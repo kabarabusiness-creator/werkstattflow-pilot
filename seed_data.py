@@ -190,8 +190,8 @@ def main():
     ]
     for name, size, season, qty, loc in tires:
         conn.execute(
-            "INSERT INTO tires (id,workshop_id,name,size,season,qty,location_id) VALUES (?,?,?,?,?,?,?)",
-            (uid(), workshop_id, name, size, season, qty, loc_ids[loc]),
+            "INSERT INTO tires (id,name,size,season,qty,location_id) VALUES (?,?,?,?,?,?)",
+            (uid(), name, size, season, qty, loc_ids[loc]),
         )
 
     # --- Ersatzteile ---
@@ -202,57 +202,19 @@ def main():
     ]
     for name, oem, stock, loc, price in parts:
         conn.execute(
-            "INSERT INTO parts (id,workshop_id,name,oem_number,stock_qty,location,unit_price) VALUES (?,?,?,?,?,?,?)",
-            (uid(), workshop_id, name, oem, stock, loc, price),
+            "INSERT INTO parts (id,name,oem_number,stock_qty,location,unit_price) VALUES (?,?,?,?,?,?)",
+            (uid(), name, oem, stock, loc, price),
         )
 
     # --- Hebebühnen ---
     for n in range(1, 7):
-        conn.execute("INSERT INTO lifts (id,workshop_id,number,status) VALUES (?,?,?,?)", (uid(), workshop_id, n, "frei"))
+        conn.execute("INSERT INTO lifts (id,number,status) VALUES (?,?,?)", (uid(), n, "frei"))
 
     # --- laufende Schicht für den Mechaniker ---
     conn.execute(
         "INSERT INTO shifts (id,user_id,started_at) VALUES (?,?,?)",
         (uid(), user_by_name["Mert Kabara"], now),
     )
-
-    conn.commit()
-
-    # --- Zweite Werkstatt (nur zum Beweis, dass die Trennung funktioniert) ---
-    workshop2_id = uid()
-    conn.execute("INSERT INTO workshops (id,name) VALUES (?,?)", (workshop2_id, "Musterwerkstatt Test GmbH"))
-
-    w2_admin_id = uid()
-    conn.execute(
-        "INSERT INTO users (id,workshop_id,name,email,password_hash,pin_hash,role) VALUES (?,?,?,?,?,?,?)",
-        (w2_admin_id, workshop2_id, "Erika Musterfrau", "erika.musterfrau@testwerkstatt.de",
-         fake_hash("demo-passwort"), fake_hash("9999"), "admin"),
-    )
-    w2_cust_id = uid()
-    conn.execute("INSERT INTO customers (id,workshop_id,name) VALUES (?,?,?)", (w2_cust_id, workshop2_id, "Test Kunde GmbH"))
-    w2_veh_id = uid()
-    conn.execute(
-        """INSERT INTO vehicles (id,customer_id,brand,model,plate,mileage_km)
-           VALUES (?,?,?,?,?,?)""",
-        (w2_veh_id, w2_cust_id, "Opel", "Astra", "XY · ZZ 999", 50000),
-    )
-    w2_order_id = uid()
-    conn.execute(
-        """INSERT INTO orders (id,workshop_id,order_number,vehicle_id,status,progress,estimated_duration_min,assigned_mechanic_id)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (w2_order_id, workshop2_id, 20001, w2_veh_id, "arbeit", 10, 60, w2_admin_id),
-    )
-    conn.execute(
-        """INSERT INTO tasks (id,order_id,title,category,description,duration_min,status,mechanic_id,progress,sort_order)
-           VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (uid(), w2_order_id, "Testaufgabe Werkstatt 2", "Wartung", "Nur zum Isolationstest.", 30, "open", w2_admin_id, 0, 0),
-    )
-    for j, label in enumerate(["QK-Punkt A", "QK-Punkt B"]):
-        conn.execute(
-            "INSERT INTO qc_checklist_items (id,order_id,label,checked,sort_order) VALUES (?,?,?,?,?)",
-            (uid(), w2_order_id, label, 0, j),
-        )
-    conn.execute("INSERT INTO lifts (id,workshop_id,number,status) VALUES (?,?,?,?)", (uid(), workshop2_id, 1, "frei"))
 
     conn.commit()
 
