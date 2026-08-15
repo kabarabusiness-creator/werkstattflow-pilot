@@ -24,7 +24,7 @@ from auth import hash_secret  # noqa: E402
 
 DEMO_PASSWORD = "demo-passwort"
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "werkstattflow.db")
+DB_PATH = os.environ.get("WERKSTATTFLOW_DB_PATH", os.path.join(os.path.dirname(__file__), "werkstattflow.db"))
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema_sqlite.sql")
 
 
