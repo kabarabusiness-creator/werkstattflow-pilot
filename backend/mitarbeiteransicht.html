@@ -1254,7 +1254,7 @@ const LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZAAAACMCAYAAABS
 
 /* ---------- Backend-API ---------- */
 // Passe dies an, wo dein Backend läuft:
-// - Backend läuft lokal auf demselben Rechner wie der Browser: 'https://werkstattflow-pilot-production.up.railway.app'
+// - Backend läuft lokal auf demselben Rechner wie der Browser: 'http://localhost:8000'
 // - Tablet im selben WLAN wie dein Rechner: 'http://<Rechner-IP>:8000' (z.B. 'http://192.168.1.23:8000')
 // - Gehostetes Backend (Produktion): die echte URL, z.B. 'https://werkstattflow-api.up.railway.app'
 const API_BASE = 'https://werkstattflow-pilot-production.up.railway.app';
@@ -3411,6 +3411,10 @@ function sendMessage(){
 function toggleTask(o,t){
   if(t.status==='done'){
     t.status='open'; t.statusLabel='Ausstehend'; t.progress=0;
+    if(state.backendAvailable && t.id){
+      apiFetch(`/tasks/${t.id}`, { method:'PATCH', body: JSON.stringify({ status:'open', progress:0 }) })
+        .catch(e=>console.warn('Aufgabe zurücksetzen (Backend) fehlgeschlagen:', e.message));
+    }
   } else {
     completeTask(o,t,true);
   }
@@ -3424,11 +3428,19 @@ function completeTask(o,t){
   t.statusLabel = 'heute · ' + now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
   recalcProgress(o);
   renderOrderList(); renderDetail();
+  if(state.backendAvailable && t.id){
+    apiFetch(`/tasks/${t.id}`, { method:'PATCH', body: JSON.stringify({ status:'done', progress:100 }) })
+      .catch(e=>console.warn('Aufgabe abschließen (Backend) fehlgeschlagen:', e.message));
+  }
 }
 function recalcProgress(o){
   const total = o.tasks.length;
   const doneWeighted = o.tasks.reduce((sum,t)=> sum + (t.status==='done'?1: (t.progress||0)/100), 0);
   o.progress = Math.round((doneWeighted/total)*100);
+  if(state.backendAvailable && o._apiId){
+    apiFetch(`/orders/${o._apiId}`, { method:'PATCH', body: JSON.stringify({ progress: o.progress }) })
+      .catch(e=>console.warn('Auftragsfortschritt (Backend) fehlgeschlagen:', e.message));
+  }
 }
 
 /* ---------- 6. KI-Assistent ---------- */
