@@ -19,7 +19,8 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from database import get_db, ensure_schema, rows_to_list, row_to_dict
+from fastapi.responses import FileResponse
+from database import get_db, ensure_schema, rows_to_list, row_to_dict, DB_PATH
 from auth import hash_secret, verify_secret, create_token, get_current_user, require_role
 
 app = FastAPI(title="WerkstattFlow API", version="0.2.0")
@@ -254,6 +255,28 @@ def register_workshop(body: WorkshopRegister):
         "user": {"id": user_id, "name": body.admin_name, "role": "admin"},
         "workshop_id": workshop_id,
     }
+
+
+# =====================================================================
+# Backup: geschützter Download der kompletten Datenbank-Datei.
+# Bewusst NICHT über die normale Werkstatt-Anmeldung geschützt (sonst könnte
+# ein Werkstatt-Admin die Daten ALLER Werkstätten mit runterladen) - stattdessen
+# über einen separaten Secret-Key, den nur der Betreiber (du) kennt.
+# =====================================================================
+
+import os as _os
+
+@app.get("/admin/backup")
+def download_backup(key: str):
+    backup_secret = _os.environ.get("WERKSTATTFLOW_BACKUP_SECRET")
+    if not backup_secret:
+        raise HTTPException(status_code=503, detail="Backup nicht konfiguriert (WERKSTATTFLOW_BACKUP_SECRET fehlt)")
+    if key != backup_secret:
+        raise HTTPException(status_code=403, detail="Ungültiger Backup-Schlüssel")
+    if not _os.path.exists(DB_PATH):
+        raise HTTPException(status_code=404, detail="Datenbank-Datei nicht gefunden")
+    filename = f"werkstattflow-backup-{datetime.date.today().isoformat()}.db"
+    return FileResponse(DB_PATH, filename=filename, media_type="application/octet-stream")
 
 
 # =====================================================================
