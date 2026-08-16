@@ -69,7 +69,7 @@ def new_id() -> str:
 
 
 def now_iso() -> str:
-    return datetime.datetime.now().isoformat()
+    return datetime.datetime.utcnow().isoformat() + "Z"
 
 
 # =====================================================================
@@ -328,6 +328,14 @@ def get_order(order_id: str, user: dict = Depends(get_current_user)):
                 "SELECT * FROM task_voice_notes WHERE task_id=? ORDER BY created_at DESC LIMIT 1", (t["id"],)
             ).fetchone()
             t["voice_note"] = row_to_dict(voice)
+            if t["timer_status"] == "running":
+                open_entry = db.execute(
+                    "SELECT started_at FROM task_time_entries WHERE task_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+                    (t["id"],),
+                ).fetchone()
+                t["timer_started_at"] = open_entry["started_at"] if open_entry else None
+            else:
+                t["timer_started_at"] = None
         qc = db.execute("SELECT * FROM qc_checklist_items WHERE order_id=? ORDER BY sort_order", (order_id,)).fetchall()
     return {
         "order": row_to_dict(order),
