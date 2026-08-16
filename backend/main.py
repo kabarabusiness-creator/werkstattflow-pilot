@@ -280,6 +280,135 @@ def download_backup(key: str):
 
 
 # =====================================================================
+# Kunden, Fahrzeuge, Aufträge ANLEGEN (für Serviceberater/Meister-Desktop)
+# =====================================================================
+
+class CustomerCreate(BaseModel):
+    name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+
+
+@app.get("/customers")
+def list_customers(user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM customers WHERE workshop_id=? ORDER BY name", (user["workshop_id"],)
+        ).fetchall()
+    return rows_to_list(rows)
+
+
+@app.post("/customers")
+def create_customer(body: CustomerCreate, user: dict = Depends(get_current_user)):
+    customer_id = new_id()
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO customers (id, workshop_id, name, phone, email, address, created_at) VALUES (?,?,?,?,?,?,?)",
+            (customer_id, user["workshop_id"], body.name, body.phone, body.email, body.address, now_iso()),
+        )
+    return {"id": customer_id}
+
+
+class VehicleCreate(BaseModel):
+    brand: str
+    model: str
+    plate: Optional[str] = None
+    vin: Optional[str] = None
+    color: Optional[str] = None
+    engine: Optional[str] = None
+    fuel_type: Optional[str] = None
+    transmission: Optional[str] = None
+    mileage_km: Optional[int] = None
+    first_registration: Optional[str] = None
+    tuv_valid_until: Optional[str] = None
+
+
+@app.get("/customers/{customer_id}/vehicles")
+def list_customer_vehicles(customer_id: str, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        require_customer_in_workshop(db, customer_id, user["workshop_id"])
+        rows = db.execute("SELECT * FROM vehicles WHERE customer_id=? ORDER BY brand", (customer_id,)).fetchall()
+    return rows_to_list(rows)
+
+
+@app.post("/customers/{customer_id}/vehicles")
+def create_vehicle(customer_id: str, body: VehicleCreate, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        require_customer_in_workshop(db, customer_id, user["workshop_id"])
+        vehicle_id = new_id()
+        db.execute(
+            """INSERT INTO vehicles (id, customer_id, brand, model, plate, vin, color, engine, fuel_type,
+               transmission, mileage_km, first_registration, tuv_valid_until)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (vehicle_id, customer_id, body.brand, body.model, body.plate, body.vin, body.color, body.engine,
+             body.fuel_type, body.transmission, body.mileage_km, body.first_registration, body.tuv_valid_until),
+        )
+    return {"id": vehicle_id}
+
+
+DEFAULT_QC_LABELS = [
+    "Drehmoment geprüft", "Ölstand geprüft", "Probefahrt durchgeführt",
+    "Fehlerspeicher gelöscht", "Werkzeug entfernt", "Motorraum sauber",
+]
+
+
+class TaskCreate(BaseModel):
+    title: str
+    category: Optional[str] = "Wartung"
+    description: Optional[str] = None
+    duration_min: Optional[int] = 30
+
+
+class OrderCreate(BaseModel):
+    vehicle_id: str
+    estimated_duration_min: Optional[int] = None
+    assigned_mechanic_id: Optional[str] = None
+    tasks: List[TaskCreate] = []
+
+
+@app.post("/orders")
+def create_order(body: OrderCreate, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        vehicle = db.execute(
+            "SELECT v.* FROM vehicles v JOIN customers c ON c.id=v.customer_id WHERE v.id=? AND c.workshop_id=?",
+            (body.vehicle_id, user["workshop_id"]),
+        ).fetchone()
+        if not vehicle:
+            raise HTTPException(status_code=404, detail="Fahrzeug nicht gefunden")
+        if body.assigned_mechanic_id:
+            mech = db.execute(
+                "SELECT id FROM users WHERE id=? AND workshop_id=?", (body.assigned_mechanic_id, user["workshop_id"])
+            ).fetchone()
+            if not mech:
+                raise HTTPException(status_code=404, detail="Mechaniker nicht gefunden")
+        next_num = db.execute(
+            "SELECT COALESCE(MAX(order_number),10000)+1 AS n FROM orders WHERE workshop_id=?", (user["workshop_id"],)
+        ).fetchone()["n"]
+        order_id = new_id()
+        db.execute(
+            """INSERT INTO orders (id, workshop_id, order_number, vehicle_id, status, progress,
+               estimated_duration_min, assigned_mechanic_id, created_at, updated_at)
+               VALUES (?,?,?,?, 'arbeit', 0, ?, ?, ?, ?)""",
+            (order_id, user["workshop_id"], next_num, body.vehicle_id, body.estimated_duration_min,
+             body.assigned_mechanic_id, now_iso(), now_iso()),
+        )
+        for i, t in enumerate(body.tasks):
+            db.execute(
+                """INSERT INTO tasks (id, order_id, title, category, description, duration_min, status,
+                   mechanic_id, progress, sort_order) VALUES (?,?,?,?,?,?, 'open', ?, 0, ?)""",
+                (new_id(), order_id, t.title, t.category, t.description, t.duration_min,
+                 body.assigned_mechanic_id, i),
+            )
+        for i, label in enumerate(DEFAULT_QC_LABELS):
+            db.execute(
+                "INSERT INTO qc_checklist_items (id, order_id, label, checked, sort_order) VALUES (?,?,?,0,?)",
+                (new_id(), order_id, label, i),
+            )
+    return {"id": order_id, "order_number": next_num}
+
+
+# =====================================================================
 # Aufträge
 # =====================================================================
 
@@ -581,9 +710,49 @@ def send_message(customer_id: str, body: MessageCreate, user: dict = Depends(get
 def list_appointments(user: dict = Depends(get_current_user)):
     with get_db() as db:
         rows = db.execute(
-            "SELECT * FROM appointments WHERE workshop_id=? ORDER BY scheduled_at", (user["workshop_id"],)
+            """SELECT a.*, c.name AS customer_name, v.brand, v.model
+               FROM appointments a
+               LEFT JOIN customers c ON c.id = a.customer_id
+               LEFT JOIN vehicles v ON v.id = a.vehicle_id
+               WHERE a.workshop_id=? ORDER BY a.scheduled_at""",
+            (user["workshop_id"],),
         ).fetchall()
     return rows_to_list(rows)
+
+
+class AppointmentCreate(BaseModel):
+    title: str
+    scheduled_at: str
+    customer_id: Optional[str] = None
+    vehicle_id: Optional[str] = None
+    order_id: Optional[str] = None
+
+
+@app.post("/appointments")
+def create_appointment(body: AppointmentCreate, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        if body.customer_id:
+            require_customer_in_workshop(db, body.customer_id, user["workshop_id"])
+        if body.order_id:
+            require_order_in_workshop(db, body.order_id, user["workshop_id"])
+        appt_id = new_id()
+        db.execute(
+            """INSERT INTO appointments (id, workshop_id, vehicle_id, customer_id, order_id, title, scheduled_at, status, created_at)
+               VALUES (?,?,?,?,?,?,?, 'geplant', ?)""",
+            (appt_id, user["workshop_id"], body.vehicle_id, body.customer_id, body.order_id,
+             body.title, body.scheduled_at, now_iso()),
+        )
+    return {"id": appt_id}
+
+
+@app.delete("/appointments/{appointment_id}")
+def delete_appointment(appointment_id: str, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        row = db.execute("SELECT workshop_id FROM appointments WHERE id=?", (appointment_id,)).fetchone()
+        if not row or row["workshop_id"] != user["workshop_id"]:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        db.execute("DELETE FROM appointments WHERE id=?", (appointment_id,))
+    return {"ok": True}
 
 
 # =====================================================================
