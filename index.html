@@ -1254,7 +1254,7 @@ const LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZAAAACMCAYAAABS
 
 /* ---------- Backend-API ---------- */
 // Passe dies an, wo dein Backend läuft:
-// - Backend läuft lokal auf demselben Rechner wie der Browser: 'https://werkstattflow-pilot-production.up.railway.app'
+// - Backend läuft lokal auf demselben Rechner wie der Browser: 'http://localhost:8000'
 // - Tablet im selben WLAN wie dein Rechner: 'http://<Rechner-IP>:8000' (z.B. 'http://192.168.1.23:8000')
 // - Gehostetes Backend (Produktion): die echte URL, z.B. 'https://werkstattflow-api.up.railway.app'
 const API_BASE = 'https://werkstattflow-pilot-production.up.railway.app';
@@ -1336,8 +1336,9 @@ function apiOrderDetailToLocal(listItem, detail, demoImageByBrand){
     desc: t.description || '',
     progress: t.progress || 0,
     images: 0,
-    photos: [],
-    voiceNote: null, voiceError: null, voiceShowManual: false,
+    photos: t.photos || [],
+    voiceNote: t.voice_note ? { transcript: t.voice_note.transcript, bericht: t.voice_note.werkstattbericht, kunde: t.voice_note.kundenbeschreibung } : null,
+    voiceError: null, voiceShowManual: false,
     timeStatus: t.timer_status || 'idle',
     startedAt: null, elapsedSec: 0,
     istMin: t.ist_min,
@@ -1695,6 +1696,12 @@ function addPhotoToCurrentTask(files){
     // t.aiAnalysis = analyzePhoto();
     // t.zusatzarbeit = undefined;
     renderTaskDetail(t);
+    if(state.backendAvailable && t.id){
+      results.forEach(dataUrl=>{
+        apiFetch(`/tasks/${t.id}/photos`, { method:'POST', body: JSON.stringify({ file_url: dataUrl }) })
+          .catch(e=>console.warn('Foto (Backend) fehlgeschlagen:', e.message));
+      });
+    }
   });
 }
 
@@ -2849,6 +2856,7 @@ function toggleVoiceRecording(o,t){
     if(fullText){
       t.voiceNote = simulateVoiceReport(fullText);
       t.voiceError = null;
+      syncVoiceNoteToApi(t);
     } else if(errorCode && errorMessages[errorCode] !== null){
       t.voiceError = errorMessages[errorCode] || `Spracherkennung fehlgeschlagen (${errorCode}).`;
     } else if(!errorCode){
@@ -2881,6 +2889,18 @@ function createManualVoiceNote(o,t){
   t.voiceNote = simulateVoiceReport(input.value.trim());
   t.voiceError = null;
   renderTaskDetail(t);
+  syncVoiceNoteToApi(t);
+}
+function syncVoiceNoteToApi(t){
+  if(!state.backendAvailable || !t.id || !t.voiceNote) return;
+  apiFetch(`/tasks/${t.id}/voice-note`, {
+    method:'POST',
+    body: JSON.stringify({
+      transcript: t.voiceNote.transcript,
+      werkstattbericht: t.voiceNote.bericht,
+      kundenbeschreibung: t.voiceNote.kunde,
+    }),
+  }).catch(e=>console.warn('Sprachnotiz (Backend) fehlgeschlagen:', e.message));
 }
 function simulateVoiceReport(transcript){
   const sentences = transcript.split(/[.!?]\s*/).filter(Boolean);
@@ -3391,6 +3411,10 @@ function sendMessage(){
 function toggleTask(o,t){
   if(t.status==='done'){
     t.status='open'; t.statusLabel='Ausstehend'; t.progress=0;
+    if(state.backendAvailable && t.id){
+      apiFetch(`/tasks/${t.id}`, { method:'PATCH', body: JSON.stringify({ status:'open', progress:0 }) })
+        .catch(e=>console.warn('Aufgabe zurücksetzen (Backend) fehlgeschlagen:', e.message));
+    }
   } else {
     completeTask(o,t,true);
   }
@@ -3404,11 +3428,19 @@ function completeTask(o,t){
   t.statusLabel = 'heute · ' + now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
   recalcProgress(o);
   renderOrderList(); renderDetail();
+  if(state.backendAvailable && t.id){
+    apiFetch(`/tasks/${t.id}`, { method:'PATCH', body: JSON.stringify({ status:'done', progress:100 }) })
+      .catch(e=>console.warn('Aufgabe abschließen (Backend) fehlgeschlagen:', e.message));
+  }
 }
 function recalcProgress(o){
   const total = o.tasks.length;
   const doneWeighted = o.tasks.reduce((sum,t)=> sum + (t.status==='done'?1: (t.progress||0)/100), 0);
   o.progress = Math.round((doneWeighted/total)*100);
+  if(state.backendAvailable && o._apiId){
+    apiFetch(`/orders/${o._apiId}`, { method:'PATCH', body: JSON.stringify({ progress: o.progress }) })
+      .catch(e=>console.warn('Auftragsfortschritt (Backend) fehlgeschlagen:', e.message));
+  }
 }
 
 /* ---------- 6. KI-Assistent ---------- */
