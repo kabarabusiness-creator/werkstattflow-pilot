@@ -1340,7 +1340,8 @@ function apiOrderDetailToLocal(listItem, detail, demoImageByBrand){
     voiceNote: t.voice_note ? { transcript: t.voice_note.transcript, bericht: t.voice_note.werkstattbericht, kunde: t.voice_note.kundenbeschreibung } : null,
     voiceError: null, voiceShowManual: false,
     timeStatus: t.timer_status || 'idle',
-    startedAt: null, elapsedSec: 0,
+    startedAt: t.timer_started_at ? new Date(t.timer_started_at).getTime() : null,
+    elapsedSec: 0,
     istMin: t.ist_min,
     _voiceParts: [],
   }));
