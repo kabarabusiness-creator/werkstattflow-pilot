@@ -171,6 +171,27 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
 
 .empty-state{text-align:center; padding:50px 20px; color:var(--text-faint); font-size:13.5px;}
 .offline-banner{background:var(--warning); color:#1a1200; text-align:center; font-size:12.5px; font-weight:600; padding:7px;}
+
+/* Kanban-Board */
+.kanban-col{padding:16px; min-height:120px;}
+.kanban-count{background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:2px 10px; font-size:12px; color:var(--text-dim);}
+.kanban-card{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px; cursor:pointer;}
+.kanban-card:hover{border-color:var(--accent);}
+.kanban-card-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; gap:8px;}
+.kanban-card-title{font-weight:600; font-size:13px;}
+.kanban-card-meta{font-size:11.5px; color:var(--text-faint); margin-top:2px;}
+.kanban-card-time{font-size:11px; color:var(--text-faint); margin-top:8px; display:flex; align-items:center; gap:5px;}
+
+/* Mitarbeiter-Aktivität */
+.staff-row{display:flex; align-items:center; justify-content:space-between; padding:11px 4px; border-bottom:1px solid var(--border);}
+.staff-row:last-child{border-bottom:none;}
+.staff-left{display:flex; align-items:center; gap:12px;}
+.staff-avatar{width:38px; height:38px; border-radius:50%; background:var(--surface); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px;}
+.staff-name{font-size:13.5px; font-weight:600;}
+.staff-role{font-size:11.5px; color:var(--text-faint);}
+.staff-count{text-align:right;}
+.staff-count .n{font-weight:700; color:var(--accent-2); font-size:15px;}
+.staff-count .l{font-size:10.5px; color:var(--text-faint);}
 </style>
 </head>
 <body>
@@ -212,9 +233,14 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
     <div class="brand-row"><div class="dot">WF</div><div class="name">WerkstattFlow</div></div>
     <div class="nav-item active" data-view="dashboard">📊 Dashboard</div>
     <div class="nav-item" data-view="auftraege">📋 Aufträge</div>
+    <div class="nav-item" data-view="hebebuehnen">🚗 Hebebühnen</div>
+    <div class="nav-item" data-view="kalender">📅 Termine &amp; Kalender</div>
+    <div class="nav-group-label">Verwaltung</div>
     <div class="nav-item" data-view="kunden">👥 Kunden</div>
     <div class="nav-item" data-view="mitarbeiter">🧑‍🔧 Mitarbeiter</div>
-    <div class="nav-item" data-view="hebebuehnen">🚗 Hebebühnen</div>
+    <div class="nav-item" data-view="bald">📦 Lager</div>
+    <div class="nav-item" data-view="bald">💵 Rechnungen</div>
+    <div class="nav-item" data-view="bald">📊 Berichte</div>
     <div class="nav-group-label">Konto</div>
     <div class="nav-item" id="logoutNav">↩ Abmelden</div>
   </div>
@@ -231,18 +257,44 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
     <!-- DASHBOARD -->
     <div class="view active" id="view-dashboard">
       <div class="view-head">
-        <div><h1>Werkstatt-Dashboard</h1><p>Überblick über alle Fahrzeuge, Aufträge und Termine.</p></div>
+        <div><h1>Werkstatt-Dashboard</h1><p>Überblick über alle Fahrzeuge, Aufträge und Termine in Echtzeit.</p></div>
         <div class="btn primary" id="newOrderBtnDash">+ Neuer Auftrag</div>
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-icon" style="background:rgba(139,92,246,.15);color:var(--accent);">📋</div><div class="stat-num" id="statActive">–</div><div class="stat-label">Aktive Aufträge</div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:rgba(245,165,36,.15);color:var(--warning);">🔍</div><div class="stat-num" id="statPruefung">–</div><div class="stat-label">In Prüfung</div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:rgba(245,165,36,.15);color:var(--warning);">🔔</div><div class="stat-num" id="statFreigaben">–</div><div class="stat-label">Offene Freigaben</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,.15);color:var(--success);">✓</div><div class="stat-num" id="statDone">–</div><div class="stat-label">Abholbereit</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(79,158,255,.15);color:var(--info);">🚗</div><div class="stat-num" id="statTotal">–</div><div class="stat-label">Gesamt</div></div>
       </div>
-      <div class="panel">
-        <div class="panel-head"><h3>Alle Aufträge</h3></div>
-        <div id="dashOrderList"></div>
+
+      <div style="display:grid; grid-template-columns:1.6fr 1fr; gap:16px; margin-bottom:16px;">
+        <div class="panel">
+          <div class="panel-head"><h3>Anstehende Termine</h3><span style="font-size:12.5px; color:var(--accent-2); cursor:pointer;" data-view="kalender" class="nav-view-link">Kalender 📅</span></div>
+          <div id="dashApptList"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Mitarbeiter-Aktivität</h3></div>
+          <div id="staffActivityList"></div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:16px;">
+        <div class="panel kanban-col">
+          <div class="panel-head"><h3>Neu &amp; Diagnose</h3><span class="kanban-count" id="kbCount1">0</span></div>
+          <div id="kbCol1"></div>
+        </div>
+        <div class="panel kanban-col">
+          <div class="panel-head"><h3>Freigabe &amp; Teile</h3><span class="kanban-count" id="kbCount2">0</span></div>
+          <div id="kbCol2"></div>
+        </div>
+        <div class="panel kanban-col">
+          <div class="panel-head"><h3>Reparatur &amp; Prüfung</h3><span class="kanban-count" id="kbCount3">0</span></div>
+          <div id="kbCol3"></div>
+        </div>
+        <div class="panel kanban-col">
+          <div class="panel-head"><h3>Fertig</h3><span class="kanban-count" id="kbCount4">0</span></div>
+          <div id="kbCol4"></div>
+        </div>
       </div>
     </div>
 
@@ -253,6 +305,15 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
         <div class="btn primary" id="newOrderBtn">+ Neuer Auftrag</div>
       </div>
       <div class="panel"><table id="orderTable"><thead><tr><th>Nr.</th><th>Fahrzeug</th><th>Kunde</th><th>Status</th><th>Fortschritt</th><th>Aufgaben</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <!-- KALENDER -->
+    <div class="view" id="view-kalender">
+      <div class="view-head">
+        <div><h1>Kalender</h1><p>Anstehende Termine.</p></div>
+        <div class="btn primary" id="newApptBtn">+ Neuer Termin</div>
+      </div>
+      <div class="panel"><div id="apptList"></div></div>
     </div>
 
     <!-- KUNDEN -->
@@ -268,6 +329,11 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
     <div class="view" id="view-mitarbeiter">
       <div class="view-head"><div><h1>Mitarbeiter</h1><p>Team dieser Werkstatt.</p></div></div>
       <div class="panel"><table id="staffTable"><thead><tr><th>Name</th><th>E-Mail</th><th>Rolle</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <!-- BALD VERFÜGBAR (Platzhalter für noch nicht angebundene Bereiche) -->
+    <div class="view" id="view-bald">
+      <div class="view-head"><div><h1>Noch nicht angebunden</h1><p>Dieser Bereich ist im Kontrollzentrum aktuell nur als Vorschau sichtbar – die Anbindung ans Backend folgt bei Bedarf.</p></div></div>
     </div>
 
     <!-- HEBEBÜHNEN -->
@@ -339,12 +405,37 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
   </div>
 </div>
 
+<!-- ============ MODAL: Neuer Termin ============ -->
+<div class="modal-overlay" id="apptModal">
+  <div class="modal" style="width:460px;">
+    <h2>Neuer Termin</h2>
+    <div class="form-field" style="margin-bottom:10px;"><label>Titel *</label><input id="apptTitle" placeholder="z.B. Kundengespräch, Abholung"></div>
+    <div class="form-row">
+      <div class="form-field"><label>Datum *</label><input id="apptDate" type="date"></div>
+      <div class="form-field"><label>Uhrzeit *</label><input id="apptTime" type="time"></div>
+    </div>
+    <div class="form-field" style="margin-bottom:10px;">
+      <label>Kunde (optional)</label>
+      <select id="apptCustomer"><option value="">— kein Kunde —</option></select>
+    </div>
+    <div class="form-field" style="margin-bottom:10px;">
+      <label>Auftrag (optional)</label>
+      <select id="apptOrder"><option value="">— kein Auftrag —</option></select>
+    </div>
+    <div id="apptModalMsg" style="font-size:13px; color:var(--danger); min-height:16px;"></div>
+    <div class="modal-actions">
+      <div class="btn" id="apptModalCancel">Abbrechen</div>
+      <div class="btn primary" id="apptModalSave">Termin anlegen</div>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ================= Backend-API ================= */
 // Gleiche Backend-Instanz wie die Tablet-App (mitarbeiteransicht.html / index.html).
 const API_BASE = 'https://werkstattflow-pilot-production.up.railway.app';
 
-const state = { token:null, apiProfiles:null, pendingProfile:null, backendAvailable:false, currentUser:null, orders:[], customers:[], staff:[], lifts:[], pinEntry:'' };
+const state = { token:null, apiProfiles:null, pendingProfile:null, backendAvailable:false, currentUser:null, orders:[], customers:[], staff:[], lifts:[], appointments:[], pinEntry:'' };
 
 async function apiFetch(path, options={}){
   const headers = Object.assign({'Content-Type':'application/json'}, options.headers||{});
@@ -460,6 +551,9 @@ document.getElementById('logoutNav').addEventListener('click', ()=>{
 document.querySelectorAll('.nav-item[data-view]').forEach(el=>{
   el.addEventListener('click', ()=>setView(el.dataset.view));
 });
+document.querySelectorAll('.nav-view-link[data-view]').forEach(el=>{
+  el.addEventListener('click', ()=>setView(el.dataset.view));
+});
 function setView(v){
   document.querySelectorAll('.nav-item[data-view]').forEach(el=>el.classList.toggle('active', el.dataset.view===v));
   document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active', el.id==='view-'+v));
@@ -479,7 +573,10 @@ async function loadAll(){
   try{
     state.lifts = await apiFetch('/lifts');
   }catch(e){ state.lifts=[]; }
-  renderDashboard(); renderOrderTable(); renderCustomerTable(); renderStaffTable(); renderLifts();
+  try{
+    state.appointments = await apiFetch('/appointments');
+  }catch(e){ state.appointments=[]; }
+  renderDashboard(); renderOrderTable(); renderCustomerTable(); renderStaffTable(); renderLifts(); renderAppointments();
 }
 
 function statusBadge(s){
@@ -489,20 +586,49 @@ function statusBadge(s){
 
 function renderDashboard(){
   const active = state.orders.filter(o=>o.status==='arbeit').length;
-  const pruefung = state.orders.filter(o=>o.status==='pruefung').length;
+  // "Offene Freigaben" gibt es als eigenes Konzept im Backend noch nicht -> Näherung: Aufträge in Prüfung
+  const freigaben = state.orders.filter(o=>o.status==='pruefung').length;
   const done = state.orders.filter(o=>o.status==='erledigt').length;
   document.getElementById('statActive').textContent = active;
-  document.getElementById('statPruefung').textContent = pruefung;
+  document.getElementById('statFreigaben').textContent = freigaben;
   document.getElementById('statDone').textContent = done;
   document.getElementById('statTotal').textContent = state.orders.length;
 
-  const list = document.getElementById('dashOrderList');
-  if(!state.orders.length){ list.innerHTML = `<div class="empty-state">Noch keine Aufträge. Leg den ersten mit "+ Neuer Auftrag" an.</div>`; return; }
-  list.innerHTML = state.orders.slice(0,8).map(o=>`
-    <div class="order-row">
-      <div><div class="order-veh">#${o.order_number} · ${o.brand} ${o.model}</div><div class="order-meta">${o.customer_name} · ${o.plate||'kein Kennzeichen'}</div></div>
-      ${statusBadge(o.status)}
+  // Anstehende Termine (nächste 4)
+  const apptList = document.getElementById('dashApptList');
+  const upcoming = [...state.appointments].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at)).slice(0,4);
+  apptList.innerHTML = upcoming.length ? upcoming.map(a=>`
+    <div class="order-row"><div><div class="order-veh">${a.title}</div><div class="order-meta">${formatApptDate(a.scheduled_at)}${a.customer_name?' · '+a.customer_name:''}</div></div></div>
+  `).join('') : `<div class="empty-state">Keine anstehenden Termine.</div>`;
+
+  // Mitarbeiter-Aktivität: aktive Aufträge je Mitarbeiter
+  const staffList = document.getElementById('staffActivityList');
+  const counts = state.staff.map(u=>({
+    ...u, count: state.orders.filter(o=>o.status==='arbeit' && o.assigned_mechanic_id===u.id).length,
+  })).sort((a,b)=>b.count-a.count);
+  staffList.innerHTML = counts.map(u=>`
+    <div class="staff-row">
+      <div class="staff-left"><div class="staff-avatar">${initials(u.name)}</div><div><div class="staff-name">${u.name}</div><div class="staff-role">${roleLabel[u.role]||u.role}</div></div></div>
+      <div class="staff-count"><div class="n">${u.count}</div><div class="l">aktive Aufträge</div></div>
     </div>`).join('');
+
+  // Kanban-Board: einfache, nachvollziehbare Zuordnung anhand vorhandener Felder
+  // (echtes "Freigabe"-Konzept existiert im Backend noch nicht)
+  const col1 = state.orders.filter(o=>o.status==='arbeit' && o.progress===0);
+  const col2 = state.orders.filter(o=>o.status==='pruefung');
+  const col3 = state.orders.filter(o=>o.status==='arbeit' && o.progress>0);
+  const col4 = state.orders.filter(o=>o.status==='erledigt');
+  const cols = [col1,col2,col3,col4];
+  cols.forEach((col,i)=>{
+    document.getElementById('kbCount'+(i+1)).textContent = col.length;
+    const el = document.getElementById('kbCol'+(i+1));
+    el.innerHTML = col.length ? col.map(o=>`
+      <div class="kanban-card">
+        <div class="kanban-card-top"><span class="kanban-card-title">${o.brand} ${o.model}</span>${statusBadge(o.status)}</div>
+        <div class="kanban-card-meta">${o.plate||'–'} · ${o.customer_name}</div>
+        <div class="kanban-card-time">🕐 #${o.order_number}</div>
+      </div>`).join('') : `<div class="empty-state" style="padding:20px 0;">Keine Aufträge.</div>`;
+  });
 }
 
 function renderOrderTable(){
@@ -622,6 +748,56 @@ document.getElementById('orderModalSave').addEventListener('click', async ()=>{
     document.getElementById('orderModal').classList.remove('open');
     await loadAll();
     setView('auftraege');
+  }catch(e){ msg.textContent = e.message; }
+});
+function renderAppointments(){
+  const list = document.getElementById('apptList');
+  if(!state.appointments.length){ list.innerHTML = `<div class="empty-state">Keine Termine geplant. Leg den ersten mit "+ Neuer Termin" an.</div>`; return; }
+  const groups = {};
+  state.appointments.forEach(a=>{
+    const d = new Date(a.scheduled_at);
+    const key = isNaN(d) ? 'Unbekanntes Datum' : d.toLocaleDateString('de-DE', {weekday:'long', day:'2-digit', month:'long'});
+    (groups[key] = groups[key]||[]).push({...a, _d:d});
+  });
+  list.innerHTML = Object.entries(groups).map(([day, items])=>`
+    <div class="form-section-title" style="margin-top:18px;">${day}</div>
+    ${items.map(a=>`
+      <div class="order-row">
+        <div>
+          <div class="order-veh">${a.title}</div>
+          <div class="order-meta">${isNaN(a._d)?'':a._d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} ${a.customer_name?'· '+a.customer_name:''} ${a.brand?'· '+a.brand+' '+a.model:''}</div>
+        </div>
+        <span class="badge arbeit">${a.status==='geplant'?'Geplant':a.status}</span>
+      </div>`).join('')}
+  `).join('');
+}
+
+/* ================= Modal: Neuer Termin ================= */
+document.getElementById('newApptBtn').addEventListener('click', ()=>{
+  document.getElementById('apptTitle').value=''; document.getElementById('apptDate').value=''; document.getElementById('apptTime').value='';
+  document.getElementById('apptModalMsg').textContent='';
+  document.getElementById('apptCustomer').innerHTML = '<option value="">— kein Kunde —</option>' +
+    state.customers.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  document.getElementById('apptOrder').innerHTML = '<option value="">— kein Auftrag —</option>' +
+    state.orders.map(o=>`<option value="${o.id}">#${o.order_number} · ${o.brand} ${o.model}</option>`).join('');
+  document.getElementById('apptModal').classList.add('open');
+});
+document.getElementById('apptModalCancel').addEventListener('click', ()=>document.getElementById('apptModal').classList.remove('open'));
+document.getElementById('apptModalSave').addEventListener('click', async ()=>{
+  const msg = document.getElementById('apptModalMsg');
+  const title = document.getElementById('apptTitle').value.trim();
+  const date = document.getElementById('apptDate').value;
+  const time = document.getElementById('apptTime').value;
+  if(!title || !date || !time){ msg.textContent='Titel, Datum und Uhrzeit sind erforderlich.'; return; }
+  try{
+    await apiFetch('/appointments', {method:'POST', body:JSON.stringify({
+      title, scheduled_at: `${date}T${time}:00`,
+      customer_id: document.getElementById('apptCustomer').value || null,
+      order_id: document.getElementById('apptOrder').value || null,
+    })});
+    document.getElementById('apptModal').classList.remove('open');
+    state.appointments = await apiFetch('/appointments');
+    renderAppointments();
   }catch(e){ msg.textContent = e.message; }
 });
 </script>
