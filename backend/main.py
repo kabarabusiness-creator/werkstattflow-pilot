@@ -337,11 +337,12 @@ def create_vehicle(customer_id: str, body: VehicleCreate, user: dict = Depends(g
     with get_db() as db:
         require_customer_in_workshop(db, customer_id, user["workshop_id"])
         vehicle_id = new_id()
+        plate = body.plate.strip() if body.plate and body.plate.strip() else "unbekannt"
         db.execute(
             """INSERT INTO vehicles (id, customer_id, brand, model, plate, vin, color, engine, fuel_type,
                transmission, mileage_km, first_registration, tuv_valid_until)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (vehicle_id, customer_id, body.brand, body.model, body.plate, body.vin, body.color, body.engine,
+            (vehicle_id, customer_id, body.brand, body.model, plate, body.vin, body.color, body.engine,
              body.fuel_type, body.transmission, body.mileage_km, body.first_registration, body.tuv_valid_until),
         )
     return {"id": vehicle_id}
@@ -649,13 +650,97 @@ def list_tires(user: dict = Depends(get_current_user)):
     return rows_to_list(rows)
 
 
+class TireCreate(BaseModel):
+    name: str
+    size: str
+    season: str
+    qty: int = 0
+    location_id: Optional[str] = None
+
+
+@app.post("/tires")
+def create_tire(body: TireCreate, user: dict = Depends(get_current_user)):
+    if body.season not in ("sommer", "winter", "ganzjahres"):
+        raise HTTPException(status_code=400, detail="Ungültige Saison")
+    with get_db() as db:
+        if body.location_id:
+            loc = db.execute(
+                "SELECT id FROM tire_locations WHERE id=? AND workshop_id=?", (body.location_id, user["workshop_id"])
+            ).fetchone()
+            if not loc:
+                raise HTTPException(status_code=404, detail="Lagerort nicht gefunden")
+        tire_id = new_id()
+        db.execute(
+            "INSERT INTO tires (id, workshop_id, name, size, season, qty, location_id, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (tire_id, user["workshop_id"], body.name, body.size, body.season, body.qty, body.location_id, now_iso()),
+        )
+    return {"id": tire_id}
+
+
+class TireUpdate(BaseModel):
+    qty: Optional[int] = None
+    location_id: Optional[str] = None
+    name: Optional[str] = None
+    size: Optional[str] = None
+    season: Optional[str] = None
+
+
+@app.patch("/tires/{tire_id}")
+def update_tire(tire_id: str, body: TireUpdate, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        row = db.execute("SELECT workshop_id FROM tires WHERE id=?", (tire_id,)).fetchone()
+        if not row or row["workshop_id"] != user["workshop_id"]:
+            raise HTTPException(status_code=404, detail="Reifen nicht gefunden")
+        fields, params = [], []
+        for field in ("qty", "location_id", "name", "size", "season"):
+            val = getattr(body, field)
+            if val is not None:
+                fields.append(f"{field}=?")
+                params.append(val)
+        if fields:
+            fields.append("updated_at=?")
+            params.append(now_iso())
+            params.append(tire_id)
+            db.execute(f"UPDATE tires SET {', '.join(fields)} WHERE id=?", params)
+    return {"ok": True}
+
+
+@app.delete("/tires/{tire_id}")
+def delete_tire(tire_id: str, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        row = db.execute("SELECT workshop_id FROM tires WHERE id=?", (tire_id,)).fetchone()
+        if not row or row["workshop_id"] != user["workshop_id"]:
+            raise HTTPException(status_code=404, detail="Reifen nicht gefunden")
+        db.execute("DELETE FROM tires WHERE id=?", (tire_id,))
+    return {"ok": True}
+
+
 @app.get("/tire-locations")
 def list_tire_locations(user: dict = Depends(get_current_user)):
     with get_db() as db:
         rows = db.execute(
-            "SELECT * FROM tire_locations WHERE workshop_id=? ORDER BY name", (user["workshop_id"],)
+            """SELECT l.*, COALESCE(SUM(t.qty),0) AS used_qty, COUNT(t.id) AS tire_types
+               FROM tire_locations l LEFT JOIN tires t ON t.location_id=l.id
+               WHERE l.workshop_id=? GROUP BY l.id ORDER BY l.name""",
+            (user["workshop_id"],),
         ).fetchall()
     return rows_to_list(rows)
+
+
+class TireLocationCreate(BaseModel):
+    name: str
+    capacity: int = 60
+
+
+@app.post("/tire-locations")
+def create_tire_location(body: TireLocationCreate, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        loc_id = new_id()
+        db.execute(
+            "INSERT INTO tire_locations (id, workshop_id, name, capacity) VALUES (?,?,?,?)",
+            (loc_id, user["workshop_id"], body.name, body.capacity),
+        )
+    return {"id": loc_id}
 
 
 @app.get("/parts")
@@ -810,7 +895,7 @@ def create_ticket(body: TicketCreate, user: dict = Depends(get_current_user)):
 def list_lifts(user: dict = Depends(get_current_user)):
     with get_db() as db:
         rows = db.execute(
-            """SELECT l.*, o.order_number, v.brand, v.model, c.name AS customer_name
+            """SELECT l.*, o.order_number, o.status AS order_status, v.brand, v.model, c.name AS customer_name
                FROM lifts l
                LEFT JOIN orders o ON o.id = l.order_id
                LEFT JOIN vehicles v ON v.id = o.vehicle_id
@@ -820,3 +905,22 @@ def list_lifts(user: dict = Depends(get_current_user)):
             (user["workshop_id"],),
         ).fetchall()
     return rows_to_list(rows)
+
+
+class LiftUpdate(BaseModel):
+    order_id: Optional[str] = None  # null = Bühne freigeben
+
+
+@app.patch("/lifts/{lift_id}")
+def update_lift(lift_id: str, body: LiftUpdate, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        lift = db.execute("SELECT * FROM lifts WHERE id=? AND workshop_id=?", (lift_id, user["workshop_id"])).fetchone()
+        if not lift:
+            raise HTTPException(status_code=404, detail="Hebebühne nicht gefunden")
+        if body.order_id:
+            require_order_in_workshop(db, body.order_id, user["workshop_id"])
+            order = db.execute("SELECT status FROM orders WHERE id=?", (body.order_id,)).fetchone()
+            db.execute("UPDATE lifts SET order_id=?, status=? WHERE id=?", (body.order_id, order["status"], lift_id))
+        else:
+            db.execute("UPDATE lifts SET order_id=NULL, status='frei' WHERE id=?", (lift_id,))
+    return {"ok": True}

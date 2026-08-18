@@ -192,6 +192,43 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
 .staff-count{text-align:right;}
 .staff-count .n{font-weight:700; color:var(--accent-2); font-size:15px;}
 .staff-count .l{font-size:10.5px; color:var(--text-faint);}
+
+/* Reifenlager */
+.tire-loc-card{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px;}
+.tire-loc-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+.tire-loc-name{font-weight:600; font-size:14px;}
+.tire-loc-badge{background:var(--panel); border:1px solid var(--border); border-radius:20px; padding:3px 10px; font-size:11.5px; color:var(--text-dim);}
+.tire-loc-bar-bg{height:8px; background:var(--panel); border-radius:4px; overflow:hidden; margin-top:12px;}
+.tire-loc-bar-fill{height:100%; background:linear-gradient(90deg,var(--accent),var(--accent-2)); border-radius:4px;}
+.tire-loc-pct{font-size:11.5px; color:var(--text-faint); margin-top:6px; text-align:right;}
+.tire-row{display:flex; align-items:center; gap:12px; padding:11px 4px; border-bottom:1px solid var(--border); cursor:pointer; border-radius:8px;}
+.tire-row.selected{background:rgba(139,92,246,.1); border:1px solid var(--accent); padding:10px 8px;}
+.tire-row:last-child{border-bottom:none;}
+.tire-icon{width:38px; height:38px; border-radius:8px; background:var(--surface); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0;}
+.tire-name{font-weight:600; font-size:13.5px;}
+.tire-meta{font-size:11.5px; color:var(--text-faint); margin-top:2px;}
+.season-badge{padding:2px 8px; border-radius:10px; font-size:10.5px; font-weight:600;}
+.season-badge.sommer{background:rgba(245,165,36,.15); color:var(--warning);}
+.season-badge.winter{background:rgba(79,158,255,.15); color:var(--info);}
+.season-badge.ganzjahres{background:rgba(34,197,94,.15); color:var(--success);}
+.tire-qty{font-weight:700; font-size:15px; margin-left:auto; text-align:right;}
+.tire-qty .l{font-size:10px; color:var(--text-faint); font-weight:400; display:block;}
+.tire-actions{display:flex; gap:6px;}
+.icon-btn{width:28px; height:28px; border-radius:6px; background:var(--surface); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; color:var(--text-dim);}
+.icon-btn:hover{border-color:var(--accent); color:var(--text);}
+.low-stock-row{color:var(--danger);}
+
+/* Hebebühnen */
+.lift-card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px; border-left:4px solid var(--border);}
+.lift-card.occupied{border-left-color:var(--warning);}
+.lift-card.free{border-left-color:var(--success);}
+.lift-card-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;}
+.lift-card-num{font-size:15px; font-weight:700;}
+.lift-card-body{min-height:52px;}
+.lift-card-veh{font-weight:600; font-size:14px;}
+.lift-card-meta{font-size:12px; color:var(--text-faint); margin-top:3px;}
+.lift-card-empty{color:var(--text-faint); font-size:13px; padding:8px 0;}
+.lift-card-actions{margin-top:14px;}
 </style>
 </head>
 <body>
@@ -238,7 +275,7 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
     <div class="nav-group-label">Verwaltung</div>
     <div class="nav-item" data-view="kunden">👥 Kunden</div>
     <div class="nav-item" data-view="mitarbeiter">🧑‍🔧 Mitarbeiter</div>
-    <div class="nav-item" data-view="bald">📦 Lager</div>
+    <div class="nav-item" data-view="reifenlager">📦 Reifenlager</div>
     <div class="nav-item" data-view="bald">💵 Rechnungen</div>
     <div class="nav-item" data-view="bald">📊 Berichte</div>
     <div class="nav-group-label">Konto</div>
@@ -336,10 +373,40 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
       <div class="view-head"><div><h1>Noch nicht angebunden</h1><p>Dieser Bereich ist im Kontrollzentrum aktuell nur als Vorschau sichtbar – die Anbindung ans Backend folgt bei Bedarf.</p></div></div>
     </div>
 
+    <!-- REIFENLAGER -->
+    <div class="view" id="view-reifenlager">
+      <div class="view-head">
+        <div><h1>Reifenlager</h1><p>Verwalten Sie Ihr Reifenlager und behalten Sie den Überblick.</p></div>
+        <div style="display:flex; gap:10px;">
+          <div class="btn" id="newLocBtn">+ Lagerort</div>
+          <div class="btn primary" id="newTireBtn">+ Neuer Reifen</div>
+        </div>
+      </div>
+
+      <div class="stat-grid" id="tireStatGrid"></div>
+
+      <div style="display:grid; grid-template-columns:1fr 1.4fr; gap:16px;">
+        <div class="panel">
+          <div class="panel-head"><h3>Reifenliste</h3><span class="tire-loc-badge" id="tireCountBadge">0 Reifen</span></div>
+          <div id="tireList"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Lagerübersicht</h3></div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;" id="tireLocGrid"></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:16px;">
+        <div class="panel-head"><h3 style="color:var(--danger);">⚠ Niedriger Bestand</h3></div>
+        <div id="lowStockList"></div>
+      </div>
+    </div>
+
     <!-- HEBEBÜHNEN -->
     <div class="view" id="view-hebebuehnen">
-      <div class="view-head"><div><h1>Hebebühnen</h1><p>Live-Belegung der Hebebühnen.</p></div></div>
-      <div class="stat-grid" id="liftGrid"></div>
+      <div class="view-head"><div><h1>Hebebühnen</h1><p>Live-Belegung der Hebebühnen – Aufträge zuweisen oder freigeben.</p></div></div>
+      <div class="stat-grid" id="liftStatGrid" style="margin-bottom:20px;"></div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px;" id="liftGrid"></div>
     </div>
   </div>
 </div>
@@ -386,6 +453,57 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
     <div class="modal-actions">
       <div class="btn" id="orderModalCancel">Abbrechen</div>
       <div class="btn primary" id="orderModalSave">Auftrag anlegen</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: Hebebühne zuweisen ============ -->
+<div class="modal-overlay" id="liftAssignModal">
+  <div class="modal" style="width:400px;">
+    <h2>Auftrag zuweisen</h2>
+    <div class="form-field" style="margin-bottom:10px;">
+      <label>Auftrag wählen</label>
+      <select id="liftAssignSelect"></select>
+    </div>
+    <div id="liftAssignMsg" style="font-size:13px; color:var(--danger); min-height:16px;"></div>
+    <div class="modal-actions">
+      <div class="btn" id="liftAssignCancel">Abbrechen</div>
+      <div class="btn primary" id="liftAssignSave">Zuweisen</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: Neuer Reifen ============ -->
+<div class="modal-overlay" id="tireModal">
+  <div class="modal" style="width:440px;">
+    <h2 id="tireModalTitle">Neuer Reifen</h2>
+    <div class="form-field" style="margin-bottom:10px;"><label>Bezeichnung *</label><input id="tireName" placeholder="Michelin Pilot Sport 5"></div>
+    <div class="form-row">
+      <div class="form-field"><label>Größe *</label><input id="tireSize" placeholder="225/45 R17 94Y"></div>
+      <div class="form-field"><label>Menge</label><input id="tireQty" type="number" value="4"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Saison *</label><select id="tireSeason"><option value="sommer">Sommer</option><option value="winter">Winter</option><option value="ganzjahres">Ganzjahres</option></select></div>
+      <div class="form-field"><label>Lagerort</label><select id="tireLocation"><option value="">— Kein Lagerort —</option></select></div>
+    </div>
+    <div id="tireModalMsg" style="font-size:13px; color:var(--danger); min-height:16px;"></div>
+    <div class="modal-actions">
+      <div class="btn" id="tireModalCancel">Abbrechen</div>
+      <div class="btn primary" id="tireModalSave">Reifen anlegen</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: Neuer Lagerort ============ -->
+<div class="modal-overlay" id="locModal">
+  <div class="modal" style="width:380px;">
+    <h2>Neuer Lagerort</h2>
+    <div class="form-field" style="margin-bottom:10px;"><label>Name *</label><input id="locName" placeholder="Lager D-01"></div>
+    <div class="form-field" style="margin-bottom:10px;"><label>Kapazität (Reifen)</label><input id="locCapacity" type="number" value="60"></div>
+    <div id="locModalMsg" style="font-size:13px; color:var(--danger); min-height:16px;"></div>
+    <div class="modal-actions">
+      <div class="btn" id="locModalCancel">Abbrechen</div>
+      <div class="btn primary" id="locModalSave">Lagerort anlegen</div>
     </div>
   </div>
 </div>
@@ -576,9 +694,23 @@ async function loadAll(){
   try{
     state.appointments = await apiFetch('/appointments');
   }catch(e){ state.appointments=[]; }
-  renderDashboard(); renderOrderTable(); renderCustomerTable(); renderStaffTable(); renderLifts(); renderAppointments();
+  try{
+    state.tires = await apiFetch('/tires');
+    state.tireLocations = await apiFetch('/tire-locations');
+  }catch(e){ state.tires=[]; state.tireLocations=[]; }
+  renderDashboard(); renderOrderTable(); renderCustomerTable(); renderStaffTable(); renderLifts(); renderAppointments(); renderReifenlager();
 }
 
+function formatApptDate(iso){
+  const d = new Date(iso);
+  if(isNaN(d)) return iso;
+  const heute = new Date(); const morgen = new Date(); morgen.setDate(heute.getDate()+1);
+  const sameDay = (a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+  const zeit = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  if(sameDay(d,heute)) return `Heute, ${zeit}`;
+  if(sameDay(d,morgen)) return `Morgen, ${zeit}`;
+  return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}, ${zeit}`;
+}
 function statusBadge(s){
   const label = {arbeit:'In Arbeit', pruefung:'Prüfung', erledigt:'Erledigt'}[s]||s;
   return `<span class="badge ${s}">${label}</span>`;
@@ -657,15 +789,65 @@ function renderStaffTable(){
 }
 
 function renderLifts(){
+  const statGrid = document.getElementById('liftStatGrid');
+  const occupied = state.lifts.filter(l=>l.order_id).length;
+  const free = state.lifts.length - occupied;
+  if(statGrid) statGrid.innerHTML = `
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(79,158,255,.15);color:var(--info);">🚗</div><div class="stat-num">${state.lifts.length}</div><div class="stat-label">Hebebühnen gesamt</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(245,165,36,.15);color:var(--warning);">🔧</div><div class="stat-num">${occupied}</div><div class="stat-label">Belegt</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,.15);color:var(--success);">✓</div><div class="stat-num">${free}</div><div class="stat-label">Frei</div></div>
+  `;
+
   const grid = document.getElementById('liftGrid');
   if(!state.lifts.length){ grid.innerHTML = `<div class="empty-state">Keine Hebebühnen hinterlegt.</div>`; return; }
   grid.innerHTML = state.lifts.map(l=>`
-    <div class="stat-card">
-      <div class="stat-icon" style="background:${l.order_number?'rgba(245,165,36,.15)':'rgba(34,197,94,.15)'};color:${l.order_number?'var(--warning)':'var(--success)'};">${l.order_number?'🔧':'✓'}</div>
-      <div class="stat-num" style="font-size:18px;">Bühne ${l.number}</div>
-      <div class="stat-label">${l.order_number ? `#${l.order_number} · ${l.brand||''} ${l.model||''}` : 'Frei'}</div>
+    <div class="lift-card ${l.order_id?'occupied':'free'}">
+      <div class="lift-card-head">
+        <span class="lift-card-num">🅿️ Bühne ${l.number}</span>
+        ${l.order_id ? statusBadge(l.order_status||'arbeit') : `<span class="badge erledigt">Frei</span>`}
+      </div>
+      <div class="lift-card-body">
+        ${l.order_id
+          ? `<div class="lift-card-veh">#${l.order_number} · ${l.brand||''} ${l.model||''}</div><div class="lift-card-meta">${l.customer_name||''}</div>`
+          : `<div class="lift-card-empty">Keinem Auftrag zugewiesen.</div>`}
+      </div>
+      <div class="lift-card-actions">
+        ${l.order_id
+          ? `<div class="btn" style="width:100%; justify-content:center;" data-liftclear="${l.id}">Freigeben</div>`
+          : `<div class="btn primary" style="width:100%; justify-content:center;" data-liftassign="${l.id}">Auftrag zuweisen</div>`}
+      </div>
     </div>`).join('');
+
+  grid.querySelectorAll('[data-liftclear]').forEach(el=>el.addEventListener('click', async ()=>{
+    try{ await apiFetch(`/lifts/${el.dataset.liftclear}`, {method:'PATCH', body:JSON.stringify({order_id:null})}); await loadAll(); }
+    catch(e){ alert('Freigeben fehlgeschlagen: '+e.message); }
+  }));
+  grid.querySelectorAll('[data-liftassign]').forEach(el=>el.addEventListener('click', ()=>openLiftAssignModal(el.dataset.liftassign)));
 }
+
+let liftAssignTargetId = null;
+function openLiftAssignModal(liftId){
+  liftAssignTargetId = liftId;
+  const occupiedOrderIds = new Set(state.lifts.filter(l=>l.order_id).map(l=>l.order_id));
+  const available = state.orders.filter(o=>o.status!=='erledigt' && !occupiedOrderIds.has(o.id));
+  const sel = document.getElementById('liftAssignSelect');
+  sel.innerHTML = available.length
+    ? available.map(o=>`<option value="${o.id}">#${o.order_number} · ${o.brand} ${o.model} · ${o.customer_name}</option>`).join('')
+    : `<option value="">Keine freien Aufträge verfügbar</option>`;
+  document.getElementById('liftAssignMsg').textContent='';
+  document.getElementById('liftAssignModal').classList.add('open');
+}
+document.getElementById('liftAssignCancel').addEventListener('click', ()=>document.getElementById('liftAssignModal').classList.remove('open'));
+document.getElementById('liftAssignSave').addEventListener('click', async ()=>{
+  const msg = document.getElementById('liftAssignMsg');
+  const orderId = document.getElementById('liftAssignSelect').value;
+  if(!orderId){ msg.textContent = 'Kein Auftrag ausgewählt.'; return; }
+  try{
+    await apiFetch(`/lifts/${liftAssignTargetId}`, {method:'PATCH', body:JSON.stringify({order_id:orderId})});
+    document.getElementById('liftAssignModal').classList.remove('open');
+    await loadAll();
+  }catch(e){ msg.textContent = e.message; }
+});
 
 /* ================= Modal: Neuer Kunde ================= */
 document.getElementById('newCustomerBtn').addEventListener('click', ()=>{
@@ -798,6 +980,144 @@ document.getElementById('apptModalSave').addEventListener('click', async ()=>{
     document.getElementById('apptModal').classList.remove('open');
     state.appointments = await apiFetch('/appointments');
     renderAppointments();
+  }catch(e){ msg.textContent = e.message; }
+});
+/* ================= Reifenlager ================= */
+const seasonLabel = {sommer:'Sommer', winter:'Winter', ganzjahres:'Ganzjahres'};
+function renderReifenlager(){
+  const tires = state.tires||[]; const locs = state.tireLocations||[];
+
+  const total = tires.reduce((s,t)=>s+t.qty,0);
+  const bySeasonQty = s => tires.filter(t=>t.season===s).reduce((sum,t)=>sum+t.qty,0);
+  const grid = document.getElementById('tireStatGrid');
+  if(grid) grid.innerHTML = `
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(139,92,246,.15);color:var(--accent);">📦</div><div class="stat-num">${total}</div><div class="stat-label">Gesamtbestand</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(245,165,36,.15);color:var(--warning);">☀️</div><div class="stat-num">${bySeasonQty('sommer')}</div><div class="stat-label">Sommerreifen</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(79,158,255,.15);color:var(--info);">❄️</div><div class="stat-num">${bySeasonQty('winter')}</div><div class="stat-label">Winterreifen</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,.15);color:var(--success);">🔄</div><div class="stat-num">${bySeasonQty('ganzjahres')}</div><div class="stat-label">Ganzjahresreifen</div></div>
+  `;
+
+  const countBadge = document.getElementById('tireCountBadge');
+  if(countBadge) countBadge.textContent = `${tires.length} Reifentypen`;
+
+  const list = document.getElementById('tireList');
+  if(list){
+    list.innerHTML = tires.length ? tires.map(t=>`
+      <div class="tire-row ${state.selectedTireId===t.id?'selected':''}" data-tirerow="${t.id}">
+        <div class="tire-icon">🛞</div>
+        <div style="flex:1; min-width:0;">
+          <div class="tire-name">${t.name}</div>
+          <div class="tire-meta">${t.size} <span class="season-badge ${t.season}">${seasonLabel[t.season]}</span> ${t.location_name?(' · '+t.location_name):''}</div>
+        </div>
+        <div class="tire-qty">${t.qty}x</div>
+        <div class="tire-actions">
+          <div class="icon-btn" data-tiredel="${t.id}" title="Löschen">✕</div>
+        </div>
+      </div>
+    `).join('') : `<div class="empty-state">Noch keine Reifen erfasst.</div>`;
+    list.querySelectorAll('[data-tiredel]').forEach(el=>el.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      if(!confirm('Diesen Reifen wirklich löschen?')) return;
+      try{ await apiFetch(`/tires/${el.dataset.tiredel}`, {method:'DELETE'}); await loadAll(); }
+      catch(e){ alert('Löschen fehlgeschlagen: '+e.message); }
+    }));
+    list.querySelectorAll('[data-tirerow]').forEach(el=>el.addEventListener('click', ()=>{
+      state.selectedTireId = el.dataset.tirerow;
+      openTireEditModal(tires.find(x=>x.id===el.dataset.tirerow));
+      renderReifenlager();
+    }));
+  }
+
+  const locGrid = document.getElementById('tireLocGrid');
+  if(locGrid){
+    locGrid.innerHTML = locs.length ? locs.map(l=>{
+      const pct = l.capacity ? Math.min(100, Math.round(l.used_qty/l.capacity*100)) : 0;
+      return `
+      <div class="tire-loc-card">
+        <div class="tire-loc-head"><span class="tire-loc-name">📍 ${l.name}</span><span class="tire-loc-badge">${l.used_qty} Reifen</span></div>
+        <div class="tire-loc-bar-bg"><div class="tire-loc-bar-fill" style="width:${pct}%;"></div></div>
+        <div class="tire-loc-pct">${pct}% belegt</div>
+      </div>`;
+    }).join('') : `<div class="empty-state">Noch keine Lagerorte angelegt.</div>`;
+  }
+
+  const lowList = document.getElementById('lowStockList');
+  if(lowList){
+    const low = tires.filter(t=>t.qty <= 4).sort((a,b)=>a.qty-b.qty);
+    lowList.innerHTML = low.length ? low.map(t=>`
+      <div class="order-row low-stock-row"><div><div class="order-veh" style="color:var(--text);">${t.name}</div><div class="order-meta">${t.size} · ${t.location_name||'kein Lagerort'}</div></div><div style="font-weight:700;">${t.qty}x</div></div>
+    `).join('') : `<div class="empty-state">Kein Reifen mit niedrigem Bestand.</div>`;
+  }
+}
+
+function fillTireLocationOptions(selectedId){
+  document.getElementById('tireLocation').innerHTML = '<option value="">— Kein Lagerort —</option>' +
+    (state.tireLocations||[]).map(l=>`<option value="${l.id}" ${l.id===selectedId?'selected':''}>${l.name}</option>`).join('');
+}
+document.getElementById('newTireBtn').addEventListener('click', ()=>{
+  state.editingTireId = null;
+  document.getElementById('tireModalTitle').textContent = 'Neuer Reifen';
+  document.getElementById('tireModalSave').textContent = 'Reifen anlegen';
+  document.getElementById('tireName').value=''; document.getElementById('tireSize').value=''; document.getElementById('tireQty').value='4';
+  document.getElementById('tireSeason').value='sommer';
+  fillTireLocationOptions(null);
+  document.getElementById('tireModalMsg').textContent='';
+  document.getElementById('tireModal').classList.add('open');
+});
+function openTireEditModal(t){
+  state.editingTireId = t.id;
+  document.getElementById('tireModalTitle').textContent = 'Reifen bearbeiten';
+  document.getElementById('tireModalSave').textContent = 'Speichern';
+  document.getElementById('tireName').value = t.name;
+  document.getElementById('tireSize').value = t.size;
+  document.getElementById('tireQty').value = t.qty;
+  document.getElementById('tireSeason').value = t.season;
+  fillTireLocationOptions(t.location_id);
+  document.getElementById('tireModalMsg').textContent='';
+  document.getElementById('tireModal').classList.add('open');
+}
+document.getElementById('tireModalCancel').addEventListener('click', ()=>{
+  document.getElementById('tireModal').classList.remove('open');
+  state.selectedTireId = null; renderReifenlager();
+});
+document.getElementById('tireModalSave').addEventListener('click', async ()=>{
+  const msg = document.getElementById('tireModalMsg');
+  const name = document.getElementById('tireName').value.trim();
+  const size = document.getElementById('tireSize').value.trim();
+  if(!name || !size){ msg.textContent = 'Bezeichnung und Größe sind erforderlich.'; return; }
+  const payload = {
+    name, size, season: document.getElementById('tireSeason').value,
+    qty: parseInt(document.getElementById('tireQty').value)||0,
+    location_id: document.getElementById('tireLocation').value || null,
+  };
+  try{
+    if(state.editingTireId){
+      await apiFetch(`/tires/${state.editingTireId}`, {method:'PATCH', body:JSON.stringify(payload)});
+    } else {
+      await apiFetch('/tires', {method:'POST', body:JSON.stringify(payload)});
+    }
+    document.getElementById('tireModal').classList.remove('open');
+    state.selectedTireId = null;
+    await loadAll();
+  }catch(e){ msg.textContent = e.message; }
+});
+
+document.getElementById('newLocBtn').addEventListener('click', ()=>{
+  document.getElementById('locName').value=''; document.getElementById('locCapacity').value='60';
+  document.getElementById('locModalMsg').textContent='';
+  document.getElementById('locModal').classList.add('open');
+});
+document.getElementById('locModalCancel').addEventListener('click', ()=>document.getElementById('locModal').classList.remove('open'));
+document.getElementById('locModalSave').addEventListener('click', async ()=>{
+  const msg = document.getElementById('locModalMsg');
+  const name = document.getElementById('locName').value.trim();
+  if(!name){ msg.textContent = 'Name ist erforderlich.'; return; }
+  try{
+    await apiFetch('/tire-locations', {method:'POST', body:JSON.stringify({
+      name, capacity: parseInt(document.getElementById('locCapacity').value)||60,
+    })});
+    document.getElementById('locModal').classList.remove('open');
+    await loadAll();
   }catch(e){ msg.textContent = e.message; }
 });
 </script>
