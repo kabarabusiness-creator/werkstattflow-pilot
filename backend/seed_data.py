@@ -166,15 +166,17 @@ def main():
             )
 
     # --- Reifenlager ---
+    # Kapazität so gewählt, dass sie zur tatsächlichen Reifenmenge unten passt
+    # (z.B. Lager A-01: 24+2=26 Reifen bei Kapazität 35 -> ~75% belegt)
     locations = [
-        ("Lager A-01", 75), ("Lager A-02", 60), ("Lager B-01", 53),
-        ("Lager B-02", 47), ("Lager C-01", 86), ("Lager C-02", 37),
+        ("Lager A-01", 35), ("Lager A-02", 30), ("Lager B-01", 30),
+        ("Lager B-02", 55), ("Lager C-01", 22), ("Lager C-02", 41),
     ]
     loc_ids = {}
-    for name, _pct in locations:
+    for name, capacity in locations:
         lid = uid()
         loc_ids[name] = lid
-        conn.execute("INSERT INTO tire_locations (id,workshop_id,name,capacity) VALUES (?,?,?,8)", (lid, workshop_id, name))
+        conn.execute("INSERT INTO tire_locations (id,workshop_id,name,capacity) VALUES (?,?,?,?)", (lid, workshop_id, name, capacity))
 
     tires = [
         ("Michelin Pilot Sport 4", "225/45 R17 94Y", "sommer", 24, "Lager A-01"),
