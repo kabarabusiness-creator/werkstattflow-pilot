@@ -1415,6 +1415,9 @@ async function loadOrdersFromApi(){
       return { name: l.name, count: used, pct: l.capacity ? Math.min(100, Math.round(used / l.capacity * 100)) : 0 };
     });
   } catch(e){ /* lokale Reifenlager-Daten bleiben erhalten */ }
+  try{
+    state.apiAppointments = await apiFetch('/appointments');
+  } catch(e){ state.apiAppointments = null; /* lokale Termine-Demo-Daten bleiben erhalten */ }
   renderChrome();
   setMainView(state.mainView || 'dashboard');
 }
@@ -1793,6 +1796,30 @@ function renderFahrzeugeView(ov){
 }
 
 function getAppointmentsData(){
+  if(state.apiAppointments){
+    const heute = [], morgen = [];
+    const now = new Date();
+    const tomorrow = new Date(); tomorrow.setDate(now.getDate()+1);
+    const sameDay = (a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+    const clsFor = s => s==='erledigt' ? 'arbeit' : (s==='pruefung' ? 'pruefung' : 'arbeit');
+    const badgeFor = s => ({geplant:'Geplant', arbeit:'In Arbeit', pruefung:'In Prüfung', erledigt:'Erledigt'})[s] || 'Geplant';
+    state.apiAppointments.forEach(a=>{
+      const d = new Date(a.scheduled_at);
+      if(isNaN(d)) return;
+      const item = {
+        time: String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'),
+        title: a.title,
+        sub: [a.customer_name, a.order_number ? ('Auftrag #'+a.order_number) : null].filter(Boolean).join(' · ') || 'Kein Kunde verknüpft',
+        badge: badgeFor(a.status), cls: clsFor(a.status),
+        order: a.order_number ? String(a.order_number) : null,
+      };
+      if(sameDay(d, now)) heute.push(item);
+      else if(sameDay(d, tomorrow)) morgen.push(item);
+    });
+    heute.sort((a,b)=>a.time.localeCompare(b.time));
+    morgen.sort((a,b)=>a.time.localeCompare(b.time));
+    return { heute, morgen };
+  }
   return {
     heute: [
       {time:'08:15', title:'BMW 320d – Bremsen & Wartung', sub:'Max Mustermann · Auftrag #10072', badge:'In Arbeit', cls:'arbeit', order:'10072'},
@@ -1819,12 +1846,14 @@ function renderTermineView(ov){
       </div>
     `).join('');
   }
+  const MONATE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  const now = new Date(); const tomorrow = new Date(); tomorrow.setDate(now.getDate()+1);
   ov.innerHTML = `
     <div class="ov-head"><div><h1>Termine</h1><div class="sub">Deine geplanten Aufträge und Übergaben</div></div></div>
-    <div class="tm-day-label">Heute, 26. Mai</div>
-    ${list(heute)}
-    <div class="tm-day-label">Morgen, 27. Mai</div>
-    ${list(morgen)}
+    <div class="tm-day-label">Heute, ${now.getDate()}. ${MONATE[now.getMonth()]}</div>
+    ${heute.length ? list(heute) : '<div class="td-empty">Keine Termine heute.</div>'}
+    <div class="tm-day-label">Morgen, ${tomorrow.getDate()}. ${MONATE[tomorrow.getMonth()]}</div>
+    ${morgen.length ? list(morgen) : '<div class="td-empty">Keine Termine morgen.</div>'}
   `;
 }
 
