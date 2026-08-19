@@ -195,6 +195,18 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
 
 /* Reifenlager */
 .tire-loc-card{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px;}
+.tire-shelf{
+  background:linear-gradient(180deg, #0d0d1a 0%, #14142650 100%); border:1px solid var(--border); border-radius:10px;
+  padding:12px 10px; margin:10px 0; min-height:70px; display:flex; flex-direction:column; gap:6px; justify-content:center;
+}
+.tire-shelf-row{display:flex; gap:4px; justify-content:center;}
+.tire-shelf-tire{width:16px; height:16px; border-radius:50%; background:radial-gradient(circle at 35% 35%, #3a3a55, #14141f 70%); border:1.5px solid #45456a; flex-shrink:0;}
+.tire-shelf-empty{width:16px; height:16px; border-radius:50%; border:1.5px dashed var(--border); flex-shrink:0;}
+.recent-row{display:flex; align-items:center; gap:12px; padding:10px 4px; border-bottom:1px solid var(--border);}
+.recent-row:last-child{border-bottom:none;}
+.recent-row .tire-icon{width:34px; height:34px; font-size:14px;}
+.recent-time{font-size:11px; color:var(--text-faint); text-align:right;}
+.recent-delta{color:var(--success); font-weight:700; font-size:13px;}
 .tire-loc-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
 .tire-loc-name{font-weight:600; font-size:14px;}
 .tire-loc-badge{background:var(--panel); border:1px solid var(--border); border-radius:20px; padding:3px 10px; font-size:11.5px; color:var(--text-dim);}
@@ -378,29 +390,46 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
       <div class="view-head">
         <div><h1>Reifenlager</h1><p>Verwalten Sie Ihr Reifenlager und behalten Sie den Überblick.</p></div>
         <div style="display:flex; gap:10px;">
-          <div class="btn" id="newLocBtn">+ Lagerort</div>
+          <div class="btn" id="newLocBtn">📍 + Lagerort</div>
           <div class="btn primary" id="newTireBtn">+ Neuer Reifen</div>
         </div>
       </div>
 
       <div class="stat-grid" id="tireStatGrid"></div>
 
-      <div style="display:grid; grid-template-columns:1fr 1.4fr; gap:16px;">
+      <div style="display:grid; grid-template-columns:340px 1fr; gap:16px; align-items:start;">
         <div class="panel">
-          <div class="panel-head"><h3>Reifenliste</h3><span class="tire-loc-badge" id="tireCountBadge">0 Reifen</span></div>
-          <div id="tireList"></div>
+          <div class="panel-head"><h3>Reifen finden</h3></div>
+          <input id="tireSearchInput" placeholder="🔍 Größe, Marke, Profil..." style="width:100%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:9px 12px; color:var(--text); font-size:13px; outline:none; margin-bottom:10px;">
+          <select id="tireFilterSeason" style="width:100%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:9px 12px; color:var(--text); font-size:13px; outline:none; margin-bottom:10px;">
+            <option value="">Alle Saisons</option>
+            <option value="sommer">Nur Sommer</option>
+            <option value="winter">Nur Winter</option>
+            <option value="ganzjahres">Nur Ganzjahres</option>
+          </select>
+          <select id="tireFilterLoc" style="width:100%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:9px 12px; color:var(--text); font-size:13px; outline:none;">
+            <option value="">Alle Lagerorte</option>
+          </select>
+          <div class="panel-head" style="margin-top:18px;"><h3>Reifenliste</h3><span class="tire-loc-badge" id="tireCountBadge">0 Reifen</span></div>
+          <div id="tireList" style="max-height:520px; overflow-y:auto;"></div>
         </div>
+
         <div class="panel">
           <div class="panel-head"><h3>Lagerübersicht</h3></div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;" id="tireLocGrid"></div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px;" id="tireLocGrid"></div>
         </div>
       </div>
 
-      <div class="panel" style="margin-top:16px;">
-        <div class="panel-head"><h3 style="color:var(--danger);">⚠ Niedriger Bestand</h3></div>
-        <div id="lowStockList"></div>
-      </div>
-    </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
+        <div class="panel">
+          <div class="panel-head"><h3 style="color:var(--danger);">⚠ Niedriger Bestand</h3><span class="tire-loc-badge" id="lowStockBadge">0 Reifen</span></div>
+          <div id="lowStockList"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Kürzlich hinzugefügt</h3></div>
+          <div id="recentTireList"></div>
+        </div>
+      </div>    </div>
 
     <!-- HEBEBÜHNEN -->
     <div class="view" id="view-hebebuehnen">
@@ -660,12 +689,32 @@ function enterApp(){
   document.getElementById('topRole').textContent = roleLabel[state.currentUser.role]||state.currentUser.role;
   document.getElementById('offlineBanner').style.display = state.backendAvailable ? 'none' : 'block';
   loadAll();
+  startPolling();
 }
 document.getElementById('logoutNav').addEventListener('click', ()=>{
   state.token=null; state.currentUser=null; state.backendAvailable=false;
   document.getElementById('app').style.display='none';
   document.getElementById('loginScreen').style.display='flex';
+  stopPolling();
 });
+
+/* ---------- Automatischer Hintergrund-Abgleich (kein echtes Echtzeit-Push,
+   aber alle 8s ein stiller Datenabgleich, damit man nicht manuell neu laden muss) ---------- */
+let pollInterval = null;
+function startPolling(){
+  if(pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(async ()=>{
+    if(!state.backendAvailable || !state.token) return;
+    if(document.querySelector('.modal-overlay.open')) return; // Modal offen -> nicht stören
+    const active = document.activeElement;
+    if(active && (active.tagName==='INPUT' || active.tagName==='TEXTAREA' || active.tagName==='SELECT')) return;
+    await loadAll();
+  }, 8000);
+}
+function stopPolling(){
+  if(pollInterval){ clearInterval(pollInterval); pollInterval = null; }
+}
+
 document.querySelectorAll('.nav-item[data-view]').forEach(el=>{
   el.addEventListener('click', ()=>setView(el.dataset.view));
 });
@@ -997,12 +1046,31 @@ function renderReifenlager(){
     <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,.15);color:var(--success);">🔄</div><div class="stat-num">${bySeasonQty('ganzjahres')}</div><div class="stat-label">Ganzjahresreifen</div></div>
   `;
 
+  // Lagerort-Filter-Dropdown befüllen (einmalig pro Datenwechsel, Auswahl beibehalten)
+  const locSelect = document.getElementById('tireFilterLoc');
+  if(locSelect && locSelect.dataset.filled !== String(locs.length)){
+    const current = locSelect.value;
+    locSelect.innerHTML = '<option value="">Alle Lagerorte</option>' + locs.map(l=>`<option value="${l.id}">${l.name}</option>`).join('');
+    locSelect.value = current;
+    locSelect.dataset.filled = String(locs.length);
+  }
+
+  // Filter anwenden (Suche, Saison, Lagerort)
+  const q = (document.getElementById('tireSearchInput')?.value||'').toLowerCase().trim();
+  const seasonFilter = document.getElementById('tireFilterSeason')?.value||'';
+  const locFilter = document.getElementById('tireFilterLoc')?.value||'';
+  const filtered = tires.filter(t=>
+    (!q || t.name.toLowerCase().includes(q) || t.size.toLowerCase().includes(q)) &&
+    (!seasonFilter || t.season===seasonFilter) &&
+    (!locFilter || t.location_id===locFilter)
+  );
+
   const countBadge = document.getElementById('tireCountBadge');
-  if(countBadge) countBadge.textContent = `${tires.length} Reifentypen`;
+  if(countBadge) countBadge.textContent = `${filtered.length} Reifen`;
 
   const list = document.getElementById('tireList');
   if(list){
-    list.innerHTML = tires.length ? tires.map(t=>`
+    list.innerHTML = filtered.length ? filtered.map(t=>`
       <div class="tire-row ${state.selectedTireId===t.id?'selected':''}" data-tirerow="${t.id}">
         <div class="tire-icon">🛞</div>
         <div style="flex:1; min-width:0;">
@@ -1014,7 +1082,7 @@ function renderReifenlager(){
           <div class="icon-btn" data-tiredel="${t.id}" title="Löschen">✕</div>
         </div>
       </div>
-    `).join('') : `<div class="empty-state">Noch keine Reifen erfasst.</div>`;
+    `).join('') : `<div class="empty-state">Keine Reifen gefunden.</div>`;
     list.querySelectorAll('[data-tiredel]').forEach(el=>el.addEventListener('click', async (e)=>{
       e.stopPropagation();
       if(!confirm('Diesen Reifen wirklich löschen?')) return;
@@ -1028,13 +1096,28 @@ function renderReifenlager(){
     }));
   }
 
+  // Lagerübersicht: visuelles "Regal" je Lagerort (Kreise = Reifen, gestrichelt = frei)
   const locGrid = document.getElementById('tireLocGrid');
   if(locGrid){
     locGrid.innerHTML = locs.length ? locs.map(l=>{
       const pct = l.capacity ? Math.min(100, Math.round(l.used_qty/l.capacity*100)) : 0;
+      const shownSlots = Math.min(24, l.capacity||24);
+      const filledSlots = Math.round((l.used_qty/(l.capacity||1))*shownSlots);
+      const perRow = 8;
+      let shelfHtml = '';
+      for(let r=0; r<Math.ceil(shownSlots/perRow); r++){
+        shelfHtml += '<div class="tire-shelf-row">';
+        for(let c=0; c<perRow; c++){
+          const idx = r*perRow+c;
+          if(idx>=shownSlots) break;
+          shelfHtml += idx<filledSlots ? '<div class="tire-shelf-tire"></div>' : '<div class="tire-shelf-empty"></div>';
+        }
+        shelfHtml += '</div>';
+      }
       return `
       <div class="tire-loc-card">
         <div class="tire-loc-head"><span class="tire-loc-name">📍 ${l.name}</span><span class="tire-loc-badge">${l.used_qty} Reifen</span></div>
+        <div class="tire-shelf">${shelfHtml}</div>
         <div class="tire-loc-bar-bg"><div class="tire-loc-bar-fill" style="width:${pct}%;"></div></div>
         <div class="tire-loc-pct">${pct}% belegt</div>
       </div>`;
@@ -1042,11 +1125,26 @@ function renderReifenlager(){
   }
 
   const lowList = document.getElementById('lowStockList');
+  const low = tires.filter(t=>t.qty <= 4).sort((a,b)=>a.qty-b.qty);
+  const lowBadge = document.getElementById('lowStockBadge');
+  if(lowBadge) lowBadge.textContent = `${low.length} Reifen`;
   if(lowList){
-    const low = tires.filter(t=>t.qty <= 4).sort((a,b)=>a.qty-b.qty);
     lowList.innerHTML = low.length ? low.map(t=>`
       <div class="order-row low-stock-row"><div><div class="order-veh" style="color:var(--text);">${t.name}</div><div class="order-meta">${t.size} · ${t.location_name||'kein Lagerort'}</div></div><div style="font-weight:700;">${t.qty}x</div></div>
     `).join('') : `<div class="empty-state">Kein Reifen mit niedrigem Bestand.</div>`;
+  }
+
+  // Kürzlich hinzugefügt/geändert (nach updated_at sortiert)
+  const recentList = document.getElementById('recentTireList');
+  if(recentList){
+    const recent = [...tires].sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)).slice(0,5);
+    recentList.innerHTML = recent.length ? recent.map(t=>`
+      <div class="recent-row">
+        <div class="tire-icon">🛞</div>
+        <div style="flex:1; min-width:0;"><div class="tire-name">${t.name}</div><div class="tire-meta">${t.size} · ${t.location_name||'kein Lagerort'}</div></div>
+        <div class="recent-time">${formatApptDate(t.updated_at)}</div>
+      </div>
+    `).join('') : `<div class="empty-state">Noch keine Reifen erfasst.</div>`;
   }
 }
 
@@ -1054,6 +1152,11 @@ function fillTireLocationOptions(selectedId){
   document.getElementById('tireLocation').innerHTML = '<option value="">— Kein Lagerort —</option>' +
     (state.tireLocations||[]).map(l=>`<option value="${l.id}" ${l.id===selectedId?'selected':''}>${l.name}</option>`).join('');
 }
+['tireSearchInput','tireFilterSeason','tireFilterLoc'].forEach(id=>{
+  const el = document.getElementById(id);
+  if(el){ el.addEventListener('input', renderReifenlager); el.addEventListener('change', renderReifenlager); }
+});
+
 document.getElementById('newTireBtn').addEventListener('click', ()=>{
   state.editingTireId = null;
   document.getElementById('tireModalTitle').textContent = 'Neuer Reifen';

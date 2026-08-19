@@ -1419,6 +1419,23 @@ async function loadOrdersFromApi(){
   setMainView(state.mainView || 'dashboard');
 }
 
+/* ---------- Automatischer Hintergrund-Abgleich (kein echtes Echtzeit-Push,
+   aber alle 8s ein stiller Datenabgleich, damit man nicht manuell neu laden muss) ---------- */
+let pollInterval = null;
+function startPolling(){
+  if(pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(async ()=>{
+    if(!state.backendAvailable || !state.token) return;
+    if(state.recognition) return; // Sprachaufnahme läuft gerade -> nicht stören
+    const active = document.activeElement;
+    if(active && (active.tagName==='INPUT' || active.tagName==='TEXTAREA')) return; // Nutzer tippt gerade -> nicht stören
+    await loadOrdersFromApi();
+  }, 8000);
+}
+function stopPolling(){
+  if(pollInterval){ clearInterval(pollInterval); pollInterval = null; }
+}
+
 /* ---------- icons ---------- */
 function svg(paths, vb='0 0 24 24'){return `<svg class="icon" viewBox="${vb}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;}
 const iconGrid = svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>');
@@ -3760,6 +3777,7 @@ async function checkPin(){
         document.getElementById('pinScreen').style.display = 'none';
         await selectProfile({ name: data.user.name, role: data.user.role });
         loadOrdersFromApi();
+        startPolling();
       }, 150);
     } catch(e){
       pinShakeAndReset(e.isNetworkError ? 'Backend nicht erreichbar.' : (e.status===429 ? e.message : 'Falscher PIN. Bitte erneut versuchen.'));
@@ -3804,6 +3822,7 @@ function showLoginScreen(){
   state.shiftStart = null;
   state.token = null;
   state.backendAvailable = false;
+  stopPolling();
 }
 
 /* ---------- Live-Uhr (lokale Systemzeit) ---------- */
