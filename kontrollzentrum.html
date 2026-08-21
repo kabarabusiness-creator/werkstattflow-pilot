@@ -537,6 +537,29 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
   </div>
 </div>
 
+<!-- ============ MODAL: Auftrag bearbeiten ============ -->
+<div class="modal-overlay" id="orderEditModal">
+  <div class="modal" style="width:460px;">
+    <h2 id="orderEditTitle">Auftrag bearbeiten</h2>
+    <div class="form-row">
+      <div class="form-field"><label>Status</label><select id="oeStatus"><option value="arbeit">In Arbeit</option><option value="pruefung">Prüfung</option><option value="erledigt">Erledigt</option></select></div>
+      <div class="form-field"><label>Fortschritt (%)</label><input id="oeProgress" type="number" min="0" max="100"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Mechaniker</label><select id="oeMechanic"><option value="">— Nicht zugewiesen —</option></select></div>
+      <div class="form-field"><label>Geschätzte Dauer (Min.)</label><input id="oeDuration" type="number"></div>
+    </div>
+    <div id="orderEditMsg" style="font-size:13px; color:var(--danger); min-height:16px;"></div>
+    <div class="modal-actions" style="justify-content:space-between;">
+      <div class="btn" id="orderEditDelete" style="border-color:var(--danger); color:var(--danger);">🗑 Auftrag löschen</div>
+      <div style="display:flex; gap:10px;">
+        <div class="btn" id="orderEditCancel">Abbrechen</div>
+        <div class="btn primary" id="orderEditSave">Speichern</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ============ MODAL: Neuer Kunde ============ -->
 <div class="modal-overlay" id="customerModal">
   <div class="modal" style="width:420px;">
@@ -555,7 +578,7 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
 <!-- ============ MODAL: Neuer Termin ============ -->
 <div class="modal-overlay" id="apptModal">
   <div class="modal" style="width:460px;">
-    <h2>Neuer Termin</h2>
+    <h2 id="apptModalTitle">Neuer Termin</h2>
     <div class="form-field" style="margin-bottom:10px;"><label>Titel *</label><input id="apptTitle" placeholder="z.B. Kundengespräch, Abholung"></div>
     <div class="form-row">
       <div class="form-field"><label>Datum *</label><input id="apptDate" type="date"></div>
@@ -570,9 +593,12 @@ tr.clickable:hover{background:var(--surface); cursor:pointer;}
       <select id="apptOrder"><option value="">— kein Auftrag —</option></select>
     </div>
     <div id="apptModalMsg" style="font-size:13px; color:var(--danger); min-height:16px;"></div>
-    <div class="modal-actions">
-      <div class="btn" id="apptModalCancel">Abbrechen</div>
-      <div class="btn primary" id="apptModalSave">Termin anlegen</div>
+    <div class="modal-actions" style="justify-content:space-between;">
+      <div class="btn" id="apptModalDelete" style="border-color:var(--danger); color:var(--danger); display:none;">🗑 Löschen</div>
+      <div style="display:flex; gap:10px; margin-left:auto;">
+        <div class="btn" id="apptModalCancel">Abbrechen</div>
+        <div class="btn primary" id="apptModalSave">Termin anlegen</div>
+      </div>
     </div>
   </div>
 </div>
@@ -809,11 +835,12 @@ function renderDashboard(){
     document.getElementById('kbCount'+(i+1)).textContent = col.length;
     const el = document.getElementById('kbCol'+(i+1));
     el.innerHTML = col.length ? col.map(o=>`
-      <div class="kanban-card">
+      <div class="kanban-card" data-kanbancard="${o.id}">
         <div class="kanban-card-top"><span class="kanban-card-title">${o.brand} ${o.model}</span>${statusBadge(o.status)}</div>
         <div class="kanban-card-meta">${o.plate||'–'} · ${o.customer_name}</div>
         <div class="kanban-card-time">🕐 #${o.order_number}</div>
       </div>`).join('') : `<div class="empty-state" style="padding:20px 0;">Keine Aufträge.</div>`;
+    el.querySelectorAll('[data-kanbancard]').forEach(card=>card.addEventListener('click', ()=>openOrderEditModal(card.dataset.kanbancard)));
   });
 }
 
@@ -821,7 +848,7 @@ function renderOrderTable(){
   const tbody = document.querySelector('#orderTable tbody');
   if(!state.orders.length){ tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">Keine Aufträge vorhanden.</div></td></tr>`; return; }
   tbody.innerHTML = state.orders.map(o=>`
-    <tr>
+    <tr class="clickable" data-orderrow="${o.id}">
       <td>#${o.order_number}</td>
       <td>${o.brand} ${o.model}</td>
       <td>${o.customer_name}</td>
@@ -829,6 +856,7 @@ function renderOrderTable(){
       <td>${o.progress}%</td>
       <td>${o.task_done_count}/${o.task_count}</td>
     </tr>`).join('');
+  tbody.querySelectorAll('[data-orderrow]').forEach(el=>el.addEventListener('click', ()=>openOrderEditModal(el.dataset.orderrow)));
 }
 
 function renderCustomerTable(){
@@ -899,6 +927,45 @@ document.getElementById('liftAssignSave').addEventListener('click', async ()=>{
   try{
     await apiFetch(`/lifts/${liftAssignTargetId}`, {method:'PATCH', body:JSON.stringify({order_id:orderId})});
     document.getElementById('liftAssignModal').classList.remove('open');
+    await loadAll();
+  }catch(e){ msg.textContent = e.message; }
+});
+
+/* ================= Modal: Auftrag bearbeiten ================= */
+let orderEditTargetId = null;
+function openOrderEditModal(orderId){
+  const o = state.orders.find(x=>x.id===orderId);
+  if(!o) return;
+  orderEditTargetId = orderId;
+  document.getElementById('orderEditTitle').textContent = `Auftrag #${o.order_number} · ${o.brand} ${o.model}`;
+  document.getElementById('oeStatus').value = o.status;
+  document.getElementById('oeProgress').value = o.progress;
+  document.getElementById('oeDuration').value = o.estimated_duration_min || '';
+  document.getElementById('oeMechanic').innerHTML = '<option value="">— Nicht zugewiesen —</option>' +
+    state.staff.filter(u=>u.role==='mechaniker').map(u=>`<option value="${u.id}" ${u.id===o.assigned_mechanic_id?'selected':''}>${u.name}</option>`).join('');
+  document.getElementById('orderEditMsg').textContent = '';
+  document.getElementById('orderEditModal').classList.add('open');
+}
+document.getElementById('orderEditCancel').addEventListener('click', ()=>document.getElementById('orderEditModal').classList.remove('open'));
+document.getElementById('orderEditSave').addEventListener('click', async ()=>{
+  const msg = document.getElementById('orderEditMsg');
+  try{
+    await apiFetch(`/orders/${orderEditTargetId}`, {method:'PATCH', body:JSON.stringify({
+      status: document.getElementById('oeStatus').value,
+      progress: parseInt(document.getElementById('oeProgress').value)||0,
+      assigned_mechanic_id: document.getElementById('oeMechanic').value || null,
+      estimated_duration_min: document.getElementById('oeDuration').value ? parseInt(document.getElementById('oeDuration').value) : null,
+    })});
+    document.getElementById('orderEditModal').classList.remove('open');
+    await loadAll();
+  }catch(e){ msg.textContent = e.message; }
+});
+document.getElementById('orderEditDelete').addEventListener('click', async ()=>{
+  if(!confirm('Diesen Auftrag wirklich unwiderruflich löschen? Alle Aufgaben und die QK-Checkliste werden mitgelöscht.')) return;
+  const msg = document.getElementById('orderEditMsg');
+  try{
+    await apiFetch(`/orders/${orderEditTargetId}`, {method:'DELETE'});
+    document.getElementById('orderEditModal').classList.remove('open');
     await loadAll();
   }catch(e){ msg.textContent = e.message; }
 });
@@ -998,7 +1065,7 @@ function renderAppointments(){
   list.innerHTML = Object.entries(groups).map(([day, items])=>`
     <div class="form-section-title" style="margin-top:18px;">${day}</div>
     ${items.map(a=>`
-      <div class="order-row">
+      <div class="order-row clickable" data-apptrow="${a.id}" style="cursor:pointer;">
         <div>
           <div class="order-veh">${a.title}</div>
           <div class="order-meta">${isNaN(a._d)?'':a._d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} ${a.customer_name?'· '+a.customer_name:''} ${a.brand?'· '+a.brand+' '+a.model:''}</div>
@@ -1006,10 +1073,16 @@ function renderAppointments(){
         <span class="badge arbeit">${a.status==='geplant'?'Geplant':a.status}</span>
       </div>`).join('')}
   `).join('');
+  list.querySelectorAll('[data-apptrow]').forEach(el=>el.addEventListener('click', ()=>openApptEditModal(el.dataset.apptrow)));
 }
 
 /* ================= Modal: Neuer Termin ================= */
+let editingApptId = null;
 document.getElementById('newApptBtn').addEventListener('click', ()=>{
+  editingApptId = null;
+  document.getElementById('apptModalTitle').textContent = 'Neuer Termin';
+  document.getElementById('apptModalSave').textContent = 'Termin anlegen';
+  document.getElementById('apptModalDelete').style.display = 'none';
   document.getElementById('apptTitle').value=''; document.getElementById('apptDate').value=''; document.getElementById('apptTime').value='';
   document.getElementById('apptModalMsg').textContent='';
   document.getElementById('apptCustomer').innerHTML = '<option value="">— kein Kunde —</option>' +
@@ -1018,6 +1091,26 @@ document.getElementById('newApptBtn').addEventListener('click', ()=>{
     state.orders.map(o=>`<option value="${o.id}">#${o.order_number} · ${o.brand} ${o.model}</option>`).join('');
   document.getElementById('apptModal').classList.add('open');
 });
+function openApptEditModal(apptId){
+  const a = state.appointments.find(x=>x.id===apptId);
+  if(!a) return;
+  editingApptId = apptId;
+  document.getElementById('apptModalTitle').textContent = 'Termin bearbeiten';
+  document.getElementById('apptModalSave').textContent = 'Speichern';
+  document.getElementById('apptModalDelete').style.display = 'inline-flex';
+  document.getElementById('apptModalMsg').textContent='';
+  document.getElementById('apptCustomer').innerHTML = '<option value="">— kein Kunde —</option>' +
+    state.customers.map(c=>`<option value="${c.id}" ${c.id===a.customer_id?'selected':''}>${c.name}</option>`).join('');
+  document.getElementById('apptOrder').innerHTML = '<option value="">— kein Auftrag —</option>' +
+    state.orders.map(o=>`<option value="${o.id}" ${o.id===a.order_id?'selected':''}>#${o.order_number} · ${o.brand} ${o.model}</option>`).join('');
+  document.getElementById('apptTitle').value = a.title;
+  const d = new Date(a.scheduled_at);
+  if(!isNaN(d)){
+    document.getElementById('apptDate').value = d.toISOString().slice(0,10);
+    document.getElementById('apptTime').value = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  }
+  document.getElementById('apptModal').classList.add('open');
+}
 document.getElementById('apptModalCancel').addEventListener('click', ()=>document.getElementById('apptModal').classList.remove('open'));
 document.getElementById('apptModalSave').addEventListener('click', async ()=>{
   const msg = document.getElementById('apptModalMsg');
@@ -1025,16 +1118,30 @@ document.getElementById('apptModalSave').addEventListener('click', async ()=>{
   const date = document.getElementById('apptDate').value;
   const time = document.getElementById('apptTime').value;
   if(!title || !date || !time){ msg.textContent='Titel, Datum und Uhrzeit sind erforderlich.'; return; }
+  const payload = {
+    title, scheduled_at: `${date}T${time}:00`,
+    customer_id: document.getElementById('apptCustomer').value || null,
+  };
   try{
-    await apiFetch('/appointments', {method:'POST', body:JSON.stringify({
-      title, scheduled_at: `${date}T${time}:00`,
-      customer_id: document.getElementById('apptCustomer').value || null,
-      order_id: document.getElementById('apptOrder').value || null,
-    })});
+    if(editingApptId){
+      await apiFetch(`/appointments/${editingApptId}`, {method:'PATCH', body:JSON.stringify(payload)});
+    } else {
+      payload.order_id = document.getElementById('apptOrder').value || null;
+      await apiFetch('/appointments', {method:'POST', body:JSON.stringify(payload)});
+    }
     document.getElementById('apptModal').classList.remove('open');
     state.appointments = await apiFetch('/appointments');
     renderAppointments();
   }catch(e){ msg.textContent = e.message; }
+});
+document.getElementById('apptModalDelete').addEventListener('click', async ()=>{
+  if(!editingApptId || !confirm('Diesen Termin wirklich löschen?')) return;
+  try{
+    await apiFetch(`/appointments/${editingApptId}`, {method:'DELETE'});
+    document.getElementById('apptModal').classList.remove('open');
+    state.appointments = await apiFetch('/appointments');
+    renderAppointments();
+  }catch(e){ document.getElementById('apptModalMsg').textContent = e.message; }
 });
 /* ================= Reifenlager ================= */
 const seasonLabel = {sommer:'Sommer', winter:'Winter', ganzjahres:'Ganzjahres'};

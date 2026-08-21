@@ -1094,6 +1094,7 @@
 </head>
 <body>
 <div class="device">
+  <div id="updateToast" style="display:none; position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:999; background:linear-gradient(135deg,#8b5cf6,#a78bfa); color:#fff; padding:10px 18px; border-radius:30px; font-size:13px; font-weight:600; box-shadow:0 8px 24px rgba(139,92,246,.4); align-items:center; gap:8px; max-width:90%;"></div>
   <!-- LOGIN SCREEN -->
   <div class="login-screen" id="loginScreen">
     <div class="login-card">
@@ -1425,6 +1426,32 @@ async function loadOrdersFromApi(){
 /* ---------- Automatischer Hintergrund-Abgleich (kein echtes Echtzeit-Push,
    aber alle 8s ein stiller Datenabgleich, damit man nicht manuell neu laden muss) ---------- */
 let pollInterval = null;
+function snapshotOrders(){
+  // Leichte "Signatur" des aktuellen Zustands, um echte Änderungen zu erkennen
+  return orders.map(o => `${o.id}:${o.status}:${o.progress}:${o.tasks.map(t=>t.status).join(',')}`).join('|')
+    + '||' + bays.map(b=>`${b.n}:${b.orderId}`).join(',');
+}
+function showUpdateToast(message){
+  const el = document.getElementById('updateToast');
+  if(!el) return;
+  el.innerHTML = `🔔 ${message}`;
+  el.style.display = 'flex';
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(()=>{ el.style.display = 'none'; }, 5000);
+}
+function describeOrderChanges(before, after){
+  const beforeMap = new Map(before.map(o=>[o.id, o]));
+  const messages = [];
+  let newCount = 0, statusChanged = 0;
+  after.forEach(o=>{
+    const prev = beforeMap.get(o.id);
+    if(!prev) newCount++;
+    else if(prev.status !== o.status) statusChanged++;
+  });
+  if(newCount>0) messages.push(newCount===1 ? 'Neuer Auftrag hinzugefügt' : `${newCount} neue Aufträge hinzugefügt`);
+  if(statusChanged>0) messages.push(statusChanged===1 ? 'Ein Auftragsstatus wurde geändert' : `${statusChanged} Auftragsstatus geändert`);
+  return messages;
+}
 function startPolling(){
   if(pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(async ()=>{
@@ -1432,7 +1459,17 @@ function startPolling(){
     if(state.recognition) return; // Sprachaufnahme läuft gerade -> nicht stören
     const active = document.activeElement;
     if(active && (active.tagName==='INPUT' || active.tagName==='TEXTAREA')) return; // Nutzer tippt gerade -> nicht stören
+    const beforeSig = snapshotOrders();
+    const beforeOrders = orders.map(o=>({id:o.id, status:o.status}));
+    const beforeBays = bays.map(b=>({...b}));
     await loadOrdersFromApi();
+    const afterSig = snapshotOrders();
+    if(beforeSig !== afterSig){
+      const messages = describeOrderChanges(beforeOrders, orders);
+      const liftChanged = JSON.stringify(beforeBays) !== JSON.stringify(bays.map(b=>({...b})));
+      if(liftChanged) messages.push('Hebebühnen-Belegung aktualisiert');
+      showUpdateToast(messages.length ? messages.join(' · ') : 'Daten wurden aktualisiert');
+    }
   }, 8000);
 }
 function stopPolling(){

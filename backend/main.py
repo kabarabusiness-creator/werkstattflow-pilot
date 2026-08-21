@@ -478,6 +478,8 @@ def get_order(order_id: str, user: dict = Depends(get_current_user)):
 class OrderUpdate(BaseModel):
     status: Optional[str] = None
     progress: Optional[int] = None
+    assigned_mechanic_id: Optional[str] = None
+    estimated_duration_min: Optional[int] = None
 
 
 @app.patch("/orders/{order_id}")
@@ -489,12 +491,35 @@ def update_order(order_id: str, body: OrderUpdate, user: dict = Depends(get_curr
     if body.progress is not None:
         fields.append("progress=?")
         params.append(body.progress)
+    if body.assigned_mechanic_id is not None:
+        fields.append("assigned_mechanic_id=?")
+        params.append(body.assigned_mechanic_id if body.assigned_mechanic_id else None)
+    if body.estimated_duration_min is not None:
+        fields.append("estimated_duration_min=?")
+        params.append(body.estimated_duration_min)
     if not fields:
         return {"ok": True}
     with get_db() as db:
         require_order_in_workshop(db, order_id, user["workshop_id"])
+        if body.assigned_mechanic_id:
+            mech = db.execute(
+                "SELECT id FROM users WHERE id=? AND workshop_id=?", (body.assigned_mechanic_id, user["workshop_id"])
+            ).fetchone()
+            if not mech:
+                raise HTTPException(status_code=404, detail="Mechaniker nicht gefunden")
+        fields.append("updated_at=?")
+        params.append(now_iso())
         params.append(order_id)
         db.execute(f"UPDATE orders SET {', '.join(fields)} WHERE id=?", params)
+    return {"ok": True}
+
+
+@app.delete("/orders/{order_id}")
+def delete_order(order_id: str, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        require_order_in_workshop(db, order_id, user["workshop_id"])
+        db.execute("UPDATE lifts SET order_id=NULL, status='frei' WHERE order_id=?", (order_id,))
+        db.execute("DELETE FROM orders WHERE id=?", (order_id,))
     return {"ok": True}
 
 
@@ -828,6 +853,36 @@ def create_appointment(body: AppointmentCreate, user: dict = Depends(get_current
              body.title, body.scheduled_at, now_iso()),
         )
     return {"id": appt_id}
+
+
+class AppointmentUpdate(BaseModel):
+    title: Optional[str] = None
+    scheduled_at: Optional[str] = None
+    customer_id: Optional[str] = None
+    status: Optional[str] = None
+
+
+@app.patch("/appointments/{appointment_id}")
+def update_appointment(appointment_id: str, body: AppointmentUpdate, user: dict = Depends(get_current_user)):
+    with get_db() as db:
+        row = db.execute("SELECT workshop_id FROM appointments WHERE id=?", (appointment_id,)).fetchone()
+        if not row or row["workshop_id"] != user["workshop_id"]:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        if body.customer_id:
+            require_customer_in_workshop(db, body.customer_id, user["workshop_id"])
+        fields, params = [], []
+        if body.title is not None:
+            fields.append("title=?"); params.append(body.title)
+        if body.scheduled_at is not None:
+            fields.append("scheduled_at=?"); params.append(body.scheduled_at)
+        if body.customer_id is not None:
+            fields.append("customer_id=?"); params.append(body.customer_id or None)
+        if body.status is not None:
+            fields.append("status=?"); params.append(body.status)
+        if fields:
+            params.append(appointment_id)
+            db.execute(f"UPDATE appointments SET {', '.join(fields)} WHERE id=?", params)
+    return {"ok": True}
 
 
 @app.delete("/appointments/{appointment_id}")
