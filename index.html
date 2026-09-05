@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>WerkstattFlow – Mitarbeiteransicht</title>
+<title>AutoLeitwerk – Mitarbeiteransicht</title>
 <style>
   :root{
     --bg:#08080f;
@@ -1115,7 +1115,7 @@
 
   <!-- PROFILE SCREEN (Netflix-Style) -->
   <div class="profile-screen" id="profileScreen" style="display:none;">
-    <div class="profile-logo"><img id="logoImgProfile" alt="WerkstattFlow"></div>
+    <div class="profile-logo"><img id="logoImgProfile" alt="AutoLeitwerk"></div>
     <h2>Wer arbeitet gerade?</h2>
     <p>Wähle dein Profil, um fortzufahren.</p>
     <div class="profile-grid" id="profileGrid"></div>
@@ -1146,7 +1146,7 @@
     <!-- SIDEBAR -->
     <aside class="sidebar">
       <div class="logo">
-        <div class="logo-mark"><img id="logoImgSidebar" alt="WerkstattFlow"></div>
+        <div class="logo-mark"><img id="logoImgSidebar" alt="AutoLeitwerk"></div>
         <div class="logo-text">WERKSTATT<span>FLOW</span></div>
       </div>
       <div class="nav" id="sidebarNav"></div>
@@ -1203,7 +1203,7 @@
   <div class="modal-overlay" id="logoutModal" style="display:none;">
     <div class="modal-card">
       <h3>Abmelden?</h3>
-      <p>Du wirst von WerkstattFlow abgemeldet und musst dich erneut anmelden.</p>
+      <p>Du wirst von AutoLeitwerk abgemeldet und musst dich erneut anmelden.</p>
       <div class="modal-actions">
         <div class="btn" id="logoutCancel">Abbrechen</div>
         <div class="btn danger" id="logoutConfirm">Abmelden</div>
@@ -1239,7 +1239,7 @@
 
   <!-- LOGGED OUT SCREEN -->
   <div class="loggedout" id="loggedOutScreen" style="display:none;">
-    <div class="logo-mark big"><img id="logoImgBig" alt="WerkstattFlow"></div>
+    <div class="logo-mark big"><img id="logoImgBig" alt="AutoLeitwerk"></div>
     <h2>Abgemeldet</h2>
     <p>Du kannst dich jederzeit wieder anmelden.</p>
     <div class="btn primary" id="reLoginBtn">Erneut anmelden</div>
@@ -2420,7 +2420,7 @@ function renderEinstellungenView(ov){
     <div class="set-card">
       <div class="set-profile">
         <div class="set-avatar">MK</div>
-        <div><div class="set-name">Mert Kabara</div><div class="set-role">Mechaniker · WerkstattFlow</div></div>
+        <div><div class="set-name">Mert Kabara</div><div class="set-role">Mechaniker · AutoLeitwerk</div></div>
       </div>
     </div>
     <div class="set-section-title">Benachrichtigungen</div>
@@ -2437,7 +2437,7 @@ function renderEinstellungenView(ov){
     <div class="set-section-title">App</div>
     <div class="set-card">
       <div class="set-row">
-        <div><div class="set-row-label">Dunkelmodus</div><div class="set-row-sub">WerkstattFlow nutzt immer das dunkle Theme</div></div>
+        <div><div class="set-row-label">Dunkelmodus</div><div class="set-row-sub">AutoLeitwerk nutzt immer das dunkle Theme</div></div>
         <div class="toggle on disabled"></div>
       </div>
       <div class="set-row">
@@ -3491,7 +3491,7 @@ document.addEventListener('click', (e)=>{
     if(p && state.shiftStart){
       const secs = (Date.now()-state.shiftStart)/1000;
       const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
-      p.innerHTML = `Deine heutige Schicht: <b>${h}:${String(m).padStart(2,'0')} Std.</b> (seit ${formatClock(state.shiftStart)}).<br>Du wirst von WerkstattFlow abgemeldet und musst dich erneut anmelden.`;
+      p.innerHTML = `Deine heutige Schicht: <b>${h}:${String(m).padStart(2,'0')} Std.</b> (seit ${formatClock(state.shiftStart)}).<br>Du wirst von AutoLeitwerk abgemeldet und musst dich erneut anmelden.`;
     }
     document.getElementById('logoutModal').style.display='flex';
     return;
