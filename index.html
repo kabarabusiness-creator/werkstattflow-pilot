@@ -404,6 +404,15 @@
   .td-btn:hover{filter:brightness(1.08);}
   .td-btn:disabled{background:var(--surface);color:var(--text-faint);cursor:default;filter:none;}
   .td-empty{color:var(--text-faint);font-size:13px;text-align:center;padding:40px 10px;}
+  .auslastung-list{display:flex;flex-direction:column;gap:14px;padding:4px 0;}
+  .auslastung-row{display:grid;grid-template-columns:180px 1fr 140px;align-items:center;gap:14px;background:var(--panel,#161625);border:1px solid var(--border,#26264a);border-radius:12px;padding:14px 16px;}
+  .auslastung-name{font-weight:600;font-size:14px;display:flex;flex-direction:column;gap:2px;}
+  .auslastung-role{font-size:11px;color:var(--text-faint);font-weight:400;}
+  .auslastung-bar-bg{height:10px;background:var(--surface,#0d0d16);border-radius:6px;overflow:hidden;}
+  .auslastung-bar-fill{height:100%;background:var(--accent,#8b5cf6);border-radius:6px;transition:width .3s;}
+  .auslastung-bar-fill.over{background:var(--danger,#f2495c);}
+  .auslastung-val{font-size:13px;text-align:right;font-variant-numeric:tabular-nums;}
+  .auslastung-val.over{color:var(--danger,#f2495c);font-weight:600;}
 
   /* zeiterfassung */
   .td-timer{background:var(--panel-2);border:1px solid var(--border-soft);border-radius:11px;padding:13px 14px;margin-top:14px;}
@@ -1364,6 +1373,18 @@ async function loadFromBase44(){
   state.base44Data = data;
   orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
   state.apiUsers = data.employees.filter(e=>e.is_active).map(e => ({ id: e.id, name: e.name, email:'', role: e.role, active: 1 }));
+  if(Array.isArray(data.lifts)){
+    bays = data.lifts
+      .sort((a,b)=>(a.lift_number||0)-(b.lift_number||0))
+      .map(l => ({
+        n: l.lift_number,
+        orderId: l.assigned_order_id || null,
+        remainingMin: (l.remaining_minutes!=null) ? l.remaining_minutes : null,
+        offline: l.status === 'ausser_betrieb',
+      }));
+  }
+  // Wenn Base44 noch keine Lifts liefert (Function-Update ausstehend), bleiben die
+  // bisherigen lokalen Demo-Hebebühnen unverändert bestehen (kein Absturz, kein Datenverlust).
 }
 function startBase44Polling(){
   if(b44PollInterval) clearInterval(b44PollInterval);
@@ -1729,6 +1750,7 @@ function renderChrome(){
     {ic:iconDoc, label:'Dokumente', view:'dokumente'},
     {ic:iconTire, label:'Reifenlager', view:'reifenlager'},
     {ic:iconShield, label:'Benutzerverwaltung', view:'benutzer', roles:['admin']},
+    {ic:iconGrid, label:'Team-Auslastung', view:'auslastung', roles:['meister','serviceberater','admin']},
     {ic:iconSupport, label:'Support', view:'support'},
     {ic:iconGear, label:'Einstellungen', view:'einstellungen'},
   ];
@@ -1918,6 +1940,7 @@ function renderOtherView(view){
   if(view==='dokumente') return renderDokumenteView(ov);
   if(view==='reifenlager') return renderReifenlagerView(ov);
   if(view==='benutzer') return renderBenutzerView(ov);
+  if(view==='auslastung') return renderAuslastungView(ov);
   if(view==='support') return renderSupportView(ov);
   if(view==='einstellungen') return renderEinstellungenView(ov);
 }
@@ -2293,6 +2316,14 @@ function renderHebebuehnenView(ov){
       ${bays.map(b=>{
         const o = b.orderId ? orders.find(x=>x.id===b.orderId) : null;
         const sm = o ? statusMeta[o.status] : null;
+        const restText = (b.remainingMin!=null) ? `${b.remainingMin} Min.` : (o ? o.rest : '–');
+        if(b.offline){
+          return `
+        <div class="bay-card ausser-betrieb">
+          <div class="bay-card-head"><span class="bay-num">${b.n}</span><span class="status-pill dot pruefung">Außer Betrieb</span></div>
+          <div class="bay-empty">${iconLift}<span>Nicht verfügbar</span></div>
+        </div>`;
+        }
         return `
         <div class="bay-card ${o?o.status:'frei'}" ${o?`data-order="${o.id}"`:''}>
           <div class="bay-card-head">
@@ -2305,7 +2336,7 @@ function renderHebebuehnenView(ov){
               <div class="bay-card-veh">${o.vehicle}</div>
               <div class="bay-card-sub">Auftrag #${o.orderNumber} · ${o.customer}</div>
               <div class="bay-progress-bar"><div class="bay-progress-fill" style="width:${o.progress}%;background:${progressColor(o.progress)}"></div></div>
-              <div class="bay-card-foot"><span>${o.progress}%</span><span>${iconClock} ${o.rest}</span></div>
+              <div class="bay-card-foot"><span>${o.progress}%</span><span>${iconClock} ${restText}</span></div>
             </div>
           ` : `
             <div class="bay-empty">${iconLift}<span>Bereit für den nächsten Auftrag</span></div>
@@ -2347,6 +2378,43 @@ function renderToolRow(tool){
 }
 
 /* ---------- Benutzerverwaltung (Admin-only, Rollen) ---------- */
+function renderAuslastungView(ov){
+  const data = state.base44Data;
+  if(!data){
+    ov.innerHTML = `<div class="ov-head"><div><h1>Team-Auslastung</h1><div class="sub">Keine Live-Daten verfügbar.</div></div></div>`;
+    return;
+  }
+  const orderStatusById = {};
+  (data.orders||[]).forEach(o => orderStatusById[o.id] = o.status);
+  const employees = (data.employees||[]).filter(e=>e.is_active);
+  const SHIFT_MIN = 480; // angenommener 8-Stunden-Arbeitstag
+  const rows = employees.map(emp => {
+    const minutes = (data.tasks||[])
+      .filter(t => t.assigned_employee === emp.name)
+      .filter(t => t.status !== 'erledigt')
+      .filter(t => orderStatusById[t.order_id] !== 'abgeschlossen')
+      .reduce((sum,t) => sum + (t.estimated_minutes||0), 0);
+    const pct = Math.round((minutes/SHIFT_MIN)*100);
+    return { name: emp.name, role: emp.role, minutes, pct };
+  }).sort((a,b)=>b.pct-a.pct);
+
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Team-Auslastung</h1><div class="sub">Verplante Arbeitszeit heute je Mitarbeiter (Basis: 8-Std.-Schicht)</div></div></div>
+    <div class="auslastung-list">
+      ${rows.length ? rows.map(r => {
+        const h = Math.floor(r.minutes/60), m = r.minutes%60;
+        const over = r.pct > 100;
+        return `
+        <div class="auslastung-row">
+          <div class="auslastung-name">${r.name}<span class="auslastung-role">${roleLabel[r.role]||r.role}</span></div>
+          <div class="auslastung-bar-bg"><div class="auslastung-bar-fill ${over?'over':''}" style="width:${Math.min(100,r.pct)}%;"></div></div>
+          <div class="auslastung-val ${over?'over':''}">${h}:${String(m).padStart(2,'0')} Std. · ${r.pct}%</div>
+        </div>`;
+      }).join('') : '<div class="td-empty">Keine aktiven Mitarbeiter gefunden.</div>'}
+    </div>
+  `;
+}
+
 function renderBenutzerView(ov){
   ov.innerHTML = `
     <div class="ov-head"><div><h1>Benutzerverwaltung</h1><div class="sub">Team-Mitglieder &amp; Rollen verwalten</div></div></div>
