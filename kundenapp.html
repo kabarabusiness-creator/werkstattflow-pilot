@@ -353,22 +353,45 @@ function renderServicebericht(){
   `;
 }
 
+let currentDocs = [];
 function renderHuAuBerichte(){
-  const docs = (state.data.media||[]).filter(m => m.media_type === 'dokument');
+  currentDocs = (state.data.media||[]).filter(m => m.media_type === 'dokument');
   return `
     <div class="card">
       <div class="card-title">📑 HU/AU-Berichte &amp; Dokumente</div>
-      ${docs.length ? docs.map(d=>`
-        <a class="doc-item" href="${d.file_url}" target="_blank" rel="noopener">
+      ${currentDocs.length ? currentDocs.map((d,i)=>`
+        <div class="doc-item" onclick="openDocument(${i})" style="cursor:pointer;">
           <div class="doc-icon">📄</div>
           <div>
             <div class="doc-title">${d.caption || 'Dokument'}</div>
             <div class="doc-date">${d.created_date ? fmtDDMM(fmtDate(d.created_date)) : ''}</div>
           </div>
-        </a>
+        </div>
       `).join('') : `<div class="empty">Noch keine Berichte hinterlegt.</div>`}
     </div>
   `;
+}
+
+// iOS Safari öffnet große data:-Links oft nicht zuverlässig als direkter Link/Tab.
+// Deshalb wird die Datei bei Bedarf in einen Blob umgewandelt, das funktioniert stabiler.
+function openDocument(index){
+  const url = currentDocs[index].file_url;
+  if(url.startsWith('data:')){
+    try{
+      const [header, b64] = url.split(',');
+      const mime = (header.match(/data:([^;]+)/)||[])[1] || 'application/octet-stream';
+      const byteChars = atob(b64);
+      const byteNumbers = new Array(byteChars.length);
+      for(let i=0;i<byteChars.length;i++){ byteNumbers[i] = byteChars.charCodeAt(i); }
+      const blob = new Blob([new Uint8Array(byteNumbers)], {type:mime});
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+    }catch(e){
+      alert('Dokument konnte nicht geöffnet werden.');
+    }
+  } else {
+    window.open(url, '_blank', 'noopener');
+  }
 }
 
 function renderApprovals(){
