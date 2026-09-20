@@ -192,7 +192,7 @@ const ANLIEGEN = [
   {key:'sonstiges', title:'Sonstiges', sub:'Beratung & anderes'},
 ];
 
-let state = { token:null, data:null, showBookForm:false, bookAnliegen:'fahrzeugabgabe', bookServiceId:null, bookDate:null, bookTime:null, bookChannel:'email' };
+let state = { token:null, data:null, view:'dashboard', showBookForm:false, bookAnliegen:'fahrzeugabgabe', bookServiceId:null, bookDate:null, bookTime:null, bookChannel:'email' };
 
 document.getElementById('tokenInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 const urlParams = new URLSearchParams(window.location.search);
@@ -247,7 +247,6 @@ function fmtDate(iso){
 function fmtDDMM(d){ return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`; }
 
 function render(){
-  const o = state.data.order;
   const el = document.getElementById('appScreen');
   el.innerHTML = `
     <div class="topbar">
@@ -255,13 +254,59 @@ function render(){
       <div><div class="tb-title">AutoLeitwerk</div><div class="tb-sub">Kundenportal</div></div>
     </div>
     <div class="content">
-      ${renderStatusCard(o)}
-      ${renderFaelligkeiten(o)}
-      ${renderServicebericht()}
-      ${renderHuAuBerichte()}
-      ${renderApprovals()}
-      ${renderAppointmentsAndBooking()}
+      ${state.view==='dashboard' ? renderDashboardView() : renderServiceView()}
     </div>
+  `;
+}
+
+function goToService(){ state.view = 'service'; render(); window.scrollTo(0,0); }
+function goToDashboard(){ state.view = 'dashboard'; render(); window.scrollTo(0,0); }
+
+function renderDashboardView(){
+  const o = state.data.order;
+  const simple = simplifiedStatus(o.status);
+  const [title] = STATUS_BANNER_TEXT[o.status] || ['Status: ' + o.status];
+  return `
+    <div class="card">
+      <div class="veh-label">🚗 Ihr Fahrzeug</div>
+      <div class="veh-name">${o.vehicle_brand||''} ${o.vehicle_model||''}</div>
+      <div class="veh-plate">${o.license_plate||''}</div>
+      <div class="grid2" style="margin-top:14px;">
+        <div class="mini-card">
+          <div class="mini-label">Kilometerstand</div>
+          <div class="mini-val">${o.mileage!=null ? o.mileage.toLocaleString('de-DE')+' km' : '–'}</div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-label">Kraftstoff</div>
+          <div class="mini-val">${o.vehicle_brand ? (o.description&&o.description.includes('Diesel')?'Diesel':'–') : '–'}</div>
+        </div>
+      </div>
+    </div>
+
+    ${renderFaelligkeiten(o)}
+
+    <div class="card" style="cursor:pointer;" onclick="goToService()">
+      <div class="card-title">🔧 Aktueller Service</div>
+      <div class="status-banner ${simple}" style="margin-top:0;">
+        <div>
+          <div class="sb-title">${title}</div>
+          <div class="sb-sub">Ihr Fahrzeug ist aktuell in der Werkstatt</div>
+        </div>
+      </div>
+      <button class="btn primary" style="width:100%;margin-top:6px;" onclick="goToService()">Details &amp; Kundenportal öffnen →</button>
+    </div>
+  `;
+}
+
+function renderServiceView(){
+  const o = state.data.order;
+  return `
+    <div class="toggle-book" style="border:none;text-align:left;padding:4px 0 12px;color:var(--accent2);" onclick="goToDashboard()">← Zurück zum Dashboard</div>
+    ${renderStatusCard(o)}
+    ${renderServicebericht()}
+    ${renderHuAuBerichte()}
+    ${renderApprovals()}
+    ${renderAppointmentsAndBooking()}
   `;
 }
 
