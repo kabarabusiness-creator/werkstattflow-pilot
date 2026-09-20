@@ -324,20 +324,31 @@ function renderFaelligkeiten(o){
   `;
 }
 
+// HINWEIS: portalApi liefert aktuell keine WorkshopLog-Daten mit (state.data.workshop_logs
+// existiert nicht). Dieser Demo-Eintrag zeigt nur, wie ein echter Bericht aussehen würde,
+// sobald die Function das liefert. Sobald workshop_logs echt ankommt, wird DEMO_LOG ignoriert.
+const DEMO_SERVICEBERICHT = {
+  demo: true,
+  log_type: 'qualitaet',
+  title: 'Qualitätskontrolle nach Inspektion',
+  description: 'Ölwechsel durchgeführt, Bremsen vorne und hinten geprüft (Belagstärke i.O.), Reifendruck kontrolliert und angepasst, Beleuchtung geprüft. Keine Mängel festgestellt. Fahrzeug zur Abholung freigegeben.',
+  log_date: '2026-08-31',
+  employee_name: 'Marco Bianchi',
+};
+
 function renderServicebericht(){
   const logs = (state.data.workshop_logs || []).slice().sort((a,b)=> (b.log_date||b.created_date||'').localeCompare(a.log_date||a.created_date||''));
-  const last = logs[0];
+  const last = logs[0] || DEMO_SERVICEBERICHT;
   return `
     <div class="card">
-      <div class="card-title">📄 Letzter Servicebericht</div>
-      ${last ? `
-        <div class="report-summary">
-          <div class="rs-type">${last.log_type||'Bericht'}</div>
-          <div class="rs-title">${last.title||''}</div>
-          <div class="rs-desc">${last.description||''}</div>
-          <div class="rs-date">${last.log_date ? fmtDDMM(fmtDate(last.log_date)) : ''}${last.employee_name ? ' · '+last.employee_name : ''}</div>
-        </div>
-      ` : `<div class="empty">Noch kein Servicebericht hinterlegt.</div>`}
+      <div class="card-title">📄 Letzter Servicebericht${last.demo ? ' <span style="color:var(--accent2);font-weight:600;">(Demo)</span>' : ''}</div>
+      <div class="report-summary">
+        <div class="rs-type">${last.log_type||'Bericht'}</div>
+        <div class="rs-title">${last.title||''}</div>
+        <div class="rs-desc">${last.description||''}</div>
+        <div class="rs-date">${last.log_date ? fmtDDMM(fmtDate(last.log_date)) : ''}${last.employee_name ? ' · '+last.employee_name : ''}</div>
+      </div>
+      ${last.demo ? `<div class="empty" style="text-align:left;padding:10px 2px 0;">Beispielhafte Anzeige – echte Berichte erscheinen hier, sobald die Werkstatt-Datenanbindung erweitert ist.</div>` : ''}
     </div>
   `;
 }
