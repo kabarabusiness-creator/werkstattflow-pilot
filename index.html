@@ -693,6 +693,12 @@
   .modal-overlay{position:absolute;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;}
   .modal-card{width:340px;background:var(--panel);border:1px solid var(--border-soft);border-radius:16px;padding:22px;}
   .modal-card.wide{width:460px;}
+  .modal-card.pdf-viewer{width:94vw;height:92vh;max-width:1400px;padding:0;display:flex;flex-direction:column;overflow:hidden;}
+  .pdf-viewer-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border-soft);flex-shrink:0;}
+  .pdf-viewer-head b{font-size:15px;}
+  .pdf-viewer-close{width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--bg-soft,rgba(255,255,255,.06));}
+  .pdf-viewer-close svg{width:16px;height:16px;}
+  .pdf-viewer-frame{flex:1;width:100%;border:0;background:#525659;}
   .modal-card h3{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',Arial,sans-serif;font-size:17px;font-weight:700;}
   .modal-card p{font-size:13px;color:var(--text-dim);margin-top:8px;line-height:1.5;}
   .modal-actions{display:flex;gap:9px;margin-top:18px;}
@@ -1229,6 +1235,17 @@
   <!-- FAHRZEUGDETAILS MODAL -->
   <div class="modal-overlay" id="vehicleModal" style="display:none;">
     <div class="modal-card wide" id="vehicleModalBody"></div>
+  </div>
+
+  <!-- PDF-VIEWER MODAL (z.B. Schaltpläne aus dem KI-Assistenten) -->
+  <div class="modal-overlay" id="pdfModal" style="display:none;">
+    <div class="modal-card pdf-viewer">
+      <div class="pdf-viewer-head">
+        <b id="pdfModalTitle">Dokument</b>
+        <div class="pdf-viewer-close" id="pdfModalClose"></div>
+      </div>
+      <iframe id="pdfModalFrame" class="pdf-viewer-frame" src="about:blank"></iframe>
+    </div>
   </div>
 
   <!-- hidden file input for photo upload -->
@@ -3447,6 +3464,12 @@ document.addEventListener('click', (e)=>{
     return;
   }
 
+  /* --- pdf viewer modal --- */
+  if(e.target.closest('#pdfModalClose') || e.target.id==='pdfModal'){
+    closePdfModal();
+    return;
+  }
+
   /* --- vehicle details modal --- */
   if(e.target.closest('#vehicleDetailsBtn')){
     openVehicleModal(getSelectedOrder());
@@ -4048,7 +4071,7 @@ const AI_KB = [
       <li>Farbcodes im Schaltplan: BK=Schwarz, BL=Blau, BR/TN=Braun, GE/Y=Gelb, GN=Grün, GR/GY=Grau, OR=Orange, PK/RS=Rosa, R/RT=Rot, V/VI=Violett, W/WS=Weiß</li>
       <li>Enthaltene Schaltpläne: Starten/Laden/Hupe/Blinker (S.2) · Scheinwerfer/Nebelscheinwerfer/Innenlicht (S.3) · Check Control/Spiegel/Brems-Parklicht (S.4) · Motronic-Motorsteuerung (S.5–7) · Tempomat (S.8–9) · Zentralverriegelung/Alarm/Bordcomputer/Zusatzheizung/Uhr (S.10–12) · Scheinwerferwaschanlage (S.13–14) · elektrische Fenster (S.15–16) · Klimaanlage/Heizung (S.17–18) · Sitzheizung (S.19–20) · Memory-Sitze (S.21–23) · Sitze ohne Memory (S.24–25) · Radio (S.26–27) · L-Jetronic (S.28)</li>
       <li>Hinweis: Details (genaue Pinbelegung/Stecker) im hinterlegten PDF-Dokument nachschlagen</li>
-      <li><a href="${BMW_E30_SCHALTPLAN_PDF}" download="BMW-E30-Schaltplan.pdf" style="color:var(--accent-2,#c026d3);text-decoration:underline;font-weight:600;">&#128196; Komplettes Schaltplan-PDF herunterladen</a></li>
+      <li><a href="javascript:void(0)" onclick="openPdfModal(BMW_E30_SCHALTPLAN_PDF,'BMW E30 – Schaltplan (Verkabelungsschema)')" style="color:var(--accent-2,#c026d3);text-decoration:underline;font-weight:600;">&#128196; Komplettes Schaltplan-PDF öffnen</a></li>
     </ul>` },
   { match:/e30.*motronic|motronic.*e30/i, reply:`<b>BMW E30 – Motronic-Kabelbaum (Schaltplan S.5–7)</b><ul>
       <li>Zentrale Steuergeräte-Kennung: 1 = Elektronisches Steuergerät (ESG)</li>
@@ -4185,6 +4208,16 @@ const partsCatalog = [
   {code:'11427566327', name:'Ölfilter', oem:'11427566327', bestand:28, lagerplatz:'Regal A-02', kompatibel:true},
   {code:'8K0698151', name:'Bremsbelagsatz hinten (Audi)', oem:'8K0698151', bestand:4, lagerplatz:'Regal C-05', kompatibel:false},
 ];
+function openPdfModal(dataUri, title){
+  document.getElementById('pdfModalTitle').textContent = title || 'Dokument';
+  document.getElementById('pdfModalClose').innerHTML = iconClose;
+  document.getElementById('pdfModalFrame').src = dataUri;
+  document.getElementById('pdfModal').style.display='flex';
+}
+function closePdfModal(){
+  document.getElementById('pdfModal').style.display='none';
+  document.getElementById('pdfModalFrame').src = 'about:blank';
+}
 function openScannerModal(){
   const body = document.getElementById('closeOrderModalBody');
   body.innerHTML = `
