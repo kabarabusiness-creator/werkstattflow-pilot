@@ -1989,6 +1989,19 @@ function renderFahrzeugeView(ov){
   `;
 }
 
+// PROVISORISCH: Base44 liefert Termine noch nicht automatisch ans Tablet
+// (getTabletData enthält bisher keine Appointments). Bis der Backend-Fix
+// gemacht ist (braucht Base44-AI-Builder-Credits), werden offene Termine
+// hier manuell eingetragen. Neuen Termin ergänzen: einfach ein Objekt
+// unten anhängen. workshop_code muss zum Werkstatt-Code passen (AL-1001 /
+// AL-1002 etc.), order_id ist die Base44-Auftrags-ID (aus dem Dashboard-
+// Link oder über order_number nachschlagen).
+const MANUAL_APPOINTMENTS = [
+  { workshop_code:'AL-1001', date:'2026-09-28', time:'15:30', customer:'Thomas Becker', title:'Reifenwechsel', order_id:'6a6bfd631e8a82f4fd6ce32d', status:'bestaetigt' },
+  { workshop_code:'AL-1002', date:'2026-09-28', time:'11:00', customer:'Jonas Schneider', title:'Reifenwechsel inkl. Einlagerung', order_id:'6ab978764608cde59deed8a0', status:'bestaetigt' },
+  { workshop_code:'AL-1001', date:'2026-09-29', time:'13:30', customer:'Max Mustermann', title:'Reifenwechsel', order_id:'6ab9eb06ac9fc6e9393d60dc', status:'bestaetigt' },
+];
+
 function getAppointmentsData(){
   if(state.apiAppointments){
     const heute = [], morgen = [];
@@ -2014,10 +2027,29 @@ function getAppointmentsData(){
     morgen.sort((a,b)=>a.time.localeCompare(b.time));
     return { heute, morgen };
   }
-  return {
-    heute: [],
-    morgen: [],
-  };
+  const heute = [], morgen = [];
+  const now = new Date();
+  const tomorrow = new Date(); tomorrow.setDate(now.getDate()+1);
+  const fmtISO = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const todayISO = fmtISO(now), tomorrowISO = fmtISO(tomorrow);
+  MANUAL_APPOINTMENTS
+    .filter(a => !state.workshopToken || a.workshop_code === state.workshopToken)
+    .forEach(a => {
+      const order = orders.find(o => o.id === a.order_id);
+      const item = {
+        time: a.time,
+        title: a.title,
+        sub: [a.customer, order ? ('Auftrag #'+order.orderNumber) : null].filter(Boolean).join(' · ') || 'Kein Kunde verknüpft',
+        badge: a.status==='bestaetigt' ? 'Bestätigt' : 'Geplant',
+        cls: 'arbeit',
+        order: order ? String(order.orderNumber) : null,
+      };
+      if(a.date===todayISO) heute.push(item);
+      else if(a.date===tomorrowISO) morgen.push(item);
+    });
+  heute.sort((a,b)=>a.time.localeCompare(b.time));
+  morgen.sort((a,b)=>a.time.localeCompare(b.time));
+  return { heute, morgen };
 }
 function renderTermineView(ov){
   const {heute, morgen} = getAppointmentsData();
