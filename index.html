@@ -4041,6 +4041,52 @@ const AI_KB = [
       <li>Reparatur: Hochdruckpumpe komplett ersetzen, Kraftstoffdrucksensor mitprüfen</li>
       <li>Hinweis: bei manchen Modelljahren gab es Werksgarantie-Verlängerung – VIN/Servicehistorie prüfen</li>
     </ul>` },
+  { match:/e30.*(schaltplan|kabelbaum)|schaltplan.*e30|kabelbaum.*e30|e30.*farbcode|farbcode.*e30/i, reply:`<b>BMW E30 – Schaltplan-Übersicht (Verkabelungsschema)</b><ul>
+      <li>Deckt ab: 3er E30 (316–325i, auch Touring/Cabrio), 5er E28 &amp; E34 als Referenz</li>
+      <li>Farbcodes im Schaltplan: BK=Schwarz, BL=Blau, BR/TN=Braun, GE/Y=Gelb, GN=Grün, GR/GY=Grau, OR=Orange, PK/RS=Rosa, R/RT=Rot, V/VI=Violett, W/WS=Weiß</li>
+      <li>Enthaltene Schaltpläne: Starten/Laden/Hupe/Blinker (S.2) · Scheinwerfer/Nebelscheinwerfer/Innenlicht (S.3) · Check Control/Spiegel/Brems-Parklicht (S.4) · Motronic-Motorsteuerung (S.5–7) · Tempomat (S.8–9) · Zentralverriegelung/Alarm/Bordcomputer/Zusatzheizung/Uhr (S.10–12) · Scheinwerferwaschanlage (S.13–14) · elektrische Fenster (S.15–16) · Klimaanlage/Heizung (S.17–18) · Sitzheizung (S.19–20) · Memory-Sitze (S.21–23) · Sitze ohne Memory (S.24–25) · Radio (S.26–27) · L-Jetronic (S.28)</li>
+      <li>Hinweis: Details (genaue Pinbelegung/Stecker) im hinterlegten PDF-Dokument nachschlagen</li>
+    </ul>` },
+  { match:/e30.*motronic|motronic.*e30/i, reply:`<b>BMW E30 – Motronic-Kabelbaum (Schaltplan S.5–7)</b><ul>
+      <li>Zentrale Steuergeräte-Kennung: 1 = Elektronisches Steuergerät (ESG)</li>
+      <li>Sensoren/Aktoren im Diagramm: Drosselklappenschalter (6), Luftstromsensor (7), Referenzmarkensensor (9), Kraftstoffeinspritzdüsen (25), Kühlmitteltemperatursensor (24), Öldruckschalter (12), elektrische Kraftstoffpumpe (30)</li>
+      <li>Zündung/Start: Zündspule (19), Verteiler (18), Starter (20), Lichtmaschine (21)</li>
+      <li>Diagnose: Diagnoseschaltung (14) am Motorstecker (15)</li>
+    </ul>` },
+  { match:/e30.*(zentralverriegelung|zzv|alarm|bordcomputer)|zentralverriegelung.*e30/i, reply:`<b>BMW E30 – Zentralverriegelung/Alarmanlage/Bordcomputer (Schaltplan S.10–12)</b><ul>
+      <li>Steuereinheit: zentrale Schlosssteuereinheit (4), Steuergerät Einbruchmeldeanlage (27)</li>
+      <li>Verriegelungsmotoren pro Tür einzeln verkabelt: Fahrertür (11), Beifahrertür (15), hintere Türen (21/25), Tankklappe (19), Kofferraum (17)</li>
+      <li>Türkontaktschalter (35–38) und Haubenkontakt (39) laufen zentral auf das Alarmsteuergerät</li>
+      <li>Bordcomputer-Anschluss an Instrumentencluster (61/63), Außentemperatursensor (53) und Digitaluhr (85)</li>
+    </ul>` },
+  { match:/e30.*fensterheber|fensterheber.*e30/i, reply:`<b>BMW E30 – Elektrische Fensterheber (Schaltplan S.15–16)</b><ul>
+      <li>Relais (Pos. 20) versorgt die Fensterheber-Sammelschiene (31I/31II)</li>
+      <li>Motoren einzeln je Tür: vorne links (16), vorne rechts (17), hinten links/rechts über separate Stecker (8/9)</li>
+      <li>Sicherheitsschalter (14) und Kindersicherung (15) unterbrechen bei Bedarf die Steuerleitung</li>
+      <li>Häufige Praxis-Ursache bei Ausfall: Kontaktprobleme an den Fensterheberschaltern oder der Steckverbindung in der Tür (Kabelbruch durch Türbewegung)</li>
+    </ul>` },
+  { match:/e30.*(klimaanlage|klima\b)|klimaanlage.*e30/i, reply:`<b>BMW E30 – Klimaanlage/Heizung (Schaltplan S.17–18)</b><ul>
+      <li>Steuergerät Klimaanlage (16), Schalter Klimaanlage (13)</li>
+      <li>Temperaturschalter zweistufig: 91°C Stufe I (11), 99°C Stufe II (12)</li>
+      <li>Elektromagnetische Kupplung Kompressor (28) wird über Hochdruck-Pressostat (20) abgesichert</li>
+      <li>Zusatzlüfter-Relais Stufe I/II (18/19) je nach Kühlmitteltemperatur</li>
+    </ul>` },
+  { match:/e30.*(sitzheizung|memory.*sitz|sitz.*memory)|sitzheizung.*e30/i, reply:`<b>BMW E30 – Sitzheizung &amp; Memory-Sitze (Schaltplan S.19–23)</b><ul>
+      <li>Sitzheizung: separate Schalter/Relais je Fahrer-/Beifahrerseite (Pos. 3/8), einfacher Stromkreis ohne Steuergerät</li>
+      <li>Memory-Sitze: elektronisches Steuergerät unter dem Sitz (Pos. 14), Speicherschalter (Pos. 25) sichert Rückenlehnen-, Höhen- und Kopfstützenposition</li>
+      <li>Motoren bei Memory-Sitzen: Rückenlehne, Höhe vorne/hinten, Kopfstütze – je eigener Kanal am Steuergerät</li>
+    </ul>` },
+  { match:/e30.*radio|radio.*e30/i, reply:`<b>BMW E30 – Radio-Verkabelung (Schaltplan S.26–27, frühe Modelle)</b><ul>
+      <li>Lautsprecher: vorne links/rechts (Pos. 1/2), hinten links/rechts (Pos. 3/13), Türlautsprecher links/rechts (Pos. 7/8)</li>
+      <li>Verstärker (Pos. 6) sitzt zwischen Radio und Lautsprechern bei entsprechender Ausstattung</li>
+      <li>Stromantenne über eigene Steuerleitung (Pos. 10), Sondergeräte-Stecker RA12 für Nachrüstungen</li>
+    </ul>` },
+  { match:/e30.*(l-jetronic|ljetronic)|l-jetronic.*e30/i, reply:`<b>BMW E30 – L-Jetronic-Kabelbaum (Schaltplan S.28)</b><ul>
+      <li>Einspritzsteuergerät (Pos. 11) verarbeitet Signale von Luftstromsensor (14), Drosselklappenschalter (13), Kühlmittelsensor (10)</li>
+      <li>Kraftstoffpumpenrelais (Pos. 16) schaltet die Kraftstoffpumpe über Motorstecker-Pin C3/C13</li>
+      <li>Zündung: Zündspule (3), Verteiler (2) mit Impulsgeber, Zündmodul (17)</li>
+      <li>Diagnosestecker vorhanden für Fehlerauslesung am Steuergerät</li>
+    </ul>` },
 ];
 function renderAiPanel(){
   const panel = document.getElementById('aiPanel');
