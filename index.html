@@ -4208,15 +4208,30 @@ const partsCatalog = [
   {code:'11427566327', name:'Ölfilter', oem:'11427566327', bestand:28, lagerplatz:'Regal A-02', kompatibel:true},
   {code:'8K0698151', name:'Bremsbelagsatz hinten (Audi)', oem:'8K0698151', bestand:4, lagerplatz:'Regal C-05', kompatibel:false},
 ];
+let _pdfModalBlobUrl = null;
+function _dataUriToBlobUrl(dataUri){
+  const commaIdx = dataUri.indexOf(',');
+  const meta = dataUri.slice(5, commaIdx); // strip "data:"
+  const mime = meta.split(';')[0] || 'application/pdf';
+  const base64 = dataUri.slice(commaIdx + 1);
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for(let i=0;i<len;i++) bytes[i] = binary.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], {type: mime}));
+}
 function openPdfModal(dataUri, title){
   document.getElementById('pdfModalTitle').textContent = title || 'Dokument';
   document.getElementById('pdfModalClose').innerHTML = iconClose;
-  document.getElementById('pdfModalFrame').src = dataUri;
+  if(_pdfModalBlobUrl){ URL.revokeObjectURL(_pdfModalBlobUrl); _pdfModalBlobUrl = null; }
+  _pdfModalBlobUrl = _dataUriToBlobUrl(dataUri);
+  document.getElementById('pdfModalFrame').src = _pdfModalBlobUrl;
   document.getElementById('pdfModal').style.display='flex';
 }
 function closePdfModal(){
   document.getElementById('pdfModal').style.display='none';
   document.getElementById('pdfModalFrame').src = 'about:blank';
+  if(_pdfModalBlobUrl){ URL.revokeObjectURL(_pdfModalBlobUrl); _pdfModalBlobUrl = null; }
 }
 function openScannerModal(){
   const body = document.getElementById('closeOrderModalBody');
