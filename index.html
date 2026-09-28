@@ -3829,6 +3829,50 @@ function updateNoteBadge(){
 const aiChat = [
   {from:'bot', text:'Hallo! Frag mich nach Fehlercodes, Geräuschen oder Reparaturschritten – z.B. "Fehlercode P0401" oder "BMW F31 klackert vorne".'},
 ];
+// PROVISORISCH: eingelagerte Reifensätze (Base44 TireSet-Entity) laufen
+// noch nicht über getTabletData in die App. Bis der Backend-Fix da ist,
+// werden sie hier für die KI-Namenssuche manuell gepflegt. Neuen
+// Reifensatz ergänzen: einfach ein Objekt unten anhängen.
+const TIRE_SETS = [
+  { customer:'Max Mustermann', brand:'Michelin', model:'Pilot Sport 4', size:'225/45 R17 94Y', season:'sommer', hall:'A', rack:'01', level:'01', compartment:'01', plate:'M-AB-123', condition:'mittel', tread:3.5 },
+  { customer:'Max Mustermann', brand:'Michelin', model:'Pilot Sport 4', size:'225/45 R17 Y97', season:'sommer', hall:'A', rack:'01', level:'01', compartment:'01', plate:'AB-M-2510', condition:'gut', tread:4 },
+  { customer:'Frank Zimmer', brand:'Michelin', model:'Pilot Sport 4', size:'245/40 R18 93Y', season:'sommer', hall:'B', rack:'01', level:'01', compartment:'01', plate:'M-QR 2468', condition:'gut', tread:4 },
+  { customer:'Nina Lang', brand:'Continental', model:'WinterContact TS870', size:'215/60 R16 95H', season:'winter', hall:'B', rack:'01', level:'02', compartment:'01', plate:'M-ST 9753', condition:'mittel', tread:7.7 },
+  { customer:'Max Mustermann', brand:'Bridgestone', model:'Turanza T005', size:'235/55 R19 105V', season:'sommer', hall:'B', rack:'02', level:'01', compartment:'02', plate:'M-AB 1234', condition:'gut', tread:7.9 },
+  { customer:'Anna Schmidt', brand:'Michelin', model:'CrossClimate 2', size:'195/65 R15 91T', season:'ganzjahr', hall:'B', rack:'02', level:'02', compartment:'02', plate:'M-CD 5678', condition:'neu', tread:7.2 },
+  { customer:'Tom Weber', brand:'Continental', model:'PremiumContact 6', size:'225/45 R17 94Y', season:'sommer', hall:'B', rack:'03', level:'01', compartment:'03', plate:'M-EF 9012', condition:'neu', tread:4.2 },
+  { customer:'Lisa Klein', brand:'Dunlop', model:'Winter Sport 5', size:'205/55 R16 91H', season:'winter', hall:'B', rack:'03', level:'02', compartment:'03', plate:'M-GH 3456', condition:'gut', tread:6 },
+  { customer:'Peter Müller', brand:'Pirelli', model:'Cinturato P7', size:'245/40 R18 93Y', season:'sommer', hall:'B', rack:'04', level:'01', compartment:'04', plate:'M-IJ 7890', condition:'gut', tread:6.1 },
+  { customer:'Sara Jones', brand:'Goodyear', model:'UltraGrip 9', size:'215/60 R16 95H', season:'winter', hall:'B', rack:'04', level:'02', compartment:'04', plate:'M-KL 2345', condition:'mittel', tread:3.6 },
+  { customer:'Klaus Bauer', brand:'Michelin', model:'Pilot Sport 4', size:'235/55 R19 105V', season:'sommer', hall:'C', rack:'01', level:'01', compartment:'01', plate:'M-MN 6789', condition:'gut', tread:3.1 },
+  { customer:'Julia Roth', brand:'Continental', model:'WinterContact TS870', size:'195/65 R15 91T', season:'winter', hall:'C', rack:'01', level:'02', compartment:'01', plate:'M-OP 1357', condition:'neu', tread:7.6 },
+  { customer:'Frank Zimmer', brand:'Bridgestone', model:'Turanza T005', size:'225/45 R17 94Y', season:'sommer', hall:'C', rack:'02', level:'01', compartment:'02', plate:'M-QR 2468', condition:'neu', tread:5.6 },
+  { customer:'Nina Lang', brand:'Michelin', model:'CrossClimate 2', size:'205/55 R16 91H', season:'ganzjahr', hall:'C', rack:'02', level:'02', compartment:'02', plate:'M-ST 9753', condition:'gut', tread:7.1 },
+  { customer:'Max Mustermann', brand:'Michelin', model:'Pilot Sport 4', size:'225/45 R17 94Y', season:'sommer', hall:'A', rack:'01', level:'01', compartment:'01', plate:'M-AB 1234', condition:'neu', tread:5.9 },
+  { customer:'Anna Schmidt', brand:'Continental', model:'WinterContact TS870', size:'205/55 R16 91H', season:'winter', hall:'A', rack:'01', level:'02', compartment:'01', plate:'M-CD 5678', condition:'gut', tread:3.5 },
+  { customer:'Tom Weber', brand:'Bridgestone', model:'Turanza T005', size:'245/40 R18 93Y', season:'sommer', hall:'A', rack:'02', level:'01', compartment:'02', plate:'M-EF 9012', condition:'gut', tread:5.1 },
+  { customer:'Lisa Klein', brand:'Michelin', model:'CrossClimate 2', size:'215/60 R16 95H', season:'ganzjahr', hall:'A', rack:'02', level:'02', compartment:'02', plate:'M-GH 3456', condition:'mittel', tread:7.3 },
+  { customer:'Peter Müller', brand:'Continental', model:'PremiumContact 6', size:'235/55 R19 105V', season:'sommer', hall:'A', rack:'03', level:'01', compartment:'03', plate:'M-IJ 7890', condition:'gut', tread:3.2 },
+  { customer:'Sara Jones', brand:'Dunlop', model:'Winter Sport 5', size:'195/65 R15 91T', season:'winter', hall:'A', rack:'03', level:'02', compartment:'03', plate:'M-KL 2345', condition:'neu', tread:5.8 },
+  { customer:'Klaus Bauer', brand:'Pirelli', model:'Cinturato P7', size:'225/45 R17 94Y', season:'sommer', hall:'A', rack:'04', level:'01', compartment:'04', plate:'M-MN 6789', condition:'neu', tread:5.6 },
+  { customer:'Julia Roth', brand:'Goodyear', model:'UltraGrip 9', size:'205/55 R16 91H', season:'winter', hall:'A', rack:'04', level:'02', compartment:'04', plate:'M-OP 1357', condition:'gut', tread:4.2 },
+];
+const tireSeasonLabel = { sommer:'Sommerreifen', winter:'Winterreifen', ganzjahr:'Ganzjahresreifen' };
+// Findet eingelagerte Reifensätze anhand eines frei formulierten Namens
+// in der Nutzerfrage (z.B. "wo ist der reifensatz von Max Mustermann").
+function findTireSets(query){
+  const stop = ['wo','ist','sind','wer','der','die','das','von','fuer','für','hat','reifensatz','reifensätze','reifensaetze','reifen','satz','saetze','kunde','kunden','kundin','herr','herrn','frau','bitte','mal','finde','find','such','suche','lager','lagert','steht','stehen','liegt','liegen'];
+  const words = query.toLowerCase()
+    .replace(/[^a-zà-ÿäöüß0-9\s]/gi,' ')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !stop.includes(w));
+  if(!words.length) return [];
+  return TIRE_SETS.filter(t=>{
+    const name = t.customer.toLowerCase();
+    return words.some(w => name.includes(w));
+  });
+}
+
 const AI_KB = [
   { match:/p0401/i, reply:`<b>P0401 – AGR-System, unzureichender Durchfluss</b><ul>
       <li>Mögliche Ursache: AGR-Ventil verkokt oder klemmt</li>
@@ -3985,8 +4029,24 @@ function aiAsk(){
   if(!input || !input.value.trim()) return;
   const q = input.value.trim();
   aiChat.push({from:'user', text:q});
-  const hit = AI_KB.find(k=>k.match.test(q));
-  aiChat.push({from:'bot', text: hit ? hit.reply : 'Dazu habe ich aktuell keine hinterlegten Informationen. Die KI-Wissensdatenbank wird laufend erweitert – versuch es z.B. mit einem Fehlercode oder Stichwort wie "Bremse" oder "Öl".'});
+
+  let replyHtml = null;
+  if(/reifen/i.test(q)){
+    const matches = findTireSets(q);
+    if(matches.length){
+      replyHtml = `<b>${matches.length===1?'Reifensatz gefunden':'Reifensätze gefunden ('+matches.length+')'}</b><ul>` +
+        matches.map(t=>`<li><b>${t.customer}</b> – ${t.brand} ${t.model}, ${t.size} (${tireSeasonLabel[t.season]||t.season})<br>
+          📍 Halle ${t.hall}, Regal ${t.rack}, Ebene ${t.level}, Fach ${t.compartment}${t.plate?` · Kennzeichen ${t.plate}`:''} · Zustand: ${t.condition}, Profil ${t.tread} mm</li>`).join('') +
+        `</ul>`;
+    } else {
+      replyHtml = `Für diese Suche habe ich keinen eingelagerten Reifensatz gefunden. Prüfe die Schreibweise des Namens oder wirf einen Blick ins Reifenlager.`;
+    }
+  }
+  if(!replyHtml){
+    const hit = AI_KB.find(k=>k.match.test(q));
+    replyHtml = hit ? hit.reply : 'Dazu habe ich aktuell keine hinterlegten Informationen. Die KI-Wissensdatenbank wird laufend erweitert – versuch es z.B. mit einem Fehlercode, Stichwort wie "Bremse" oder "Öl", oder frag nach einem Reifensatz per Kundenname.';
+  }
+  aiChat.push({from:'bot', text: replyHtml});
   input.value='';
   renderAiPanel();
   const inp = document.getElementById('aiInput');
