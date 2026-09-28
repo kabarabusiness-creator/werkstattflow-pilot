@@ -3855,6 +3855,111 @@ const AI_KB = [
       <li>Neues Öl nach Herstellerfreigabe einfüllen</li>
       <li>Ölstand nach 5 Minuten Wartezeit kontrollieren</li>
     </ul>` },
+  { match:/p0300|zündaussetzer|verbrennungsaussetzer/i, reply:`<b>P0300 – Zündaussetzer (mehrere Zylinder)</b><ul>
+      <li>Mögliche Ursachen: Zündkerzen verschlissen, Zündspule defekt, Kraftstoffzufuhr mangelhaft</li>
+      <li>Prüfung: Zylinderindividuelle Aussetzererkennung im Diagnosegerät auslesen</li>
+      <li>Reparatur: Zündkerzen/-spulen tauschen, Kompression prüfen wenn Ursache unklar</li>
+      <li>Hinweis: bei Ruckeln unter Last zusätzlich Kraftstoffdruck prüfen</li>
+    </ul>` },
+  { match:/p0420|katalysator|kat\b/i, reply:`<b>P0420 – Katalysator-Wirkungsgrad unter Schwelle</b><ul>
+      <li>Mögliche Ursachen: Katalysator gealtert/beschädigt, vorgelagerte Lambdasonde defekt, Abgasleck vor Sonde</li>
+      <li>Prüfung: beide Lambdasonden-Signale vergleichen, Abgasanlage auf Undichtigkeiten prüfen</li>
+      <li>Reparatur: erst Sonden/Dichtigkeit prüfen, Katalysator nur bei bestätigtem Defekt tauschen</li>
+    </ul>` },
+  { match:/p0171|p0174|gemisch.*mager|mager.*gemisch/i, reply:`<b>P0171/P0174 – Gemisch zu mager</b><ul>
+      <li>Mögliche Ursachen: Nebenluft (undichter Ansaugtrakt), verschmutzter Luftmassenmesser, schwache Kraftstoffpumpe</li>
+      <li>Prüfung: Rauchtest Ansaugtrakt, Luftmassenmesser reinigen/prüfen, Kraftstoffdruck messen</li>
+      <li>Hinweis: Bank 1 = Zylinder mit Zylinder 1, Bank 2 = gegenüberliegende Bank bei V-Motoren</li>
+    </ul>` },
+  { match:/p0128|thermostat|kühlmitteltemperatur/i, reply:`<b>P0128 – Kühlmitteltemperatur unterhalb Regelwert</b><ul>
+      <li>Mögliche Ursache: Thermostat klemmt offen</li>
+      <li>Prüfung: Warmlaufverhalten beobachten, Motor erreicht Betriebstemperatur nicht in erwarteter Zeit</li>
+      <li>Reparatur: Thermostat ersetzen, danach Kühlsystem entlüften</li>
+    </ul>` },
+  { match:/batterie|starthilfe/i, reply:`<b>Batterie &amp; Starthilfe</b><ul>
+      <li>Ruhestrom prüfen (Sollwert meist &lt; 50 mA, Herstellerangabe beachten)</li>
+      <li>Batterietest: Ladezustand + Kaltstartstrom (CCA) mit Batterietester prüfen</li>
+      <li>Starthilfe: Plus zuerst an leere Batterie, Minus an Massepunkt (nicht direkt an leere Batterie), Reihenfolge beim Abklemmen umgekehrt</li>
+      <li>Nach Batterietausch: Anlernvorgang/Registrierung bei vielen Fahrzeugen nötig (Batteriemanagement)</li>
+    </ul>` },
+  { match:/zahnriemen|steuerriemen|zahnriemenwechsel/i, reply:`<b>Zahnriemen/Steuerriemen – Wechsel</b><ul>
+      <li>Wechselintervall herstellerspezifisch, üblich 60.000–160.000 km oder 5–10 Jahre</li>
+      <li>Bei Wechsel: Wasserpumpe, Spannrolle &amp; Umlenkrolle mittauschen (Satz)</li>
+      <li>Bei Riss/Sprung: Zylinderkopfschaden möglich (Ventilschäden bei Interferenzmotor prüfen)</li>
+      <li>Nach Einbau: Steuerzeiten mit Werkzeugsatz exakt nach Herstellervorgabe fixieren</li>
+    </ul>` },
+  { match:/kupplung/i, reply:`<b>Kupplung – Verschleißanzeichen</b><ul>
+      <li>Rutschen: Motordrehzahl steigt ohne entsprechenden Vortrieb, v.a. bei Last/Steigung</li>
+      <li>Rupfen beim Anfahren: Mitnehmerscheibe verölt oder verschlissen</li>
+      <li>Kupplungspedal-Spiel/Geräusche: Ausrücklager prüfen</li>
+      <li>Arbeitszeit Kupplungssatz: stark modellabhängig (oft 3–6 Std., Getriebeausbau nötig)</li>
+    </ul>` },
+  { match:/klima|klimaanlage|klimaservice/i, reply:`<b>Klimaanlage/Klimaservice</b><ul>
+      <li>Klimaservice: Kältemittel absaugen, Anlage auf Dichtigkeit prüfen, evakuieren, neu befüllen (Menge nach Herstellerangabe)</li>
+      <li>Kältemitteltyp beachten: R134a oder R1234yf – nicht verwechseln</li>
+      <li>Schwacher Kühleffekt: meist Kältemittelverlust durch Leckage, UV-Kontrastmittel zur Lecksuche nutzen</li>
+      <li>Unangenehmer Geruch: Verdampfer-/Innenraumfilter prüfen, ggf. Klimaanlagen-Desinfektion</li>
+    </ul>` },
+  { match:/zündkerze/i, reply:`<b>Zündkerzenwechsel</b><ul>
+      <li>Wechselintervall: meist 30.000–60.000 km (Iridium/Platin-Kerzen auch deutlich länger), Herstellerangabe beachten</li>
+      <li>Elektrodenabstand vor Einbau prüfen (falls nicht vorjustiert)</li>
+      <li>Anzugsdrehmoment beachten – nicht überdrehen (Gewindeschaden im Zylinderkopf möglich)</li>
+      <li>Zündspule bei Wechsel auf Risse/Ölspuren im Kerzenschacht prüfen</li>
+    </ul>` },
+  { match:/kühlmittel|kühlwasser|kühlsystem/i, reply:`<b>Kühlmittel wechseln</b><ul>
+      <li>Kühlsystem drucklos machen, Altkühlmittel vollständig ablassen (auch Motorblock-Ablassschraube falls vorhanden)</li>
+      <li>Nur freigegebenes Kühlmittel-Konzentrat mischen (Frostschutz i.d.R. bis -25°C bis -35°C je nach Klima)</li>
+      <li>Nach Befüllung: System entlüften (Entlüftungsschraube/-ventil), Motor mit offenem Deckel/Ventil warmlaufen lassen</li>
+      <li>Kühlmittelstand nach Abkühlen erneut kontrollieren</li>
+    </ul>` },
+  { match:/bremsflüssigkeit|dot\s?4|dot\s?3/i, reply:`<b>Bremsflüssigkeit wechseln</b><ul>
+      <li>Wechselintervall: meist alle 2 Jahre unabhängig vom Kilometerstand (Wasseraufnahme durch Hygroskopie)</li>
+      <li>Nur freigegebene Spezifikation verwenden (meist DOT 4, Herstellerangabe beachten)</li>
+      <li>Reihenfolge beim Entlüften: vom Rad mit dem längsten Bremsleitungsweg zum kürzesten (meist hinten rechts → vorne links)</li>
+      <li>Nach Wechsel: Bremspedalgefühl und Dichtigkeit prüfen</li>
+    </ul>` },
+  { match:/stoßdämpfer|fahrwerk/i, reply:`<b>Stoßdämpfer/Fahrwerk prüfen</b><ul>
+      <li>Sichtprüfung: Ölaustritt am Dämpfer = Defekt, immer achsweise (paarweise) tauschen</li>
+      <li>Funktionstest: Fahrzeugecke eindrücken – schwingt sie mehr als 1–1,5x nach, Dämpfer verschlissen</li>
+      <li>Begleitend prüfen: Domlager, Federn auf Setzung/Bruch, Koppelstangen</li>
+    </ul>` },
+  { match:/achsvermessung|spur\b|spureinstellung/i, reply:`<b>Achsvermessung/Spureinstellung</b><ul>
+      <li>Vorher prüfen: Reifendruck korrekt, Fahrwerk unbeschädigt, Fahrzeug auf Nennlast/-beladung</li>
+      <li>Typische Ursache für einseitigen Verschleiß: Spur oder Sturz außerhalb Toleranz</li>
+      <li>Nach Fahrwerksarbeiten (Federn, Querlenker, Spurstangen) immer Achsvermessung empfehlen</li>
+    </ul>` },
+  { match:/hu\b|au\b|tüv|hauptuntersuchung/i, reply:`<b>HU/AU-Vorbereitung (TÜV)</b><ul>
+      <li>Prüfpunkte vorab checken: Beleuchtung, Bremsen, Reifenprofil (min. 1,6 mm, empfohlen mehr), Abgaswerte</li>
+      <li>Fälligkeitsplakette am Kennzeichen kontrollieren, mit next_service_date im Auftrag abgleichen</li>
+      <li>Häufige Mängel: Bremsscheiben korrodiert, Ölundichtigkeiten, defekte Beleuchtung, Achsspiel</li>
+      <li>Bei Mängeln: Frist zur Nachbesserung beachten (i.d.R. 1 Monat für Nachprüfung)</li>
+    </ul>` },
+  { match:/adblue/i, reply:`<b>AdBlue/SCR-System</b><ul>
+      <li>Warnmeldung "Restreichweite" ernst nehmen – bei leerem Tank verweigert der Motor nach Fahrtende den Neustart</li>
+      <li>Nur AdBlue nach ISO 22241 verwenden (32,5% Harnstofflösung), Verunreinigung vermeiden</li>
+      <li>Fehlercodes im SCR-System: oft Dosierventil, NOx-Sensor oder Tankheizung betroffen</li>
+    </ul>` },
+  { match:/anlasser|springt nicht an|startet nicht/i, reply:`<b>Anlasser/Startprobleme</b><ul>
+      <li>Kein Geräusch beim Startversuch: Batterie, Massepunkte, Zündschloss/Starterrelais prüfen</li>
+      <li>Klacken ohne Durchdrehen: Anlasser-Magnetschalter oder Ritzel defekt, oder Batterie zu schwach</li>
+      <li>Motor dreht durch, springt aber nicht an: Kraftstoffversorgung, Zündung, Wegfahrsperre prüfen</li>
+    </ul>` },
+  { match:/lichtmaschine|generator|ladekontrolle/i, reply:`<b>Lichtmaschine/Ladeproblem</b><ul>
+      <li>Ladekontrollleuchte an bei laufendem Motor: Ladespannung messen (Sollwert meist 13,5–14,8 V)</li>
+      <li>Mögliche Ursachen: Keilrippenriemen gerissen/rutscht, Lichtmaschine oder Regler defekt</li>
+      <li>Batterie entlädt sich trotz Fahrbetrieb: auf jeden Fall vor Batterietausch die Ladeleistung prüfen</li>
+    </ul>` },
+  { match:/scheibenwischer|scheibenwaschanlage/i, reply:`<b>Scheibenwischer/Scheibenwaschanlage</b><ul>
+      <li>Schlierenbildung: Wischerblätter tauschen, Scheibe vorher fettfrei reinigen</li>
+      <li>Waschanlage fördert nicht: Pumpe, Düsen (verstopft) und Sicherung prüfen</li>
+      <li>Bei Frost: nur frostsicheres Scheibenreinigungsmittel verwenden (Frostschutzgrad prüfen)</li>
+    </ul>` },
+  { match:/auspuff|abgasanlage|rauch\b/i, reply:`<b>Auspuff/Abgasanlage – Rauchfarben-Diagnose</b><ul>
+      <li>Blauer Rauch: Motor verbrennt Öl (Kolbenringe/Ventilschaftdichtungen)</li>
+      <li>Weißer Rauch (dauerhaft, nicht nur Kondenswasser): Kühlmittel gelangt in Brennraum (Zylinderkopfdichtung)</li>
+      <li>Schwarzer Rauch: Gemisch zu fett, oft Einspritzung oder Luftfilter betroffen</li>
+      <li>Zusätzlich: Anlage auf Durchrostung/Undichtigkeiten und Aufhängung prüfen</li>
+    </ul>` },
 ];
 function renderAiPanel(){
   const panel = document.getElementById('aiPanel');
