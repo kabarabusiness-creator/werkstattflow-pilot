@@ -4004,6 +4004,43 @@ const AI_KB = [
       <li>Schwarzer Rauch: Gemisch zu fett, oft Einspritzung oder Luftfilter betroffen</li>
       <li>Zusätzlich: Anlage auf Durchrostung/Undichtigkeiten und Aufhängung prüfen</li>
     </ul>` },
+  { match:/n47.*(steuerkette|kette)|steuerkette.*n47|bmw.*(diesel).*kette/i, reply:`<b>BMW N47 (Diesel) – Steuerkettenverschleiß</b><ul>
+      <li>Betrifft v.a. BMW N47 (2007–2014, 118d/120d/318d/320d u.a.) – Steuerkette liegt motorseitig hinten, sehr aufwendiger Wechsel</li>
+      <li>Anzeichen: Rasseln/Klappern beim Kaltstart, Fehlercode Nockenwellen-/Kurbelwellensensor-Korrelation</li>
+      <li>Bei Kettenriss: Motortotalschaden (Interferenzmotor) möglich – bei Verdacht keine Probefahrt mehr</li>
+      <li>Reparatur: Steuerkettensatz (Kette, Spanner, Führungsschienen) – Motor/Getriebe muss meist abgesenkt werden</li>
+      <li>Arbeitszeit: ca. 8–12 Std. je nach Modell</li>
+    </ul>` },
+  { match:/bmw.*(ventildeckel|öllecl|undicht)|ventildeckeldichtung.*bmw|n52|n54|n55/i, reply:`<b>BMW N52/N54/N55 – Ventildeckeldichtung/Ölundichtigkeit</b><ul>
+      <li>Klassische Ölleckage-Stelle bei vielen BMW-Reihenmotoren: Ventildeckeldichtung wird mit den Jahren spröde</li>
+      <li>Kontrolle: Motor sauber machen, Probefahrt, danach auf frische Ölspuren am Ventildeckel/Zündspulenschächten prüfen</li>
+      <li>Reparatur: Ventildeckeldichtung inkl. Zündspulendichtringe ersetzen</li>
+      <li>Hinweis: Öl in Zündspulenschächten kann Zündaussetzer (P0300er-Codes) verursachen</li>
+    </ul>` },
+  { match:/vanos/i, reply:`<b>BMW VANOS – Nockenwellenverstellung</b><ul>
+      <li>Anzeichen für Defekt: Rasseln im Kaltstart (Rasselgeräusch von vorne am Motor), Leistungsloch im mittleren Drehzahlbereich</li>
+      <li>Häufige Ursache: Magnetventil verschlammt/verklebt (Ölverkokung), Dichtringe am VANOS-Kolben porös</li>
+      <li>Prüfung: VANOS-Solltest per Diagnosegerät, Ölzustand/Ölwechselintervall prüfen</li>
+      <li>Reparatur: VANOS-Magnetventile reinigen/tauschen, bei Verschleiß VANOS-Einheit überholen</li>
+    </ul>` },
+  { match:/bmw.*(wasserpumpe|kühlmittelverlust)|elektrische wasserpumpe/i, reply:`<b>BMW – Elektrische Wasserpumpe</b><ul>
+      <li>Viele BMW-Reihenmotoren (u.a. N20, N51, N52, N54, N55) nutzen eine elektrische Wasserpumpe – typisches Verschleißteil</li>
+      <li>Anzeichen: Temperaturschwankungen, Kühlmittelverlust ohne sichtbares Leck, Fehlercode Kühlmittelpumpe/Regelung</li>
+      <li>Reparatur: Wasserpumpe komplett ersetzen (nicht reparierbar), gleichzeitig Thermostat prüfen</li>
+      <li>Hinweis: nach Tausch Kühlsystem sorgfältig entlüften (BMW-spezifisches Befüllverfahren beachten)</li>
+    </ul>` },
+  { match:/n63|bmw.*v8.*(ölverbrauch|ölverlust)/i, reply:`<b>BMW N63/N63TU (V8) – bekannte Schwachstellen</b><ul>
+      <li>Erhöhter Ölverbrauch: Ventilschaftdichtungen/Kolbenringe – bei manchen Baujahren Kulanz-/Rückrufaktionen möglich, VIN prüfen</li>
+      <li>Abgaskrümmerdichtungen (innenliegend, zwischen den Zylinderbänken) undicht – Ansaugung von Abgas, Klopfgeräusch</li>
+      <li>Hochdruckpumpe und Ladeluftkühler-Kondensat ebenfalls bekannte Ausfallpunkte</li>
+      <li>Empfehlung: Ölstand bei jedem Service besonders im Blick behalten, kurze Ölwechselintervalle einhalten</li>
+    </ul>` },
+  { match:/n54|n55|hochdruckpumpe|hpfp/i, reply:`<b>BMW N54/N55 – Hochdruckpumpe (HPFP)</b><ul>
+      <li>Bekannte Schwachstelle bei Direkteinspritzer-Motoren N54/N55 – Ausfall meist ohne Vorwarnung</li>
+      <li>Anzeichen: Motor startet nicht/stirbt ab, Leistungsverlust, Fehlercode Kraftstoffdruck-Regelabweichung</li>
+      <li>Reparatur: Hochdruckpumpe komplett ersetzen, Kraftstoffdrucksensor mitprüfen</li>
+      <li>Hinweis: bei manchen Modelljahren gab es Werksgarantie-Verlängerung – VIN/Servicehistorie prüfen</li>
+    </ul>` },
 ];
 function renderAiPanel(){
   const panel = document.getElementById('aiPanel');
