@@ -132,6 +132,20 @@
     border-radius:10px;padding:14px;font-size:16px;text-align:center;letter-spacing:1px;margin:16px 0;}
   .login-card .btn{width:100%;}
   .error-msg{color:var(--red);font-size:13px;min-height:18px;margin-top:8px;}
+  .greet-title{font-size:20px;font-weight:700;}
+  .greet-sub{font-size:13px;color:var(--text-faint);margin-top:2px;}
+  .veh-photo{width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;margin:12px 0 2px;background:var(--panel2);}
+  .veh-photo img{width:100%;height:100%;object-fit:cover;display:block;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+  .demo-note{font-size:10.5px;color:var(--text-faint);margin-top:8px;}
+  .chat-list{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding:4px 2px;margin-bottom:10px;}
+  .chat-bubble{max-width:78%;padding:9px 12px;border-radius:14px;font-size:13.5px;line-height:1.45;}
+  .chat-bubble.kunde{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px;}
+  .chat-bubble.werkstatt{align-self:flex-start;background:var(--panel2);color:var(--text);border-bottom-left-radius:4px;}
+  .chat-meta{font-size:10px;opacity:.7;margin-top:3px;}
+  .chat-input-row{display:flex;gap:8px;}
+  .chat-input-row input{flex:1;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:11px 12px;font-size:13.5px;color:var(--text);}
+  .chat-note{font-size:11.5px;color:var(--text-faint);margin-top:8px;text-align:center;}
 </style>
 </head>
 <body>
@@ -193,7 +207,25 @@ const ANLIEGEN = [
   {key:'sonstiges', title:'Sonstiges', sub:'Beratung & anderes'},
 ];
 
-let state = { token:null, data:null, view:'dashboard', showBookForm:false, bookAnliegen:'fahrzeugabgabe', bookServiceId:null, bookDate:null, bookTime:null, bookChannel:'email' };
+let state = { token:null, data:null, view:'dashboard', showBookForm:false, bookAnliegen:'fahrzeugabgabe', bookServiceId:null, bookDate:null, bookTime:null, bookChannel:'email', chatDraft:'', chatSending:false, chatError:null };
+
+function firstName(name){
+  if(!name) return '';
+  return name.trim().split(/\s+/)[0];
+}
+function greeting(){
+  const h = new Date().getHours();
+  if(h < 11) return 'Guten Morgen';
+  if(h < 18) return 'Hallo';
+  return 'Guten Abend';
+}
+// Fahrzeugfoto: wird automatisch angezeigt, sobald die Werkstatt (im Tablet/Backend)
+// ein Foto zum Auftrag/Fahrzeug hinterlegt (Feld o.image_url). Ohne Foto bleibt der
+// Bereich einfach leer – es wird kein Platzhalter-/Fremdbild angezeigt.
+function vehiclePhotoHtml(o){
+  if(!o.image_url) return '';
+  return `<div class="veh-photo"><img src="${o.image_url}" alt="${(o.vehicle_brand||'')+' '+(o.vehicle_model||'')}" loading="lazy" onerror="this.parentElement.style.display='none'"></div>`;
+}
 
 document.getElementById('tokenInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 const urlParams = new URLSearchParams(window.location.search);
@@ -268,10 +300,16 @@ function renderDashboardView(){
   const simple = simplifiedStatus(o.status);
   const [title] = STATUS_BANNER_TEXT[o.status] || ['Status: ' + o.status];
   return `
+    <div style="padding:2px 4px 14px;">
+      <div class="greet-title">${greeting()}${firstName(o.customer_name) ? ', '+firstName(o.customer_name) : ''} 👋</div>
+      <div class="greet-sub">Willkommen in Ihrem AutoLeitwerk-Kundenportal</div>
+    </div>
+
     <div class="card">
       <div class="veh-label">🚗 Ihr Fahrzeug</div>
       <div class="veh-name">${o.vehicle_brand||''} ${o.vehicle_model||''}</div>
       <div class="veh-plate">${o.license_plate||''}</div>
+      ${vehiclePhotoHtml(o)}
       <div class="grid2" style="margin-top:14px;">
         <div class="mini-card">
           <div class="mini-label">Kilometerstand</div>
@@ -304,6 +342,7 @@ function renderServiceView(){
   return `
     <div class="toggle-book" style="border:none;text-align:left;padding:4px 0 12px;color:var(--accent2);" onclick="goToDashboard()">← Zurück zum Dashboard</div>
     ${renderStatusCard(o)}
+    ${renderChat()}
     ${renderServicebericht()}
     ${renderHuAuBerichte()}
     ${renderApprovals()}
@@ -320,6 +359,7 @@ function renderStatusCard(o){
       <div class="veh-label">🚗 Ihr Fahrzeug</div>
       <div class="veh-name">${o.vehicle_brand||''} ${o.vehicle_model||''}</div>
       <div class="veh-plate">${o.license_plate||''}</div>
+      ${vehiclePhotoHtml(o)}
 
       <div class="status-banner ${simple}">
         <div>
@@ -348,15 +388,73 @@ function renderStatusCard(o){
   `;
 }
 
+// Chat mit der Werkstatt. Nachrichten kommen (sobald vorhanden) über state.data.messages
+// aus der 'get'-Aktion mit; das Senden nutzt die Aktion 'message_send'. Unterstützt
+// portalApi diese Aktionen noch nicht, zeigt renderChat/sendMessage einen freundlichen
+// Hinweis statt eines Fehlers – kein Absturz, sobald die Function erweitert wird läuft
+// der Chat ohne weitere Änderungen hier.
+function renderChat(){
+  const msgs = (state.data.messages || []).slice().sort((a,b)=> (a.created_date||'').localeCompare(b.created_date||''));
+  return `
+    <div class="card">
+      <div class="card-title">💬 Nachrichten</div>
+      <div class="chat-list" id="chatList">
+        ${msgs.length ? msgs.map(m=>`
+          <div class="chat-bubble ${m.sender==='kunde'?'kunde':'werkstatt'}">
+            ${m.content||''}
+            <div class="chat-meta">${m.sender==='kunde' ? 'Sie' : (m.sender_name||'Werkstatt')}${m.created_date ? ' · '+fmtDDMM(fmtDate(m.created_date.slice(0,10))) : ''}</div>
+          </div>
+        `).join('') : `<div class="empty">Noch keine Nachrichten. Schreiben Sie uns, wenn Sie Fragen zu Ihrem Auftrag haben.</div>`}
+      </div>
+      <div class="chat-input-row">
+        <input type="text" id="chatInput" placeholder="Nachricht an die Werkstatt…" value="${(state.chatDraft||'').replace(/"/g,'&quot;')}" oninput="state.chatDraft=this.value" onkeydown="if(event.key==='Enter') sendMessage();" ${state.chatSending?'disabled':''}>
+        <button class="btn primary" style="flex:0 0 auto;padding:11px 16px;" onclick="sendMessage()" ${state.chatSending?'disabled':''}>Senden</button>
+      </div>
+      ${state.chatError ? `<div class="chat-note" style="color:var(--red);">${state.chatError}</div>` : `<div class="chat-note">Antworten der Werkstatt erscheinen hier.</div>`}
+    </div>
+  `;
+}
+
+async function sendMessage(){
+  const text = (state.chatDraft||'').trim();
+  if(!text || state.chatSending) return;
+  const o = state.data.order;
+  state.chatSending = true; state.chatError = null; render();
+  try{
+    await callPortal('message_send', {
+      order_id: o.id,
+      customer_token: state.token,
+      sender: 'kunde',
+      sender_name: o.customer_name,
+      content: text,
+    });
+    state.chatDraft = '';
+    await reload();
+  }catch(e){
+    state.chatError = 'Nachricht konnte gerade nicht gesendet werden – die Chat-Funktion wird noch eingerichtet.';
+  }finally{
+    state.chatSending = false;
+    render();
+    const list = document.getElementById('chatList');
+    if(list) list.scrollTop = list.scrollHeight;
+  }
+}
+
 function renderFaelligkeiten(o){
   const tuvDate = fmtDate(o.tuv_next_date);
   const serviceDate = fmtDate(o.next_service_date);
   const now = new Date();
   const tuvSoon = tuvDate && ((tuvDate-now)/(1000*3600*24) < 60);
+  const last = getLastServiceInfo();
+  const lastDate = last.log_date ? fmtDate(last.log_date) : null;
   return `
     <div class="card">
       <div class="card-title">🔧 Fälligkeiten</div>
-      <div class="grid2">
+      <div class="grid3">
+        <div class="mini-card">
+          <div class="mini-label">Letzter Service</div>
+          ${lastDate ? `<div class="mini-val">${fmtDDMM(lastDate)}</div>` : `<div class="mini-val missing">nicht hinterlegt</div>`}
+        </div>
         <div class="mini-card">
           <div class="mini-label">HU/AU fällig</div>
           ${tuvDate ? `<div class="mini-val ${tuvSoon?'warn':''}">${fmtDDMM(tuvDate)}</div>` : `<div class="mini-val missing">nicht hinterlegt</div>`}
@@ -366,6 +464,7 @@ function renderFaelligkeiten(o){
           ${serviceDate ? `<div class="mini-val">${fmtDDMM(serviceDate)}</div>` : `<div class="mini-val missing">nicht hinterlegt</div>`}
         </div>
       </div>
+      ${last.demo ? `<div class="demo-note">* Letzter Service: Beispielanzeige</div>` : ''}
     </div>
   `;
 }
@@ -382,9 +481,13 @@ const DEMO_SERVICEBERICHT = {
   employee_name: 'Marco Bianchi',
 };
 
-function renderServicebericht(){
+function getLastServiceInfo(){
   const logs = (state.data.workshop_logs || []).slice().sort((a,b)=> (b.log_date||b.created_date||'').localeCompare(a.log_date||a.created_date||''));
-  const last = logs[0] || DEMO_SERVICEBERICHT;
+  return logs[0] || DEMO_SERVICEBERICHT;
+}
+
+function renderServicebericht(){
+  const last = getLastServiceInfo();
   return `
     <div class="card">
       <div class="card-title">📄 Letzter Servicebericht${last.demo ? ' <span style="color:var(--accent2);font-weight:600;">(Demo)</span>' : ''}</div>
