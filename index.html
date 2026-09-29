@@ -4113,6 +4113,35 @@ const AI_KB = [
       <li>Zündung: Zündspule (3), Verteiler (2) mit Impulsgeber, Zündmodul (17)</li>
       <li>Diagnosestecker vorhanden für Fehlerauslesung am Steuergerät</li>
     </ul>` },
+  { match:/e92.*(hinterachse|differential|subframe)|hinterachse.*e92|subframe.*e92/i, reply:`<b>BMW E92 – Hinterachse/Differential-Aufhängung</b><ul>
+      <li>Bekannte Schwachstelle bei E90/E92/E93: die Differential-Aufnahme kann aus dem Blech der Karosserie ausreißen (v.a. bei sportlicher Fahrweise/Leistungssteigerung)</li>
+      <li>Anzeichen: dumpfes Klonken beim Gasgeben/-wegnehmen aus dem Heckbereich, sichtbare Risse am Blech bei Anhebung</li>
+      <li>Prüfung: Fahrzeug anheben, Differential-Aufnahme und Hinterachsträger-Lagerung auf Risse/Verformung sichtprüfen</li>
+      <li>Reparatur: bei bestätigtem Riss Verstärkungsblech/-kit einschweißen (kein reiner Teiletausch ausreichend)</li>
+    </ul>` },
+  { match:/s65|e92.*m3|m3.*e92|pleuellager/i, reply:`<b>BMW E92 M3 (S65 V8) – Pleuellager-Verschleiß</b><ul>
+      <li>Bekanntes Thema beim S65-V8: erhöhter Verschleiß der Pleuellager, v.a. bei frühen Baujahren (2007–2008)</li>
+      <li>Anzeichen: metallisches Klopfen/Rasseln aus dem Motorblock, oft last-/drehzahlabhängig, Warnleuchte Öldruck möglich</li>
+      <li>Prüfung: unbedingt vor Kauf/nach Auffälligkeit Ölanalyse (Spektralanalyse auf Metallabrieb) und Motor-Abhörtest im Kaltstart</li>
+      <li>Reparatur: bei bestätigtem Verschleiß Pleuellager satzweise tauschen (Motor muss dafür ausgebaut werden) – frühzeitige Diagnose spart Folgeschäden</li>
+    </ul>` },
+  { match:/disa|saugrohrklappe|ansaugbrücke.*rasseln/i, reply:`<b>BMW N52 (u.a. E92 325i/328i/330i) – DISA-Ventil</b><ul>
+      <li>DISA-Ventil (variable Saugrohrgeometrie) klappert im Leerlauf/unteren Drehzahlbereich, wenn die interne Feder bricht oder Lager verschleißen</li>
+      <li>Anzeichen: rasselndes/klackerndes Geräusch aus dem Ansaugbereich, meist bei ca. 2000–4000 U/min am deutlichsten</li>
+      <li>Reparatur: DISA-Ventil-Reparatursatz (Feder+Lager) oder komplettes Ventil tauschen – kein Sicherheitsrisiko, aber Dauerbetrieb kann Kleinteile ins Saugrohr fallen lassen</li>
+    </ul>` },
+  { match:/e92.*fensterheber|one.?touch.*fenster|fensterheber.*(reset|anlernen)/i, reply:`<b>BMW E90/E92 – Fensterheber „One-Touch“-Ausfall</b><ul>
+      <li>Typisches Symptom: Fenster lässt sich nur noch manuell (gehalten) auf/zu fahren, One-Touch-Automatik und Einklemmschutz reagieren nicht mehr</li>
+      <li>Ursache meist: Fensterheber-Steuerung hat die Referenzposition verloren (z.B. nach Batterietrennung oder mechanischem Widerstand)</li>
+      <li>Reparatur: Fensterheber neu anlernen – Fenster von Hand ganz hochfahren, Taste 3× über Anschlag halten (Anlernvorgang), je Tür einzeln wiederholen</li>
+      <li>Bleibt der Fehler bestehen: Fensterheberschalter oder Steuergerät in der Tür prüfen</li>
+    </ul>` },
+  { match:/e92.*(335i|n54).*(ladeluft|y-?rohr|chargepipe)|chargepipe|ladeluftrohr.*riss/i, reply:`<b>BMW E92 335i (N54) – Ladeluftrohr/Chargepipe-Riss</b><ul>
+      <li>Das werksseitige Kunststoff-Ladeluftrohr (Y-Pipe) zwischen den Turboladern neigt bei höherer Ladedrücken/Alterung zum Reißen</li>
+      <li>Anzeichen: spürbarer Leistungsverlust, Fehlercode Ladedruck-Regelabweichung, teils hörbares Zischen unter Last</li>
+      <li>Reparatur: Ladeluftrohr ersetzen – im Nachrüstmarkt sind verstärkte Aluminium-Chargepipes üblich (haltbarer als Original-Kunststoffteil)</li>
+      <li>Zusätzlich prüfen: Wastegate-Rasseln im Leerlauf (separates, bekanntes N54-Thema, meist unkritisch aber hörbar störend)</li>
+    </ul>` },
 ];
 function renderAiPanel(){
   const panel = document.getElementById('aiPanel');
