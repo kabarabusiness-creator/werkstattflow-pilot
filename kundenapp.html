@@ -66,7 +66,7 @@
   .approval-desc{font-size:13px;color:var(--text-faint);margin-bottom:8px;line-height:1.4;}
   .approval-cost{font-size:14px;font-weight:600;color:var(--accent2);margin-bottom:10px;}
   .approval-status{font-size:12.5px;padding:4px 10px;border-radius:14px;display:inline-block;margin-bottom:8px;font-weight:600;}
-  .approval-status.offen{background:var(--amberbg);color:var(--amber);}
+  .approval-status.offen,.approval-status.ausstehend{background:var(--amberbg);color:var(--amber);}
   .approval-status.freigegeben{background:var(--greenbg);color:var(--green);}
   .approval-status.abgelehnt{background:var(--redbg);color:var(--red);}
   .approval-status.rueckruf_angefordert{background:var(--bluebg);color:var(--blue);}
@@ -196,7 +196,7 @@ const STATUS_BANNER_TEXT = {
   abholbereit:['Ihr Fahrzeug ist abholbereit!','Wir freuen uns auf Sie!'],
   abgeschlossen:['Auftrag abgeschlossen','Vielen Dank für Ihren Besuch.'],
 };
-const APPROVAL_LABELS = { offen:'Offen', freigegeben:'Freigegeben', abgelehnt:'Abgelehnt', rueckruf_angefordert:'Rückruf angefordert' };
+const APPROVAL_LABELS = { ausstehend:'Wartet auf Ihre Freigabe', offen:'Offen', freigegeben:'Freigegeben', abgelehnt:'Abgelehnt', rueckruf_angefordert:'Rückruf angefordert' };
 const APPT_STATUS_LABELS = { bestaetigt:'Bestätigt', offen:'Angefragt', storniert:'Storniert', abgeschlossen:'Abgeschlossen' };
 const MONATE = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
 const WOCHENTAGE = ['So','Mo','Di','Mi','Do','Fr','Sa'];
@@ -235,7 +235,7 @@ if(urlToken){ document.getElementById('tokenInput').value = urlToken; doLogin();
 async function callPortal(action, extra){
   const res = await fetch(PORTAL_URL, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(Object.assign({action}, extra||{})),
+    body: JSON.stringify(Object.assign({action, token: state.token}, extra||{})),
   });
   const data = await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Fehler');
@@ -251,14 +251,15 @@ async function doLogin(){
   btn.disabled = true; btn.textContent = 'Lädt...';
   try{
     const data = await callPortal('get', {token});
-    data.appointments = (data.appointments||[]).filter(a => a.customer_token === token);
+    data.appointments = data.appointments || [];
     state.token = token;
     state.data = data;
+    try{ if(window.location.search.indexOf('token=')>=0) history.replaceState(null,'',window.location.pathname); }catch(_){}
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appScreen').style.display = 'block';
     render();
   }catch(e){
-    errEl.textContent = e.message === 'not_found' ? 'Kein Auftrag zu diesem Code gefunden.' : 'Code ungültig oder Verbindung fehlgeschlagen.';
+    errEl.textContent = (e.message === 'not_found' || e.message === 'unauthorized') ? 'Kein Auftrag zu diesem Code gefunden.' : 'Verbindung fehlgeschlagen. Bitte erneut versuchen.';
   }finally{
     btn.disabled = false; btn.textContent = 'Anzeigen';
   }
@@ -266,7 +267,7 @@ async function doLogin(){
 
 async function reload(){
   const data = await callPortal('get', {token: state.token});
-  data.appointments = (data.appointments||[]).filter(a => a.customer_token === state.token);
+  data.appointments = data.appointments || [];
   state.data = data;
   render();
 }
@@ -543,8 +544,10 @@ function openDocument(index){
   }
 }
 
+function isApprovalPending(s){ return s==='ausstehend' || s==='offen'; }
+
 function renderApprovals(){
-  const approvals = (state.data.approvals||[]).filter(a=>a.status==='offen' || a.description);
+  const approvals = (state.data.approvals||[]).filter(a=>isApprovalPending(a.status) || a.description);
   if(!approvals.length) return '';
   return `
     <div class="card">
@@ -555,7 +558,7 @@ function renderApprovals(){
           <div class="approval-title">${a.title||''}</div>
           <div class="approval-desc">${a.description||''}</div>
           ${a.additional_cost ? `<div class="approval-cost">+ ${a.additional_cost.toLocaleString('de-DE')} €</div>` : ''}
-          ${a.status==='offen' ? `
+          ${isApprovalPending(a.status) ? `
             <div class="btn-row">
               <button class="btn primary" onclick="respondApproval('${a.id}','freigegeben')">Freigeben</button>
               <button class="btn outline" onclick="respondApproval('${a.id}','abgelehnt')">Ablehnen</button>
