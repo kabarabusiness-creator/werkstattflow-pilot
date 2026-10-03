@@ -749,7 +749,10 @@ async function submitBooking(){
     state.showBookForm = false;
     state.bookTime = null; state.bookServiceId = null;
     await reload();
-  }catch(e){ alert('Fehler bei der Buchung: ' + e.message); }
+  }catch(e){
+    const msg = { slot_taken:'Dieser Termin ist leider schon vergeben – bitte wählen Sie eine andere Uhrzeit.', invalid_slot:'Dieser Termin kann nicht gebucht werden – bitte wählen Sie einen anderen Tag oder eine andere Uhrzeit.' }[e.message];
+    alert(msg || 'Die Buchung hat nicht geklappt. Bitte versuchen Sie es erneut oder rufen Sie uns an.');
+  }
   finally{ state.bookSending = false; render(); }
 }
 
