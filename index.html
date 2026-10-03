@@ -74,16 +74,27 @@
   ::-webkit-scrollbar-track{background:transparent;}
 
   /* --- responsive fixes for narrower real-device viewports --- */
+  /* .device-Präfix nötig: die Grundregeln stehen weiter unten und würden sonst gewinnen */
   @media (max-width: 1150px){
-    .sidebar{width:190px;}
-    .worklist{width:300px;}
-    .task-detail{width:260px;}
+    .device .sidebar{width:190px;}
+    .device .worklist{width:300px;}
+    .device .task-detail{width:260px;}
+    .device .vehicle-card{flex-wrap:wrap;}
   }
   @media (max-width: 980px){
-    .worklist{width:270px;}
-    .aufgaben-row{flex-wrap:wrap;}
-    .task-detail{width:100%;position:static;order:3;margin-top:14px;}
-    .task-col{flex-basis:100%;}
+    .device .worklist{width:270px;}
+    .device .aufgaben-row{flex-wrap:wrap;}
+    .device .task-detail{width:100%;position:static;order:3;margin-top:14px;}
+    .device .task-col{flex-basis:100%;}
+  }
+  /* Tablet hochkant: Seitenleiste auf Symbole reduzieren, damit die Auftragsdetails Platz haben */
+  @media (max-width: 900px){
+    .device .sidebar{width:64px;min-width:64px;padding-left:8px;padding-right:8px;}
+    .device .sidebar .logo-text, .device .sidebar .user-id-info{display:none;}
+    .device .sidebar .nav-item{font-size:0;justify-content:center;gap:0;position:relative;}
+    .device .sidebar .nav-item .badge{position:absolute;top:2px;right:2px;font-size:9px;}
+    .device .sidebar .logout{font-size:0;justify-content:center;}
+    .device .worklist{width:250px;}
   }
   @media (max-width: 760px){
     .sidebar{display:none;}
@@ -1294,6 +1305,89 @@ const API_BASE = 'https://werkstattflow-pilot-production.up.railway.app';
    daher wirken alle Interaktionen in der App nur lokal und werden nicht zurückgeschrieben. */
 const BASE44_URL = 'https://kabaradigitalprototyp.base44.app/functions/getTabletData';
 const BASE44_LOGIN_URL = 'https://kabaradigitalprototyp.base44.app/functions/workshopLogin';
+const BASE44_ACTION_URL = 'https://kabaradigitalprototyp.base44.app/functions/tabletAction';
+
+/* ---------- Pilotbetrieb ----------
+   Bereiche, die noch mit festen Beispieldaten arbeiten, werden im Pilot ausgeblendet,
+   damit die Werkstatt nichts sieht, was nicht echt ist. Zum Vorführen auf false setzen. */
+const PILOT_HIDE_DEMO = true;
+/* Support-Kontakt, der im Tablet angezeigt wird. Leer = Karte wird ausgeblendet. */
+const SUPPORT_PHONE = '';
+const SUPPORT_EMAIL = '';
+
+/* Schreibaktionen ans Backend (Base44-Funktion tabletAction, Bearer-Token wie getTabletData).
+   Solange die Funktion fehlt, bleiben Änderungen lokal auf diesem Tablet erhalten (siehe
+   carryOverLocalState) und es erscheint einmalig ein Hinweis. */
+async function tabletAction(action, payload){
+  if(state.writeSupported === false) return null;
+  if(!state.sessionToken) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(()=>controller.abort(), 15000);
+  try{
+    const res = await fetch(BASE44_ACTION_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + state.sessionToken },
+      body: JSON.stringify(Object.assign({ action }, payload||{})),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(()=>({}));
+    if(res.status===401){ handleSessionExpired(); return null; }
+    if(res.status===404 || data.error==='unknown_action'){
+      if(state.writeSupported !== false){
+        state.writeSupported = false;
+        showUpdateToast('Hinweis: Speichern auf dem Server ist noch nicht aktiv – Änderungen bleiben nur auf diesem Tablet.');
+      }
+      return null;
+    }
+    if(!res.ok) throw new Error(data.error || ('Fehler ' + res.status));
+    state.writeSupported = true;
+    return data;
+  } catch(e){
+    console.warn('Speichern fehlgeschlagen ('+action+'):', e.message);
+    showUpdateToast('Speichern fehlgeschlagen – bitte Verbindung prüfen.');
+    return null;
+  } finally { clearTimeout(timeoutId); }
+}
+
+/* Der 30-Sekunden-Abgleich baut alle Aufträge neu auf. Ohne diese Übernahme wären laufende
+   Timer, abgehakte Checklisten, Fotos und Sprachberichte nach spätestens 30 s weg. */
+const LOCAL_TASK_FIELDS = ['timeStatus','startedAt','elapsedSec','istMin','_worktimeId','photos','voiceNote','voiceError','voiceShowManual','zusatzarbeit','aiAnalysis','_voiceParts'];
+function carryOverLocalState(prevOrders, nextOrders){
+  const prevById = new Map((prevOrders||[]).map(o=>[o.id,o]));
+  const now = Date.now(), MAX_AGE = 15*60*1000;
+  nextOrders.forEach(no=>{
+    const po = prevById.get(no.id);
+    if(po){
+      if(Array.isArray(po.qc) && po.qc.length) no.qc = po.qc;
+      no.tasks.forEach(nt=>{
+        const pt = (po.tasks||[]).find(t=>t.id===nt.id);
+        if(!pt) return;
+        LOCAL_TASK_FIELDS.forEach(f=>{ if(pt[f]!==undefined && !(f==='photos' && (!pt.photos||!pt.photos.length))) nt[f] = pt[f]; });
+      });
+    }
+    nt_pending(no, now, MAX_AGE);
+    const pend = state.pendingOrderStatus[no.id];
+    if(pend){
+      if(no.status===pend.status || now-pend.ts>MAX_AGE) delete state.pendingOrderStatus[no.id];
+      else { no.status = pend.status; no.progress = pend.progress; }
+    }
+  });
+}
+function nt_pending(no, now, MAX_AGE){
+  no.tasks.forEach(nt=>{
+    const pend = state.pendingTask[nt.id];
+    if(!pend) return;
+    if(nt.status===pend.status || now-pend.ts>MAX_AGE){ delete state.pendingTask[nt.id]; return; }
+    nt.status = pend.status;
+    nt.progress = pend.status==='done' ? 100 : 0;
+    nt.statusLabel = pend.status==='done' ? 'Erledigt' : (pend.status==='progress' ? 'In Arbeit' : 'Ausstehend');
+  });
+}
+const B44_TASK_STATUS = { open:'offen', progress:'in_arbeit', done:'erledigt' };
+function saveTaskStatus(t){
+  state.pendingTask[t.id] = { status:t.status, ts:Date.now() };
+  return tabletAction('task_update', { task_id:t.id, status:B44_TASK_STATUS[t.status]||'offen' });
+}
 const B44_STATUS_SEQUENCE = [
   'fahrzeug_angenommen','diagnose_laeuft','kostenvoranschlag','freigabe_erforderlich',
   'ersatzteile_bestellt','warte_auf_ersatzteile','reparatur_laeuft','qualitaetspruefung',
@@ -1344,7 +1438,7 @@ function b44MapOrder(o, allTasks, demoImageByBrand){
     dauer: o.estimated_completion_text || '–',
     rest: '–', eta: o.estimated_completion_text || '–',
     created: o.created_date ? formatDateTimeDE(o.created_date) : '–',
-    image: (demoImageByBrand && demoImageByBrand[o.vehicle_brand]) || FALLBACK_CAR_IMAGE,
+    image: o.vehicle_photo || o.image_url || (demoImageByBrand && demoImageByBrand[o.vehicle_brand]) || FALLBACK_CAR_IMAGE,
     vin: '–', farbe: '–', motor: '–', kraftstoff: '–', getriebe: '–', tuev: (o.tuv_next_date ? formatDateDE(o.tuv_next_date) : '–'),
     tel: o.phone || '',
     desc: o.description || '',
@@ -1403,7 +1497,9 @@ async function loadFromBase44(){
   });
   const data = await fetchBase44Data();
   state.base44Data = data;
+  const prevOrders = orders;
   orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
+  carryOverLocalState(prevOrders, orders);
   state.b44Appointments = Array.isArray(data.appointments) ? data.appointments : [];
   state.apiUsers = data.employees.filter(e=>e.is_active).map(e => ({ id: e.id, name: e.name, email:'', role: e.role, active: 1 }));
   if(Array.isArray(data.lifts)){
@@ -1785,12 +1881,13 @@ function renderChrome(){
     {ic:iconMail, label:'Nachrichten', badge:String(messages.filter(m=>m.unread).length)||null, badgeClass:'blue', view:'nachrichten'},
     {ic:iconDoc, label:'Dokumente', view:'dokumente'},
     {ic:iconTire, label:'Reifenlager', view:'reifenlager'},
-    {ic:iconShield, label:'Benutzerverwaltung', view:'benutzer', roles:['admin']},
+    {ic:iconShield, label:'Team', view:'benutzer', roles:['admin']},
     {ic:iconGrid, label:'Team-Auslastung', view:'auslastung', roles:['meister','serviceberater','admin']},
     {ic:iconSupport, label:'Support', view:'support'},
     {ic:iconGear, label:'Einstellungen', view:'einstellungen'},
   ];
-  const navItems = navItemsAll.filter(n=>!n.roles || n.roles.includes(role));
+  const DEMO_VIEWS = ['nachrichten','dokumente','reifenlager'];
+  const navItems = navItemsAll.filter(n=>(!n.roles || n.roles.includes(role)) && !(PILOT_HIDE_DEMO && DEMO_VIEWS.includes(n.view)));
   document.getElementById('sidebarNav').innerHTML = navItems.map(n=>`
     <div class="nav-item ${state.mainView===n.view?'active':''}" data-mainview="${n.view}">
       <span class="ic">${n.ic}</span> ${n.label} ${n.badge&&n.badge!=='0'?`<span class="badge ${n.badgeClass||''}">${n.badge}</span>`:''}
@@ -1817,7 +1914,7 @@ function renderChrome(){
     {ic:iconGrid, label:'Aufträge', view:'alle'},
     {ic:iconCalendar, label:'Kalender', view:'termine'},
     {ic:iconLift, label:'Hebebühnen', view:'hebebuehnen'},
-    {ic:iconMail, label:'Nachrichten', badge:String(messages.filter(m=>m.unread).length)||null, view:'nachrichten'},
+    PILOT_HIDE_DEMO ? {ic:iconDashboard, label:'Dashboard', view:'dashboard'} : {ic:iconMail, label:'Nachrichten', badge:String(messages.filter(m=>m.unread).length)||null, view:'nachrichten'},
     {ic:iconMore, label:'Mehr', mehr:true},
   ];
   document.getElementById('bottomNav').innerHTML = bnItems.map(n=>`
@@ -1825,6 +1922,8 @@ function renderChrome(){
   `).join('');
 
   document.getElementById('sheetLogout').querySelector('.sheet-ic').innerHTML = iconLogout;
+  const sheetDocs = document.querySelector('#mehrOverlay .sheet-item[data-mainview="dokumente"]');
+  if(sheetDocs) sheetDocs.style.display = PILOT_HIDE_DEMO ? 'none' : '';
   document.getElementById('mehrOverlay').querySelectorAll('.sheet-item .sheet-ic').forEach((el,i)=>{
     const icons = [iconDashboard, iconFolder, iconGear];
     if(icons[i]) el.innerHTML = icons[i];
@@ -1909,15 +2008,13 @@ function openCloseOrderModal(o){
 }
 
 async function completeOrder(o){
-  if(state.backendAvailable && o._apiId){
-    try{
-      await apiFetch(`/orders/${o._apiId}/complete`, { method:'POST' });
-    } catch(e){
-      document.getElementById('closeOrderModal').style.display='none';
-      alert('Auftrag konnte nicht abgeschlossen werden: ' + e.message);
-      return;
-    }
-  }
+  // Checkliste als Qualitätsbericht mitsenden (Backend legt daraus einen WorkshopLog an).
+  tabletAction('order_complete', {
+    order_id: o.id,
+    qc: (o.qc||[]).map(q=>({ label:q.label, checked:!!q.checked })),
+  });
+  state.pendingOrderStatus[o.id] = { status:'erledigt', progress:100, ts:Date.now() };
+  o.tasks.forEach(t=>{ state.pendingTask[t.id] = { status:'done', ts:Date.now() }; });
   o.tasks.forEach(t=>{ t.status='done'; t.progress=100; t.statusLabel = t.statusLabel==='Ausstehend'||t.statusLabel==='In Arbeit' ? 'heute' : t.statusLabel; });
   o.status='erledigt';
   o.progress=100;
@@ -1944,12 +2041,9 @@ function addPhotoToCurrentTask(files){
     // t.aiAnalysis = analyzePhoto();
     // t.zusatzarbeit = undefined;
     renderTaskDetail(t);
-    if(state.backendAvailable && t.id){
-      results.forEach(dataUrl=>{
-        apiFetch(`/tasks/${t.id}/photos`, { method:'POST', body: JSON.stringify({ file_url: dataUrl }) })
-          .catch(e=>console.warn('Foto (Backend) fehlgeschlagen:', e.message));
-      });
-    }
+    results.forEach((dataUrl, i)=>{
+      tabletAction('media_upload', { order_id:o.id, task_id:t.id, filename:`auftrag-${o.orderNumber}-${Date.now()}-${i}.jpg`, data_url:dataUrl, caption:t.title });
+    });
   });
 }
 
@@ -2327,8 +2421,9 @@ let bays = [
   {n:6, orderId:null},
 ];
 function renderHebebuehnenView(ov){
-  const belegt = bays.filter(b=>b.orderId).length;
-  const frei = bays.length - belegt;
+  const belegt = bays.filter(b=>!b.offline && b.orderId && orders.some(x=>x.id===b.orderId)).length;
+  const offline = bays.filter(b=>b.offline).length;
+  const frei = bays.length - belegt - offline;
   ov.innerHTML = `
     <div class="ov-head">
       <div><h1>Hebebühnen-Übersicht</h1><div class="sub">Alle Hebebühnen auf einen Blick</div></div>
@@ -2443,31 +2538,28 @@ function renderAuslastungView(ov){
 
 function renderBenutzerView(ov){
   ov.innerHTML = `
-    <div class="ov-head"><div><h1>Benutzerverwaltung</h1><div class="sub">Team-Mitglieder &amp; Rollen verwalten</div></div></div>
+    <div class="ov-head"><div><h1>Team</h1><div class="sub">Aktive Mitarbeiter dieser Werkstatt</div></div></div>
     <div class="team-list">
-      ${team.map((m,i)=>`
+      ${(state.apiUsers||[]).map(m=>`
         <div class="team-row">
-          <div class="avatar" style="width:36px;height:36px;font-size:13px;">${initials(m.name)}</div>
+          <div class="avatar" style="width:36px;height:36px;font-size:13px;">${initials(m.name||'?')}</div>
           <div class="team-info">
-            <div class="team-name">${m.name}</div>
-            <div class="team-email">${m.email}</div>
+            <div class="team-name">${m.name||''}</div>
+            <div class="team-email">${roleLabel[m.role]||m.role||''}</div>
           </div>
-          <select class="role-dropdown" data-teamrole="${i}">
-            ${roles.map(r=>`<option value="${r.key}" ${r.key===m.role?'selected':''}>${r.label}</option>`).join('')}
-          </select>
         </div>
-      `).join('')}
+      `).join('') || '<div class="td-empty">Keine aktiven Mitarbeiter gefunden.</div>'}
     </div>
-    <div class="team-note">${iconShield} Rollenänderungen wirken sich nur auf diese Demo-Sitzung aus.</div>
+    <div class="team-note">${iconShield} Mitarbeiter, Rollen und PINs werden im AutoLeitwerk-Dashboard verwaltet.</div>
   `;
 }
 
 /* ---------- Support ---------- */
 const faqData = [
   {q:'Wie starte ich die Zeiterfassung für eine Aufgabe?', a:'Öffne die Aufgabe in "Meine Aufträge" → Tab "Aufgaben" und tippe auf "Start" im Zeiterfassungs-Feld. Die Uhr läuft, bis du auf "Fertig" oder "Pause" tippst.'},
-  {q:'Wie füge ich ein Foto zu einer Aufgabe hinzu?', a:'In der Aufgabendetail-Ansicht auf "Hinzufügen" bei "Bilder & Notizen" tippen. Die KI analysiert das Foto automatisch und schlägt bei Auffälligkeiten Zusatzarbeiten vor.'},
+  {q:'Wie füge ich ein Foto zu einer Aufgabe hinzu?', a:'In der Aufgabendetail-Ansicht auf "Hinzufügen" bei "Bilder & Notizen" tippen. Das Foto wird dem Auftrag zugeordnet.'},
   {q:'Warum kann ich einen Auftrag nicht abschließen?', a:'Vor dem Abschluss muss die digitale Qualitätskontrolle (Tab "Checkliste") vollständig abgehakt sein. Der Abschließen-Button zeigt dir, wie viele Punkte noch offen sind.'},
-  {q:'Was passiert, wenn ich offline bin?', a:'Ein Banner zeigt dir an, wenn die Verbindung weg ist. Änderungen bleiben lokal erhalten und werden synchronisiert, sobald wieder Internet verfügbar ist.'},
+  {q:'Was passiert, wenn ich offline bin?', a:'Ein Banner zeigt dir an, wenn die Verbindung weg ist. Ohne Verbindung kann nichts gespeichert werden – arbeite weiter und prüfe nach der Rückkehr des WLANs, ob deine Änderungen angekommen sind.'},
   {q:'Wie ändere ich meine Rolle oder die eines Kollegen?', a:'Nur Admins können das unter "Benutzerverwaltung" in der Sidebar Rollen für Teammitglieder ändern.'},
 ];
 let supportTicketState = { openFaq:null };
@@ -2476,14 +2568,14 @@ function renderSupportView(ov){
     <div class="ov-head"><div><h1>Support &amp; Hilfe</h1><div class="sub">Wir helfen dir schnell weiter</div></div></div>
 
     <div class="support-contact-row">
-      <div class="support-contact-card">
+      ${SUPPORT_PHONE ? `<a class="support-contact-card" href="tel:${SUPPORT_PHONE.replace(/\s/g,'')}" style="color:inherit;text-decoration:none;">
         <div class="sc-ic">${iconPhone}</div>
-        <div><div class="sc-title">Hotline</div><div class="sc-sub">0800 123 456 78</div><div class="sc-meta">Mo–Fr, 8–18 Uhr</div></div>
-      </div>
-      <div class="support-contact-card">
+        <div><div class="sc-title">Telefon</div><div class="sc-sub">${SUPPORT_PHONE}</div><div class="sc-meta">AutoLeitwerk-Support</div></div>
+      </a>` : ''}
+      ${SUPPORT_EMAIL ? `<a class="support-contact-card" href="mailto:${SUPPORT_EMAIL}" style="color:inherit;text-decoration:none;">
         <div class="sc-ic">${iconMail}</div>
-        <div><div class="sc-title">E-Mail</div><div class="sc-sub">support@werkstattflow.de</div><div class="sc-meta">Antwort innerhalb 24h</div></div>
-      </div>
+        <div><div class="sc-title">E-Mail</div><div class="sc-sub">${SUPPORT_EMAIL}</div><div class="sc-meta">AutoLeitwerk-Support</div></div>
+      </a>` : ''}
       <div class="support-contact-card" id="openAiFromSupport" style="cursor:pointer;">
         <div class="sc-ic">${iconBot}</div>
         <div><div class="sc-title">ALEX</div><div class="sc-sub">AutoLeitwerk Expert eXchange – Sofort-Hilfe im Chat</div><div class="sc-meta">Rund um die Uhr</div></div>
@@ -2504,7 +2596,7 @@ function renderSupportView(ov){
     <div class="ticket-card" id="ticketCard">
       <div class="login-field"><label>Betreff</label><input id="ticketSubject" placeholder="z.B. Fehler beim Foto-Upload"></div>
       <div class="login-field"><label>Nachricht</label><textarea id="ticketMessage" rows="4" placeholder="Beschreibe kurz dein Problem…"></textarea></div>
-      <div class="btn primary" id="ticketSendBtn">${iconCheck} Ticket senden</div>
+      <div class="btn primary" id="ticketSendBtn">${iconCheck} ${SUPPORT_EMAIL ? 'Per E-Mail senden' : 'Ticket senden'}</div>
     </div>
   `;
 }
@@ -2514,11 +2606,11 @@ function renderEinstellungenView(ov){
     <div class="ov-head"><div><h1>Einstellungen</h1><div class="sub">Profil &amp; App-Einstellungen</div></div></div>
     <div class="set-card">
       <div class="set-profile">
-        <div class="set-avatar">MK</div>
-        <div><div class="set-name">Mert Kabara</div><div class="set-role">Mechaniker · AutoLeitwerk</div></div>
+        <div class="set-avatar">${initials((state.currentUser||{}).name||'?')}</div>
+        <div><div class="set-name">${(state.currentUser||{}).name||''}</div><div class="set-role">${roleLabel[(state.currentUser||{}).role]||''} · Werkstatt ${state.workshopToken||''}</div></div>
       </div>
     </div>
-    <div class="set-section-title">Benachrichtigungen</div>
+    ${PILOT_HIDE_DEMO ? '' : `<div class="set-section-title">Benachrichtigungen</div>
     <div class="set-card">
       <div class="set-row">
         <div><div class="set-row-label">Push-Benachrichtigungen</div><div class="set-row-sub">Neue Aufgaben und Nachrichten sofort erhalten</div></div>
@@ -2529,6 +2621,7 @@ function renderEinstellungenView(ov){
         <div class="toggle ${state.settings.email?'on':''}" data-toggle="email"></div>
       </div>
     </div>
+`}
     <div class="set-section-title">App</div>
     <div class="set-card">
       <div class="set-row">
@@ -2661,6 +2754,7 @@ let state = {
   shiftId:null,
   workshopToken:null, workshopName:null,
   sessionToken:null, sessionExpires:null, pendingLogin:null, pinBusy:false, b44Appointments:null,
+  writeSupported:null, pendingTask:{}, pendingOrderStatus:{},
 };
 
 const roles = [
@@ -2740,7 +2834,7 @@ function getRecommendations(o){
   const recs = [];
   if(km>110000) recs.push({title:'Zahnriemen &amp; Wasserpumpe', reason:'Km-Stand über Wechselintervall (i.d.R. 100–120 Tkm)'});
   if(km>60000) recs.push({title:'Bremsflüssigkeit wechseln', reason:'Fällig alle 2 Jahre / 60.000 km'});
-  if(km>30000) recs.push({title:'Innenraumfilter erneuern', reason:'Letzter Wechsel vermutlich vor über einem Jahr'});
+  if(km>30000) recs.push({title:'Innenraumfilter prüfen', reason:'Wechsel i.d.R. jährlich bzw. alle 15–30 Tkm'});
   recs.push({title:'Kühlmittel prüfen', reason:'Routineprüfung bei aktuellem Werkstattbesuch'});
   return recs.slice(0,3);
 }
@@ -2749,7 +2843,7 @@ function renderRecommendationCard(o){
   if(recs.length===0) return '';
   return `
     <div class="upsell-card">
-      <div class="upsell-head">${iconThumbUp}<div><b>Empfohlene Zusatzarbeiten</b><span>Basierend auf Km-Stand &amp; Servicehistorie</span></div></div>
+      <div class="upsell-head">${iconThumbUp}<div><b>Empfohlene Zusatzarbeiten</b><span>Hinweise anhand des Km-Stands – bitte am Fahrzeug prüfen</span></div></div>
       <div class="upsell-items">
         ${recs.map(r=>`<div class="upsell-item"><div class="upsell-item-title">${r.title}</div><div class="upsell-item-sub">${r.reason}</div></div>`).join('')}
       </div>
@@ -2773,7 +2867,7 @@ function renderDetail(){
         <div class="created">Erstellt: ${o.created}</div>
       </div>
       <div class="dh-right">
-        <div class="btn">${iconMsg} Nachricht</div>
+        ${PILOT_HIDE_DEMO ? '' : `<div class="btn">${iconMsg} Nachricht</div>`}
         <div class="btn" id="vehicleDetailsBtn">${iconCar} Fahrzeugdetails</div>
         <div class="btn primary" id="closeOrderBtn">${iconCheck} Auftrag abschließen ${iconChevDown}</div>
       </div>
@@ -2817,9 +2911,9 @@ function renderDetail(){
       <div class="tabs">
         <div class="tab ${state.detailTab==='aufgaben'?'active':''}" data-dtab="aufgaben">${iconTasks} Aufgaben</div>
         <div class="tab ${state.detailTab==='checkliste'?'active':''}" data-dtab="checkliste">${iconCheckSquare} Checkliste</div>
-        <div class="tab ${state.detailTab==='teile'?'active':''}" data-dtab="teile">${iconBox} Teile &amp; Material</div>
+        ${PILOT_HIDE_DEMO ? '' : `<div class="tab ${state.detailTab==='teile'?'active':''}" data-dtab="teile">${iconBox} Teile &amp; Material</div>
         <div class="tab ${state.detailTab==='dokumente'?'active':''}" data-dtab="dokumente">${iconFolder} Dokumente</div>
-        <div class="tab ${state.detailTab==='verlauf'?'active':''}" data-dtab="verlauf">${iconHistory} Verlauf</div>
+        <div class="tab ${state.detailTab==='verlauf'?'active':''}" data-dtab="verlauf">${iconHistory} Verlauf</div>`}
       </div>
 
       <div class="tab-panel" id="tabPanel"></div>
@@ -3040,29 +3134,36 @@ function startTimer(t){
   t.timeStatus='running'; t.startedAt=Date.now();
   if(t.status==='open'){ t.status='progress'; t.statusLabel='In Arbeit'; }
   renderTabPanel();
-  if(state.backendAvailable && t.id){
-    apiFetch(`/tasks/${t.id}/start`, { method:'POST' }).catch(e=>console.warn('Timer-Start (Backend) fehlgeschlagen:', e.message));
-  }
+  startWorktime(t);
+  if(t.status==='progress') saveTaskStatus(t);
+}
+function startWorktime(t){
+  const o = getSelectedOrder();
+  tabletAction('worktime_start', { order_id: o ? o.id : null, task_id:t.id, description:t.title })
+    .then(data=>{ if(data && data.worktime_id) t._worktimeId = data.worktime_id; });
+}
+function stopWorktime(t){
+  if(!t._worktimeId) return;
+  const id = t._worktimeId; t._worktimeId = null;
+  tabletAction('worktime_stop', { worktime_id:id });
 }
 function pauseTimer(t){
   if(t.timeStatus!=='running') return;
   t.elapsedSec = currentElapsed(t);
   t.timeStatus='paused'; t.startedAt=null;
   renderTabPanel();
+  stopWorktime(t);
 }
 function resumeTimer(t){
   t.timeStatus='running'; t.startedAt=Date.now();
   renderTabPanel();
+  startWorktime(t);
 }
 function finishTimer(o,t){
   t.elapsedSec = currentElapsed(t);
   t.timeStatus='done'; t.startedAt=null;
   t.istMin = Math.max(1, Math.round(t.elapsedSec/60));
-  if(state.backendAvailable && t.id){
-    apiFetch(`/tasks/${t.id}/stop`, { method:'POST' })
-      .then(data=>{ if(data && data.ist_min) t.istMin = data.ist_min; })
-      .catch(e=>console.warn('Timer-Stop (Backend) fehlgeschlagen:', e.message));
-  }
+  stopWorktime(t);
   completeTask(o,t);
 }
 setInterval(()=>{
@@ -3211,15 +3312,9 @@ function createManualVoiceNote(o,t){
   syncVoiceNoteToApi(t);
 }
 function syncVoiceNoteToApi(t){
-  if(!state.backendAvailable || !t.id || !t.voiceNote) return;
-  apiFetch(`/tasks/${t.id}/voice-note`, {
-    method:'POST',
-    body: JSON.stringify({
-      transcript: t.voiceNote.transcript,
-      werkstattbericht: t.voiceNote.bericht,
-      kundenbeschreibung: t.voiceNote.kunde,
-    }),
-  }).catch(e=>console.warn('Sprachnotiz (Backend) fehlgeschlagen:', e.message));
+  if(!t.id || !t.voiceNote) return;
+  const o = getSelectedOrder();
+  tabletAction('note_add', { order_id: o ? o.id : null, task_id:t.id, content: t.voiceNote.bericht || t.voiceNote.transcript || '' });
 }
 function simulateVoiceReport(transcript){
   const sentences = transcript.split(/[.!?]\s*/).filter(Boolean);
@@ -3355,12 +3450,6 @@ document.addEventListener('click', (e)=>{
     const i = parseInt(qccheck.dataset.qccheck,10);
     o.qc[i].checked = !o.qc[i].checked;
     renderTabPanel();
-    if(state.backendAvailable && o.qc[i].id){
-      apiFetch(`/qc/${o.qc[i].id}`, {
-        method:'PATCH',
-        body: JSON.stringify({ checked: o.qc[i].checked }),
-      }).catch(e=>console.warn('QC-Update (Backend) fehlgeschlagen:', e.message));
-    }
     return;
   }
 
@@ -3579,11 +3668,10 @@ document.addEventListener('click', (e)=>{
     const card = document.getElementById('ticketCard');
     const subject = (document.getElementById('ticketSubject')||{}).value || 'Support-Anfrage';
     const message = (document.getElementById('ticketMessage')||{}).value || '';
-    if(card) card.innerHTML = `<div class="ticket-sent">${iconCheck} Ticket gesendet! Wir melden uns innerhalb von 24 Stunden.</div>`;
-    if(state.backendAvailable){
-      apiFetch('/support/tickets', { method:'POST', body: JSON.stringify({ subject, message }) })
-        .catch(err => console.warn('Support-Ticket (Backend) fehlgeschlagen:', err.message));
-    }
+    if(!SUPPORT_EMAIL){ if(card) card.innerHTML = `<div class="ticket-sent">Bitte wende dich direkt an deinen AutoLeitwerk-Ansprechpartner.</div>`; return; }
+    const body = `${message}\n\n—\nWerkstatt: ${state.workshopToken||''}\nMitarbeiter: ${(state.currentUser||{}).name||''}\nGerät: ${navigator.userAgent}`;
+    window.location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('[AutoLeitwerk] '+subject)}&body=${encodeURIComponent(body)}`;
+    if(card) card.innerHTML = `<div class="ticket-sent">${iconCheck} Dein E-Mail-Programm wurde geöffnet – bitte dort auf „Senden“ tippen.</div>`;
     return;
   }
 
@@ -3739,10 +3827,7 @@ function sendMessage(){
 function toggleTask(o,t){
   if(t.status==='done'){
     t.status='open'; t.statusLabel='Ausstehend'; t.progress=0;
-    if(state.backendAvailable && t.id){
-      apiFetch(`/tasks/${t.id}`, { method:'PATCH', body: JSON.stringify({ status:'open', progress:0 }) })
-        .catch(e=>console.warn('Aufgabe zurücksetzen (Backend) fehlgeschlagen:', e.message));
-    }
+    saveTaskStatus(t);
   } else {
     completeTask(o,t,true);
   }
@@ -3756,26 +3841,20 @@ function completeTask(o,t){
   t.statusLabel = 'heute · ' + now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
   recalcProgress(o);
   renderOrderList(); renderDetail();
-  if(state.backendAvailable && t.id){
-    apiFetch(`/tasks/${t.id}`, { method:'PATCH', body: JSON.stringify({ status:'done', progress:100 }) })
-      .catch(e=>console.warn('Aufgabe abschließen (Backend) fehlgeschlagen:', e.message));
-  }
+  saveTaskStatus(t);
 }
 function recalcProgress(o){
   const total = o.tasks.length;
   const doneWeighted = o.tasks.reduce((sum,t)=> sum + (t.status==='done'?1: (t.progress||0)/100), 0);
-  o.progress = Math.round((doneWeighted/total)*100);
-  if(state.backendAvailable && o._apiId){
-    apiFetch(`/orders/${o._apiId}`, { method:'PATCH', body: JSON.stringify({ progress: o.progress }) })
-      .catch(e=>console.warn('Auftragsfortschritt (Backend) fehlgeschlagen:', e.message));
-  }
+  o.progress = total ? Math.round((doneWeighted/total)*100) : 0;
 }
 
 /* ---------- 6. ALEX (KI-Assistent) ---------- */
 /* ---------- Schnellnotiz ---------- */
-const quickNotes = [
-  {id:'n1', text:'Kunde Müller ruft heute Nachmittag wegen Ersatzteil-Lieferung zurück.', time:'09:12'},
-];
+// Persönliche Schnellnotizen – werden nur auf diesem Tablet gespeichert (localStorage).
+const QUICK_NOTES_KEY = 'autoleitwerk.quickNotes';
+const quickNotes = (()=>{ try{ return JSON.parse(localStorage.getItem(QUICK_NOTES_KEY)||'[]'); }catch(_){ return []; } })();
+function persistQuickNotes(){ try{ localStorage.setItem(QUICK_NOTES_KEY, JSON.stringify(quickNotes)); }catch(_){} }
 function renderNotePanel(){
   const panel = document.getElementById('notePanel');
   panel.innerHTML = `
@@ -3813,19 +3892,13 @@ function addQuickNote(){
   renderNotePanel();
   const inp = document.getElementById('noteInput');
   if(inp) inp.focus();
-  if(state.backendAvailable){
-    apiFetch('/notes', { method:'POST', body: JSON.stringify({ text }) })
-      .then(data => { localNote.id = data.id; })
-      .catch(e => console.warn('Notiz (Backend) fehlgeschlagen:', e.message));
-  }
+  persistQuickNotes();
 }
 function deleteQuickNote(id){
   const idx = quickNotes.findIndex(n=>n.id===id);
   if(idx>-1) quickNotes.splice(idx,1);
   renderNotePanel();
-  if(state.backendAvailable && !String(id).startsWith('n')){
-    apiFetch(`/notes/${id}`, { method:'DELETE' }).catch(e=>console.warn('Notiz löschen (Backend) fehlgeschlagen:', e.message));
-  }
+  persistQuickNotes();
 }
 function updateNoteBadge(){
   const badge = document.getElementById('noteFabBadge');

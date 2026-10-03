@@ -223,8 +223,9 @@ function greeting(){
 // ein Foto zum Auftrag/Fahrzeug hinterlegt (Feld o.image_url). Ohne Foto bleibt der
 // Bereich einfach leer – es wird kein Platzhalter-/Fremdbild angezeigt.
 function vehiclePhotoHtml(o){
-  if(!o.image_url) return '';
-  return `<div class="veh-photo"><img src="${o.image_url}" alt="${(o.vehicle_brand||'')+' '+(o.vehicle_model||'')}" loading="lazy" onerror="this.parentElement.style.display='none'"></div>`;
+  const url = o.vehicle_photo || o.image_url; // Backend-Feld heißt seit 01.10. vehicle_photo
+  if(!url) return '';
+  return `<div class="veh-photo"><img src="${url}" alt="${(o.vehicle_brand||'')+' '+(o.vehicle_model||'')}" loading="lazy" onerror="this.parentElement.style.display='none'"></div>`;
 }
 
 document.getElementById('tokenInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
@@ -299,7 +300,7 @@ function goToDashboard(){ state.view = 'dashboard'; render(); window.scrollTo(0,
 function renderDashboardView(){
   const o = state.data.order;
   const simple = simplifiedStatus(o.status);
-  const [title] = STATUS_BANNER_TEXT[o.status] || ['Status: ' + o.status];
+  const [title, bannerSub] = STATUS_BANNER_TEXT[o.status] || ['Status: ' + o.status, ''];
   return `
     <div style="padding:2px 4px 14px;">
       <div class="greet-title">${greeting()}${firstName(o.customer_name) ? ', '+firstName(o.customer_name) : ''} 👋</div>
@@ -317,8 +318,8 @@ function renderDashboardView(){
           <div class="mini-val">${o.mileage!=null ? o.mileage.toLocaleString('de-DE')+' km' : '–'}</div>
         </div>
         <div class="mini-card">
-          <div class="mini-label">Kraftstoff</div>
-          <div class="mini-val">${o.vehicle_brand ? (o.description&&o.description.includes('Diesel')?'Diesel':'–') : '–'}</div>
+          <div class="mini-label">Auftragsnummer</div>
+          <div class="mini-val">${o.order_number ? '#'+o.order_number : '–'}</div>
         </div>
       </div>
     </div>
@@ -330,7 +331,7 @@ function renderDashboardView(){
       <div class="status-banner ${simple}" style="margin-top:0;">
         <div>
           <div class="sb-title">${title}</div>
-          <div class="sb-sub">Ihr Fahrzeug ist aktuell in der Werkstatt</div>
+          <div class="sb-sub">${o.estimated_completion_text || bannerSub || ''}</div>
         </div>
       </div>
       <button class="btn primary" style="width:100%;margin-top:6px;" onclick="goToService()">Details &amp; Kundenportal öffnen →</button>
@@ -395,6 +396,9 @@ function renderStatusCard(o){
 // Hinweis statt eines Fehlers – kein Absturz, sobald die Function erweitert wird läuft
 // der Chat ohne weitere Änderungen hier.
 function renderChat(){
+  // Chat erst anzeigen, wenn portalApi Nachrichten mitliefert (message_list/message_send
+  // sind im Backend noch nicht umgesetzt) – sonst sähe der Kunde ein Feld, das nur Fehler liefert.
+  if(!Array.isArray(state.data.messages)) return '';
   const msgs = (state.data.messages || []).slice().sort((a,b)=> (a.created_date||'').localeCompare(b.created_date||''));
   return `
     <div class="card">
@@ -447,7 +451,7 @@ function renderFaelligkeiten(o){
   const now = new Date();
   const tuvSoon = tuvDate && ((tuvDate-now)/(1000*3600*24) < 60);
   const last = getLastServiceInfo();
-  const lastDate = last.log_date ? fmtDate(last.log_date) : null;
+  const lastDate = last && last.log_date ? fmtDate(String(last.log_date).slice(0,10)) : null;
   return `
     <div class="card">
       <div class="card-title">🔧 Fälligkeiten</div>
@@ -465,40 +469,32 @@ function renderFaelligkeiten(o){
           ${serviceDate ? `<div class="mini-val">${fmtDDMM(serviceDate)}</div>` : `<div class="mini-val missing">nicht hinterlegt</div>`}
         </div>
       </div>
-      ${last.demo ? `<div class="demo-note">* Letzter Service: Beispielanzeige</div>` : ''}
     </div>
   `;
 }
 
-// HINWEIS: portalApi liefert aktuell keine WorkshopLog-Daten mit (state.data.workshop_logs
-// existiert nicht). Dieser Demo-Eintrag zeigt nur, wie ein echter Bericht aussehen würde,
-// sobald die Function das liefert. Sobald workshop_logs echt ankommt, wird DEMO_LOG ignoriert.
-const DEMO_SERVICEBERICHT = {
-  demo: true,
-  log_type: 'qualitaet',
-  title: 'Qualitätskontrolle nach Inspektion',
-  description: 'Ölwechsel durchgeführt, Bremsen vorne und hinten geprüft (Belagstärke i.O.), Reifendruck kontrolliert und angepasst, Beleuchtung geprüft. Keine Mängel festgestellt. Fahrzeug zur Abholung freigegeben.',
-  log_date: '2026-08-31',
-  employee_name: 'Marco Bianchi',
-};
+// Servicebericht: nur echte WorkshopLogs anzeigen (kommen mit, sobald portalApi sie liefert).
+// Vorher stand hier ein Demo-Bericht – für echte Pilotkunden irreführend, daher entfernt.
+const LOG_TYPE_LABELS = { reparatur:'Reparatur', uebergabe:'Übergabe', schaden:'Schaden', qualitaet:'Qualitätskontrolle', sonstiges:'Bericht' };
 
 function getLastServiceInfo(){
   const logs = (state.data.workshop_logs || []).slice().sort((a,b)=> (b.log_date||b.created_date||'').localeCompare(a.log_date||a.created_date||''));
-  return logs[0] || DEMO_SERVICEBERICHT;
+  return logs[0] || null;
 }
 
 function renderServicebericht(){
   const last = getLastServiceInfo();
+  if(!last) return '';
+  const d = last.log_date ? fmtDate(String(last.log_date).slice(0,10)) : null;
   return `
     <div class="card">
-      <div class="card-title">📄 Letzter Servicebericht${last.demo ? ' <span style="color:var(--accent2);font-weight:600;">(Demo)</span>' : ''}</div>
+      <div class="card-title">📄 Letzter Servicebericht</div>
       <div class="report-summary">
-        <div class="rs-type">${last.log_type||'Bericht'}</div>
+        <div class="rs-type">${LOG_TYPE_LABELS[last.log_type]||'Bericht'}</div>
         <div class="rs-title">${last.title||''}</div>
         <div class="rs-desc">${last.description||''}</div>
-        <div class="rs-date">${last.log_date ? fmtDDMM(fmtDate(last.log_date)) : ''}${last.employee_name ? ' · '+last.employee_name : ''}</div>
+        <div class="rs-date">${d ? fmtDDMM(d) : ''}${last.employee_name ? ' · '+last.employee_name : ''}</div>
       </div>
-      ${last.demo ? `<div class="empty" style="text-align:left;padding:10px 2px 0;">Beispielhafte Anzeige – echte Berichte erscheinen hier, sobald die Werkstatt-Datenanbindung erweitert ist.</div>` : ''}
     </div>
   `;
 }
@@ -582,45 +578,99 @@ function nextNDays(n){
   for(let i=0;i<n;i++){ const d = new Date(today); d.setDate(today.getDate()+i); days.push(d); }
   return days;
 }
+// SMS/WhatsApp erst einschalten, wenn die Zustellung im Backend nachweislich funktioniert.
+const ENABLE_SMS_WHATSAPP = false;
 const TIME_SLOTS = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00','15:30'];
 
 function renderAppointmentsAndBooking(){
-  const appts = (state.data.appointments||[]).slice().sort((a,b)=> (a.appointment_date+a.time_slot).localeCompare(b.appointment_date+b.time_slot));
-  const services = state.data.services || [];
+  const all = (state.data.appointments||[]).slice().sort((a,b)=> (String(a.appointment_date)+a.time_slot).localeCompare(String(b.appointment_date)+b.time_slot));
+  const todayIso = localIso(new Date());
+  const appts = all.filter(a => String(a.appointment_date||'').slice(0,10) >= todayIso && a.status!=='storniert');
+  const past = all.filter(a => String(a.appointment_date||'').slice(0,10) < todayIso && a.status!=='storniert').slice(-3).reverse();
+  const services = bookableServices();
 
   return `
     <div class="card">
       <div class="card-title">📅 Termin buchen</div>
       ${state.showBookForm ? renderBookForm(services) : `<div class="toggle-book" onclick="toggleBook()">+ Wählen Sie einen freien Slot – ganz ohne Telefon</div>`}
 
-      <div class="steps-label" style="margin-top:18px;">Ihre gebuchten Termine</div>
+      <div class="steps-label" style="margin-top:18px;">Ihre kommenden Termine</div>
       ${appts.length ? appts.map(a=>{
         const d = fmtDate(a.appointment_date);
         return `
         <div class="appt-item">
           <div class="appt-date"><div class="d">${d?d.getDate():'–'}</div><div class="m">${d?MONATE[d.getMonth()]:''}</div></div>
           <div class="appt-body">
-            <div class="appt-title">${a.service_name || (a.appointment_type==='fahrzeugabgabe'?'Fahrzeugabgabe':(a.appointment_type||'Termin'))}</div>
+            <div class="appt-title">${a.service_name || apptTypeTitle(a.appointment_type)}</div>
             <div class="appt-sub">${a.time_slot||''}${a.end_time?' – '+a.end_time:''} Uhr</div>
             <span class="appt-status ${a.status}">${APPT_STATUS_LABELS[a.status]||a.status}</span>
             ${(a.status==='bestaetigt'||a.status==='offen') ? `<div><button class="appt-cancel" onclick="cancelAppt('${a.id}')">Termin stornieren</button></div>` : ''}
           </div>
         </div>`;
-      }).join('') : '<div class="empty">Noch keine Termine gebucht.</div>'}
+      }).join('') : '<div class="empty">Keine kommenden Termine.</div>'}
+      ${past.length ? `<div class="steps-label" style="margin-top:18px;">Vergangene Termine</div>` + past.map(a=>{
+        const d = fmtDate(String(a.appointment_date).slice(0,10));
+        return `
+        <div class="appt-item" style="opacity:.6;">
+          <div class="appt-date"><div class="d">${d?d.getDate():'–'}</div><div class="m">${d?MONATE[d.getMonth()]:''}</div></div>
+          <div class="appt-body">
+            <div class="appt-title">${a.service_name || apptTypeTitle(a.appointment_type)}</div>
+            <div class="appt-sub">${a.time_slot||''} Uhr</div>
+          </div>
+        </div>`;
+      }).join('') : ''}
     </div>
   `;
+}
+
+// Datum als YYYY-MM-DD in Ortszeit (toISOString() rechnet in UTC und verschiebt
+// zwischen 0 und 2 Uhr nachts das Datum auf den Vortag).
+function apptTypeTitle(t){ const x = ANLIEGEN.find(a=>a.key===t); return x ? x.title : 'Termin'; }
+function localIso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+// Nur Dienstleistungen der eigenen Werkstatt anbieten (Backend liefert aktuell alle Werkstätten mit).
+function bookableServices(){
+  const wc = state.data.order && state.data.order.workshop_code;
+  return (state.data.services||[]).filter(s => s.is_active!==false && (!wc || !s.workshop_code || s.workshop_code===wc));
+}
+function servicePriceLabel(s){
+  const f = n => Number(n).toFixed(2).replace('.',',');
+  if(s.price_range_min!=null && s.price_range_max!=null) return f(s.price_range_min)+' € – '+f(s.price_range_max)+' €';
+  if(s.base_price!=null) return 'ab '+f(s.base_price)+' €';
+  return '';
+}
+// Buchbare Tage: kein Sonntag; heute nur, wenn noch ein Slot frei ist.
+function bookableDays(n){
+  const out = []; const d = new Date();
+  while(out.length < n){
+    if(d.getDay()!==0 && freeSlotsFor(localIso(d)).length) out.push(new Date(d));
+    d.setDate(d.getDate()+1);
+  }
+  return out;
+}
+// Freie Slots: Vergangenheit (Puffer 60 Min.) und eigene bestehende Termine ausgeblendet.
+// Eine echte Kapazitätsprüfung gegen alle Termine der Werkstatt muss im Backend passieren.
+function freeSlotsFor(iso){
+  const now = new Date();
+  const own = new Set((state.data.appointments||[]).filter(a=>a.status!=='storniert' && String(a.appointment_date).slice(0,10)===iso).map(a=>String(a.time_slot).slice(0,5)));
+  return TIME_SLOTS.filter(t=>{
+    if(own.has(t)) return false;
+    if(iso===localIso(now)){ const [h,m]=t.split(':').map(Number); const slot=new Date(now); slot.setHours(h,m,0,0); if(slot - now < 60*60*1000) return false; }
+    return true;
+  });
 }
 
 function toggleBook(){ state.showBookForm = !state.showBookForm; render(); }
 function selectAnliegen(key){ state.bookAnliegen = key; render(); }
 function selectService(id){ state.bookServiceId = (state.bookServiceId===id ? null : id); render(); }
-function selectDate(iso){ state.bookDate = iso; render(); }
+function selectDate(iso){ state.bookDate = iso; if(state.bookTime && !freeSlotsFor(iso).includes(state.bookTime)) state.bookTime = null; render(); }
 function selectTime(t){ state.bookTime = t; render(); }
 function selectChannel(c){ state.bookChannel = c; render(); }
 
 function renderBookForm(services){
-  const days = nextNDays(10);
-  if(!state.bookDate) state.bookDate = days[0].toISOString().slice(0,10);
+  const days = bookableDays(10);
+  if(!state.bookDate || !days.some(d=>localIso(d)===state.bookDate)) state.bookDate = localIso(days[0]);
+  const freeSlots = freeSlotsFor(state.bookDate);
   const selectedService = services.find(s=>s.id===state.bookServiceId);
 
   return `
@@ -634,18 +684,18 @@ function renderBookForm(services){
       `).join('')}
     </div>
 
-    <div class="service-list-label">Dienstleistung wählen (optional)</div>
+    ${services.length ? `<div class="service-list-label">Dienstleistung wählen (optional)</div>` : ''}
     ${services.map(s=>`
       <div class="service-opt ${state.bookServiceId===s.id?'active':''}" onclick="selectService('${s.id}')">
-        <div><div class="so-name">${s.name}</div><div class="so-dur">${s.estimated_duration_minutes} Min.</div></div>
-        <div class="so-price">${s.price_range_min!=null?s.price_range_min.toFixed(2).replace('.',','):'?'} €–${s.price_range_max!=null?s.price_range_max.toFixed(2).replace('.',','):'?'} €</div>
+        <div><div class="so-name">${s.name}</div><div class="so-dur">${s.estimated_duration_minutes ? s.estimated_duration_minutes+' Min.' : ''}</div></div>
+        <div class="so-price">${servicePriceLabel(s)}</div>
       </div>
     `).join('')}
 
     <div class="steps-label" style="margin-top:16px;">Datum wählen</div>
     <div class="date-row">
       ${days.map(d=>{
-        const iso = d.toISOString().slice(0,10);
+        const iso = localIso(d);
         return `
         <div class="date-chip ${state.bookDate===iso?'active':''}" onclick="selectDate('${iso}')">
           <div class="dc-day">${WOCHENTAGE[d.getDay()]}</div>
@@ -657,25 +707,27 @@ function renderBookForm(services){
 
     <div class="steps-label">Uhrzeit wählen</div>
     <div class="time-grid">
-      ${TIME_SLOTS.map(t=>`<div class="time-chip ${state.bookTime===t?'active':''}" onclick="selectTime('${t}')">${t}</div>`).join('')}
+      ${freeSlots.map(t=>`<div class="time-chip ${state.bookTime===t?'active':''}" onclick="selectTime('${t}')">${t}</div>`).join('')}
     </div>
 
     <div class="steps-label">Bestätigung erhalten via</div>
     <div class="channel-row">
       <div class="channel-chip ${state.bookChannel==='email'?'active':''}" onclick="selectChannel('email')">✉️ E-Mail</div>
-      <div class="channel-chip ${state.bookChannel==='sms'?'active':''}" onclick="selectChannel('sms')">📱 SMS</div>
-      <div class="channel-chip ${state.bookChannel==='whatsapp'?'active':''}" onclick="selectChannel('whatsapp')">💬 WhatsApp</div>
+      ${ENABLE_SMS_WHATSAPP ? `<div class="channel-chip ${state.bookChannel==='sms'?'active':''}" onclick="selectChannel('sms')">📱 SMS</div>
+      <div class="channel-chip ${state.bookChannel==='whatsapp'?'active':''}" onclick="selectChannel('whatsapp')">💬 WhatsApp</div>` : ''}
     </div>
 
-    <button class="btn primary" style="width:100%;" onclick="submitBooking()" ${!state.bookTime?'disabled':''}>📅 Termin verbindlich buchen</button>
+    <button class="btn primary" style="width:100%;" onclick="submitBooking()" ${(!state.bookTime||state.bookSending)?'disabled':''}>${state.bookSending?'Wird gebucht…':'📅 Termin verbindlich buchen'}</button>
     <div class="toggle-book" style="border:none;color:var(--text-faint);" onclick="toggleBook()">Abbrechen</div>
   `;
 }
 
 async function submitBooking(){
   const o = state.data.order;
+  if(state.bookSending) return;
   if(!state.bookDate || !state.bookTime){ alert('Bitte Datum und Uhrzeit wählen.'); return; }
-  const services = state.data.services || [];
+  const services = bookableServices();
+  state.bookSending = true; render();
   const svc = services.find(s=>s.id===state.bookServiceId);
   try{
     await callPortal('book', { appointment: {
@@ -698,6 +750,7 @@ async function submitBooking(){
     state.bookTime = null; state.bookServiceId = null;
     await reload();
   }catch(e){ alert('Fehler bei der Buchung: ' + e.message); }
+  finally{ state.bookSending = false; render(); }
 }
 
 async function cancelAppt(id){
