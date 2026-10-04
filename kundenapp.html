@@ -71,6 +71,7 @@
   .approval-status.abgelehnt{background:var(--redbg);color:var(--red);}
   .approval-status.rueckruf_angefordert{background:var(--bluebg);color:var(--blue);}
   .btn-row{display:flex;gap:8px;margin-top:4px;}
+  .card-hint{font-size:12.5px;color:var(--text-faint);margin:-4px 0 12px;line-height:1.4;}
   .btn{flex:1;border:none;border-radius:10px;padding:11px 8px;font-size:13.5px;font-weight:600;cursor:pointer;}
   .btn.primary{background:var(--accent);color:#fff;}
   .btn.outline{background:transparent;border:1px solid var(--border);color:var(--text);}
@@ -328,6 +329,7 @@ function renderDashboardView(){
 
     <div class="card" style="cursor:pointer;" onclick="goToService()">
       <div class="card-title">🔧 Aktueller Service</div>
+      <div class="card-hint">Wo Ihr Fahrzeug gerade steht – tippen Sie für alle Details.</div>
       <div class="status-banner ${simple}" style="margin-top:0;">
         <div>
           <div class="sb-title">${title}</div>
@@ -363,6 +365,7 @@ function renderWorkshopContact(){
   return `
     <div class="card">
       <div class="card-title">🏠 Ihre Werkstatt</div>
+      <div class="card-hint">Fragen zum Auftrag? Rufen Sie direkt an oder schreiben Sie eine E-Mail.</div>
       <div style="font-weight:700;font-size:15px;margin-bottom:4px;">${w.name||''}</div>
       ${w.address ? `<div style="color:var(--text-faint);font-size:13px;margin-bottom:10px;">${w.address}</div>` : ''}
       <div class="btn-row">
@@ -423,6 +426,7 @@ function renderChat(){
   return `
     <div class="card">
       <div class="card-title">💬 Nachrichten</div>
+      <div class="card-hint">Schreiben Sie der Werkstatt direkt – Antworten erscheinen hier.</div>
       <div class="chat-list" id="chatList">
         ${msgs.length ? msgs.map(m=>`
           <div class="chat-bubble ${m.sender==='kunde'?'kunde':'werkstatt'}">
@@ -475,6 +479,7 @@ function renderFaelligkeiten(o){
   return `
     <div class="card">
       <div class="card-title">🔧 Fälligkeiten</div>
+      <div class="card-hint">Wann die nächste Hauptuntersuchung und der nächste Service anstehen.</div>
       <div class="grid3">
         <div class="mini-card">
           <div class="mini-label">Letzter Service</div>
@@ -509,6 +514,7 @@ function renderServicebericht(){
   return `
     <div class="card">
       <div class="card-title">📄 Letzter Servicebericht</div>
+      <div class="card-hint">Was die Werkstatt zuletzt an Ihrem Fahrzeug geprüft und erledigt hat.</div>
       <div class="report-summary">
         <div class="rs-type">${LOG_TYPE_LABELS[last.log_type]||'Bericht'}</div>
         <div class="rs-title">${last.title||''}</div>
@@ -525,6 +531,7 @@ function renderHuAuBerichte(){
   return `
     <div class="card">
       <div class="card-title">📑 HU/AU-Berichte &amp; Dokumente</div>
+      <div class="card-hint">Berichte und Unterlagen zu Ihrem Fahrzeug – zum Öffnen antippen.</div>
       ${currentDocs.length ? currentDocs.map((d,i)=>`
         <div class="doc-item" onclick="openDocument(${i})" style="cursor:pointer;">
           <div class="doc-icon">📄</div>
@@ -568,6 +575,7 @@ function renderApprovals(){
   return `
     <div class="card">
       <div class="card-title">✅ Freigaben</div>
+      <div class="card-hint">Zusätzliche Arbeiten werden nur durchgeführt, wenn Sie sie hier freigeben.</div>
       ${approvals.map(a=>`
         <div class="approval">
           <div class="approval-status ${a.status}">${APPROVAL_LABELS[a.status]||a.status}</div>
@@ -612,6 +620,7 @@ function renderAppointmentsAndBooking(){
   return `
     <div class="card">
       <div class="card-title">📅 Termin buchen</div>
+      <div class="card-hint">Freien Termin wählen – Sie erhalten eine Bestätigung per E-Mail.</div>
       ${state.showBookForm ? renderBookForm(services) : `<div class="toggle-book" onclick="toggleBook()">+ Wählen Sie einen freien Slot – ganz ohne Telefon</div>`}
 
       <div class="steps-label" style="margin-top:18px;">Ihre kommenden Termine</div>

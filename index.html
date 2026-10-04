@@ -132,6 +132,8 @@
     display:flex;
     flex-direction:column;
     padding:20px 14px;
+    overflow-y:auto;
+    min-height:0;
   }
   .logo{
     display:flex;
@@ -560,6 +562,27 @@
   .v-text{font-size:13px;}
   .v-text b{font-weight:600;}
   .v-when{font-size:11px;color:var(--text-faint);margin-top:2px;}
+
+  /* Demo-Banner + Erklärungs-Boxen */
+  .trial-banner{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 22px;
+    background:linear-gradient(90deg,rgba(139,92,246,.22),rgba(217,70,239,.16));border-bottom:1px solid rgba(167,139,250,.35);font-size:13px;}
+  .trial-banner b{color:var(--text);} .trial-banner span{color:var(--text-dim);}
+  .trial-banner a{flex-shrink:0;background:var(--accent);color:#fff;text-decoration:none;font-weight:700;font-size:12.5px;padding:7px 14px;border-radius:9px;}
+  .help-box{flex-shrink:0;display:flex;gap:14px;align-items:flex-start;margin:12px 22px 0;padding:14px 16px;border-radius:14px;
+    background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.28);}
+  .help-box .hb-ic{width:28px;height:28px;border-radius:50%;background:#3b5b8f;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;}
+  .help-box .hb-body{flex:1;font-size:13.5px;line-height:1.5;color:var(--text-dim);}
+  .help-box .hb-body b{color:var(--text);}
+  .help-box ul{list-style:none;margin:6px 0 0;padding:0;}
+  .help-box li{padding-left:18px;position:relative;margin-top:3px;} .help-box li:before{content:'→';position:absolute;left:0;color:var(--text-faint);}
+  .help-box .hb-tip{margin-top:6px;font-size:12.5px;color:var(--text-faint);}
+  .help-box .hb-ok{flex-shrink:0;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:9px;padding:8px 14px;font-weight:600;font-size:13px;cursor:pointer;}
+  @media (max-width:760px){ .help-box{margin:10px 12px 0;} .trial-banner{padding:8px 12px;} }
+  .switch-user{display:flex;align-items:center;gap:10px;padding:9px 12px;margin:2px 0 4px;border-radius:10px;cursor:pointer;color:var(--text-dim);font-size:13.5px;font-weight:600;}
+  .switch-user .ic{width:17px;height:17px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+  .switch-user .ic svg{width:17px;height:17px;}
+  .switch-user:hover{background:var(--surface-hover);color:var(--text);}
+  @media (max-width: 900px){ .device .sidebar .switch-user{font-size:0;justify-content:center;} }
 
   /* bottom nav */
   .bottom-nav{
@@ -1169,9 +1192,12 @@
   <div class="statusbar">
     <div id="clock">09:41 · Montag, 26. Mai</div>
     <div class="right">
-      <span>WLAN</span><span>100%</span>
+      <span id="netState">Online</span>
     </div>
   </div>
+
+  <div class="trial-banner" id="trialBanner" style="display:none;"></div>
+  <div id="helpBar"></div>
 
   <div class="shell">
     <!-- SIDEBAR -->
@@ -1183,6 +1209,7 @@
       <div class="nav" id="sidebarNav"></div>
       <div class="sidebar-foot">
         <div class="user-id-row" id="userIdRow"></div>
+        <div class="switch-user" id="switchUserBtn" title="Mitarbeiter wechseln"><span class="ic" id="switchUserIcon"></span> Mitarbeiter wechseln</div>
         <div class="logout" id="logoutBtn"><span class="ic" id="logoutIcon"></span> Abmelden</div>
       </div>
     </aside>
@@ -1225,6 +1252,7 @@
       <div class="sheet-item" data-mainview="dashboard"><span class="sheet-ic"></span> Dashboard</div>
       <div class="sheet-item" data-mainview="dokumente"><span class="sheet-ic"></span> Dokumente</div>
       <div class="sheet-item" data-mainview="einstellungen"><span class="sheet-ic"></span> Einstellungen</div>
+      <div class="sheet-item" id="sheetSwitchUser"><span class="sheet-ic">⇄</span> Mitarbeiter wechseln</div>
       <div class="sheet-item danger" id="sheetLogout"><span class="sheet-ic"></span> Abmelden</div>
       <div class="sheet-cancel" id="sheetCancel">Abbrechen</div>
     </div>
@@ -1895,6 +1923,7 @@ function renderChrome(){
     </div>
   `).join('');
   document.getElementById('logoutIcon').innerHTML = iconLogout;
+  const su = document.getElementById('switchUserIcon'); if(su) su.innerHTML = svg('<path d="M16 3h5v5"/><path d="M21 3l-7 7"/><path d="M8 21H3v-5"/><path d="M3 21l7-7"/>');
   document.getElementById('filterIcon').innerHTML = iconFilter;
   document.getElementById('worklistCollapseBtn').innerHTML = iconChevronsLeft;
   document.querySelector('#worklistExpandBtn .wl-rail-ic').innerHTML = iconChevRight;
@@ -1932,9 +1961,78 @@ function renderChrome(){
 }
 
 /* ---------- main view switching ---------- */
+/* ---------- Kurze Erklärungen je Bereich (einmal pro Gerät, „Verstanden“ blendet aus) ---------- */
+const HELP_TEXTS = {
+  dashboard:{ t:'Dein Tag auf einen Blick.', d:'Erledigte Aufgaben, deine Arbeitszeit und die nächsten Termine.', li:['Die Zahlen aktualisieren sich automatisch alle 30 Sekunden.','Tippe auf einen Termin, um den Auftrag zu öffnen.'] },
+  auftraege:{ t:'Deine Aufträge.', d:'Links die Aufträge nach Status, rechts alle Details zum ausgewählten Fahrzeug.', li:['Aufgabe antippen und „Start“ drücken – die Zeit läuft bis „Fertig“ oder „Pause“.','Fotos und Sprachbericht hängst du direkt an die Aufgabe.','„Auftrag abschließen“ geht erst, wenn die Checkliste komplett ist – danach wird der Kunde automatisch informiert.'], tip:'Tipp: Unten rechts findest du Schnellnotizen und ALEX für Technikfragen.' },
+  alle:{ t:'Alle Aufträge der Werkstatt.', d:'Status und Fortschritt jedes Fahrzeugs, das gerade in der Werkstatt ist.', li:['Tippe auf eine Zeile, um den Auftrag zu öffnen.'] },
+  hebebuehnen:{ t:'Hebebühnen.', d:'Welche Bühne belegt, frei oder außer Betrieb ist.', li:['Die Belegung wird im AutoLeitwerk-Dashboard zugewiesen.','Tippe auf eine belegte Bühne, um den Auftrag zu öffnen.'] },
+  termine:{ t:'Termine.', d:'Fahrzeugannahmen und Übergaben für heute und morgen.', li:['Online-Buchungen der Kunden erscheinen hier automatisch.'] },
+  benutzer:{ t:'Team.', d:'Alle aktiven Mitarbeiter dieser Werkstatt.', li:['Mitarbeiter anlegen, Rollen und PINs ändern geht im AutoLeitwerk-Dashboard.'] },
+  auslastung:{ t:'Team-Auslastung.', d:'Verplante Zeit je Mitarbeiter, berechnet aus der geschätzten Dauer offener Aufgaben (8-Stunden-Tag).', li:['Über 100 % heißt: mehr Arbeit verplant, als an einem Tag schaffbar ist.'] },
+  support:{ t:'Hilfe.', d:'ALEX beantwortet Technikfragen sofort, bei Problemen mit der App erreichst du uns per E-Mail oder Telefon.' },
+  einstellungen:{ t:'Einstellungen.', d:'Dein Profil und die App-Einstellungen auf diesem Tablet.', li:['„Erklärungen wieder anzeigen“ blendet alle Hilfe-Boxen erneut ein.'] },
+};
+function helpSeen(view){ try{ return localStorage.getItem('autoleitwerk.helpSeen.'+view)==='1'; }catch(_){ return false; } }
+function renderHelpBar(){
+  const el = document.getElementById('helpBar'); if(!el) return;
+  const h = HELP_TEXTS[state.mainView];
+  if(!state.currentUser || !h || helpSeen(state.mainView)){ el.innerHTML=''; return; }
+  el.innerHTML = `<div class="help-box">
+    <div class="hb-ic">?</div>
+    <div class="hb-body"><b>${h.t}</b> ${h.d}
+      ${h.li ? `<ul>${h.li.map(x=>`<li>${x}</li>`).join('')}</ul>` : ''}
+      ${h.tip ? `<div class="hb-tip">${h.tip}</div>` : ''}
+    </div>
+    <button class="hb-ok" id="helpOkBtn">Verstanden</button>
+  </div>`;
+}
+function resetHelp(){ try{ Object.keys(HELP_TEXTS).forEach(v=>localStorage.removeItem('autoleitwerk.helpSeen.'+v)); }catch(_){} renderHelpBar(); }
+
+/* ---------- Demo-Banner (14 Tage kostenlos) ---------- */
+const TRIAL_DAYS = 14;
+function renderTrialBanner(){
+  const el = document.getElementById('trialBanner'); if(!el) return;
+  if(!state.currentUser){ el.style.display='none'; return; }
+  const ws = (state.base44Data && state.base44Data.workshop) || {};
+  let detail = '';
+  if(ws.trial_ends_at){
+    const end = new Date(ws.trial_ends_at);
+    if(!isNaN(end)){
+      const left = Math.ceil((end - new Date())/86400000);
+      if(ws.subscription_status==='active'){ el.style.display='none'; return; }
+      detail = left > 0 ? ` – noch ${left} ${left===1?'Tag':'Tage'} (bis ${formatDateDE(ws.trial_ends_at)})` : ' – Testphase abgelaufen';
+    }
+  }
+  const isAdmin = state.currentUser.role==='admin';
+  el.innerHTML = `<div><b>Demo-Version: ${TRIAL_DAYS} Tage kostenlos testen${detail}.</b> <span>Alle Funktionen frei, ohne Verpflichtung.</span></div>
+    ${isAdmin && SUPPORT_EMAIL ? `<a href="mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('AutoLeitwerk Pilot buchen – '+(state.workshopToken||''))}">Pilot buchen</a>` : ''}`;
+  el.style.display='flex';
+}
+
+/* ---------- Mitarbeiter wechseln: nur mit eigenem Namen + PIN ---------- */
+function endSession(keepWorkshopCode){
+  // laufende Zeiterfassung sauber beenden, damit keine offenen Zeiten liegen bleiben
+  (orders||[]).forEach(o=>(o.tasks||[]).forEach(t=>{
+    if(t.timeStatus==='running'){ t.elapsedSec = currentElapsed(t); t.timeStatus='paused'; t.startedAt=null; stopWorktime(t); }
+  }));
+  const code = state.workshopToken;
+  showLoginScreen();
+  state.pendingTask = {}; state.pendingOrderStatus = {}; state.writeSupported = null;
+  state.selectedOrderId = null; state.selectedTaskId = null; state.base44Data = null;
+  document.getElementById('trialBanner').style.display='none';
+  document.getElementById('helpBar').innerHTML='';
+  if(keepWorkshopCode && code){
+    const c = document.getElementById('loginWorkshopCode'); if(c) c.value = code;
+    const n = document.getElementById('loginEmployeeName'); if(n) setTimeout(()=>n.focus(), 50);
+  }
+}
+
 function setMainView(view){
   state.mainView = view;
   renderChrome();
+  renderHelpBar();
+  renderTrialBanner();
   if(view==='auftraege'){
     document.getElementById('auftraegeView').style.display='flex';
     document.getElementById('otherView').style.display='none';
@@ -2624,6 +2722,7 @@ function renderEinstellungenView(ov){
     </div>
 `}
     <div class="set-section-title">App</div>
+    <div class="set-card"><div class="set-row" id="resetHelpBtn" style="cursor:pointer;"><div><div class="set-row-label">Erklärungen wieder anzeigen</div><div class="set-row-sub">Blendet die Hilfe-Boxen in allen Bereichen erneut ein</div></div></div></div>
     <div class="set-card">
       <div class="set-row">
         <div><div class="set-row-label">Dunkelmodus</div><div class="set-row-sub">AutoLeitwerk nutzt immer das dunkle Theme</div></div>
@@ -3693,7 +3792,23 @@ document.addEventListener('click', (e)=>{
   }
   if(e.target.closest('#logoutConfirm')){
     document.getElementById('logoutModal').style.display='none';
+    endSession(false);
+    document.getElementById('loginScreen').style.display='none';
     document.getElementById('loggedOutScreen').style.display='flex';
+    return;
+  }
+  if(e.target.closest('#switchUserBtn') || e.target.closest('#sheetSwitchUser')){
+    document.getElementById('mehrOverlay').style.display='none';
+    endSession(true);
+    return;
+  }
+  if(e.target.closest('#helpOkBtn')){
+    try{ localStorage.setItem('autoleitwerk.helpSeen.'+state.mainView,'1'); }catch(_){}
+    renderHelpBar();
+    return;
+  }
+  if(e.target.closest('#resetHelpBtn')){
+    resetHelp();
     return;
   }
   if(e.target.closest('#reLoginBtn')){
@@ -3706,11 +3821,7 @@ document.addEventListener('click', (e)=>{
     performLogin();
     return;
   }
-  const profileCard = e.target.closest('[data-profile]');
-  if(profileCard){
-    openPinScreen(parseInt(profileCard.dataset.profile,10));
-    return;
-  }
+  // Früher: Profil antippen = Wechsel ohne Anmeldung. Bewusst entfernt – Wechsel nur über Name + PIN.
   if(e.target.closest('#profileBackToLogin')){
     showLoginScreen();
     return;
@@ -4696,7 +4807,10 @@ function showLoginScreen(){
 /* ---------- Live-Uhr (lokale Systemzeit) ---------- */
 const WOCHENTAGE = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
 const MONATE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+function updateNetState(){ const el=document.getElementById('netState'); if(el){ el.textContent = navigator.onLine ? 'Online' : 'Offline'; el.style.color = navigator.onLine ? '' : 'var(--danger)'; } }
+window.addEventListener('online', updateNetState); window.addEventListener('offline', updateNetState);
 function updateClock(){
+  updateNetState();
   const el = document.getElementById('clock');
   if(!el) return;
   const now = new Date();
