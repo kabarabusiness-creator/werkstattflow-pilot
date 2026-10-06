@@ -294,6 +294,14 @@
     overflow:hidden;
   }
   .v-photo img{width:100%;height:100%;object-fit:cover;display:block;}
+  /* Fahrzeugfoto als Titelbild (vorübergehend im Tablet, später im Dashboard) */
+  .v-photo{position:relative;}
+  .v-photo-actions{position:absolute;left:6px;right:6px;bottom:6px;display:flex;gap:6px;}
+  .v-photo-btn{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:6px 6px;border-radius:8px;border:none;cursor:pointer;
+    background:rgba(8,8,15,.72);color:#fff;font:600 11.5px/1.1 inherit;backdrop-filter:blur(4px);}
+  .v-photo-btn.primary{background:var(--accent);}
+  .v-photo-btn svg{width:14px;height:14px;flex-shrink:0;}
+  .v-photo.uploading:after{content:'Wird hochgeladen…';position:absolute;top:6px;left:6px;font-size:11px;font-weight:600;color:#fff;background:rgba(8,8,15,.72);padding:3px 7px;border-radius:6px;}
   .v-info{flex:1;min-width:200px;}
   .v-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .v-title-row h3{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',Arial,sans-serif;font-size:20px;font-weight:700;}
@@ -1295,6 +1303,9 @@
   <input type="file" id="photoFileInput" accept="image/*" multiple style="display:none;">
   <!-- hidden camera-capture input - opens the device's native camera app directly -->
   <input type="file" id="cameraFileInput" accept="image/*" capture="environment" style="display:none;">
+  <!-- Fahrzeugfoto (Titelbild): Kamera bzw. Galerie -->
+  <input type="file" id="vehiclePhotoCamera" accept="image/*" capture="environment" style="display:none;">
+  <input type="file" id="vehiclePhotoGallery" accept="image/*" style="display:none;">
 
   <!-- OFFLINE BANNER -->
   <div class="offline-banner" id="offlineBanner" style="display:none;"></div>
@@ -1467,7 +1478,8 @@ function b44MapOrder(o, allTasks, demoImageByBrand){
     dauer: o.estimated_completion_text || '–',
     rest: '–', eta: o.estimated_completion_text || '–',
     created: o.created_date ? formatDateTimeDE(o.created_date) : '–',
-    image: o.vehicle_photo || o.image_url || (demoImageByBrand && demoImageByBrand[o.vehicle_brand]) || FALLBACK_CAR_IMAGE,
+    _serverPhoto: o.vehicle_photo || o.image_url || null,
+    image: (state.localVehiclePhoto && state.localVehiclePhoto[o.id]) || o.vehicle_photo || o.image_url || FALLBACK_CAR_IMAGE, // keine Marken-Beispielfotos mehr – sonst sieht es aus, als gäbe es schon ein echtes Foto
     vin: '–', farbe: '–', motor: '–', kraftstoff: '–', getriebe: '–', tuev: (o.tuv_next_date ? formatDateDE(o.tuv_next_date) : '–'),
     tel: o.phone || '',
     desc: o.description || '',
@@ -1961,6 +1973,47 @@ function renderChrome(){
 }
 
 /* ---------- main view switching ---------- */
+/* ---------- Fahrzeugfoto als Titelbild ----------
+   VORÜBERGEHEND: Später wird das Titelbild im Base44-Dashboard hinterlegt; dann kann dieser
+   Block samt Knöpfen (vehiclePhotoCameraBtn/GalleryBtn) wieder raus.
+   Upload über tabletAction media_upload; das Backend setzt Order.vehicle_photo. Bis die neue
+   URL vom Server zurückkommt, zeigt das Tablet das Foto lokal an (state.localVehiclePhoto). */
+function hasRealVehiclePhoto(o){ return !!(state.localVehiclePhoto[o.id] || o._serverPhoto); }
+function compressImage(file, maxSide, quality){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('Bild konnte nicht gelesen werden')); };
+    img.src = url;
+  });
+}
+async function setVehiclePhoto(o, file){
+  if(!o || !file) return;
+  let dataUrl;
+  try{ dataUrl = await compressImage(file, 1600, 0.82); }
+  catch(e){ showUpdateToast('Foto konnte nicht verarbeitet werden.'); return; }
+  state.localVehiclePhoto[o.id] = dataUrl;
+  o.image = dataUrl;
+  state.vehiclePhotoBusy = o.id;
+  renderOrderList(); renderDetail();
+  const res = await tabletAction('media_upload', {
+    order_id: o.id, task_id: null,
+    filename: `fahrzeug-${o.orderNumber}-${Date.now()}.jpg`,
+    data_url: dataUrl, caption: 'Fahrzeugfoto', set_as_vehicle_photo: true,
+  });
+  state.vehiclePhotoBusy = null;
+  if(res && res.file_url){ state.localVehiclePhoto[o.id] = res.file_url; o.image = res.file_url; showUpdateToast('Fahrzeugfoto gespeichert.'); }
+  renderOrderList(); renderDetail();
+}
+
 /* ---------- Kurze Erklärungen je Bereich (einmal pro Gerät, „Verstanden“ blendet aus) ---------- */
 const HELP_TEXTS = {
   dashboard:{ t:'Dein Tag auf einen Blick.', d:'Erledigte Aufgaben, deine Arbeitszeit und die nächsten Termine.', li:['Die Zahlen aktualisieren sich automatisch alle 30 Sekunden.','Tippe auf einen Termin, um den Auftrag zu öffnen.'] },
@@ -2018,7 +2071,7 @@ function endSession(keepWorkshopCode){
   }));
   const code = state.workshopToken;
   showLoginScreen();
-  state.pendingTask = {}; state.pendingOrderStatus = {}; state.writeSupported = null;
+  state.pendingTask = {}; state.pendingOrderStatus = {}; state.writeSupported = null; state.localVehiclePhoto = {}; state.vehiclePhotoBusy = null;
   state.selectedOrderId = null; state.selectedTaskId = null; state.base44Data = null;
   document.getElementById('trialBanner').style.display='none';
   document.getElementById('helpBar').innerHTML='';
@@ -2854,7 +2907,7 @@ let state = {
   shiftId:null,
   workshopToken:null, workshopName:null,
   sessionToken:null, sessionExpires:null, pendingLogin:null, pinBusy:false, b44Appointments:null,
-  writeSupported:null, pendingTask:{}, pendingOrderStatus:{},
+  writeSupported:null, pendingTask:{}, pendingOrderStatus:{}, localVehiclePhoto:{}, vehiclePhotoBusy:null,
 };
 
 const roles = [
@@ -2974,7 +3027,13 @@ function renderDetail(){
     </div>
     <div class="detail-body">
       <div class="vehicle-card">
-        <div class="v-photo"><img src="${o.image}" alt="${o.vehicle}" loading="lazy" onerror="this.parentElement.innerHTML=carIcon(&quot;${o.status}&quot;)"></div>
+        <div class="v-photo ${state.vehiclePhotoBusy===o.id?'uploading':''}">
+          <img src="${o.image}" alt="${o.vehicle}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{innerHTML:carIcon(&quot;${o.status}&quot;)}))">
+          <div class="v-photo-actions">
+            <button class="v-photo-btn primary" id="vehiclePhotoCameraBtn" title="Fahrzeug fotografieren">${iconCamera} ${hasRealVehiclePhoto(o)?'Neu':'Foto'}</button>
+            <button class="v-photo-btn" id="vehiclePhotoGalleryBtn" title="Foto aus der Galerie wählen">Galerie</button>
+          </div>
+        </div>
         <div class="v-info">
           <div class="v-title-row">
             <h3>${o.vehicle}</h3>
@@ -3797,6 +3856,8 @@ document.addEventListener('click', (e)=>{
     document.getElementById('loggedOutScreen').style.display='flex';
     return;
   }
+  if(e.target.closest('#vehiclePhotoCameraBtn')){ document.getElementById('vehiclePhotoCamera').click(); return; }
+  if(e.target.closest('#vehiclePhotoGalleryBtn')){ document.getElementById('vehiclePhotoGallery').click(); return; }
   if(e.target.closest('#switchUserBtn') || e.target.closest('#sheetSwitchUser')){
     document.getElementById('mehrOverlay').style.display='none';
     endSession(true);
@@ -3840,6 +3901,13 @@ document.addEventListener('click', (e)=>{
   }
 });
 
+['vehiclePhotoCamera','vehiclePhotoGallery'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', (e)=>{
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if(f) setVehiclePhoto(getSelectedOrder(), f);
+  });
+});
 document.getElementById('photoFileInput').addEventListener('change', (e)=>{
   if(e.target.files && e.target.files.length>0){
     addPhotoToCurrentTask(e.target.files);
