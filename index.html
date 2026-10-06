@@ -1358,33 +1358,42 @@ const SUPPORT_EMAIL = 'info@kabaradigital.de';
 /* Schreibaktionen ans Backend (Base44-Funktion tabletAction, Bearer-Token wie getTabletData).
    Solange die Funktion fehlt, bleiben Änderungen lokal auf diesem Tablet erhalten (siehe
    carryOverLocalState) und es erscheint einmalig ein Hinweis. */
+const ACTION_LABELS = { task_update:'Aufgabe', worktime_start:'Zeiterfassung', worktime_stop:'Zeiterfassung', media_upload:'Foto', note_add:'Notiz', order_complete:'Auftragsabschluss' };
 async function tabletAction(action, payload){
   if(state.writeSupported === false) return null;
   if(!state.sessionToken) return null;
   const controller = new AbortController();
-  const timeoutId = setTimeout(()=>controller.abort(), 15000);
+  // Foto-Upload braucht deutlich länger als die anderen Aktionen
+  const timeoutId = setTimeout(()=>controller.abort(), action==='media_upload' ? 60000 : 15000);
+  // leere Felder (z. B. task_id beim Fahrzeugfoto) gar nicht erst mitschicken
+  const body = { action };
+  Object.entries(payload||{}).forEach(([k,v])=>{ if(v!==null && v!==undefined) body[k]=v; });
   try{
     const res = await fetch(BASE44_ACTION_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + state.sessionToken },
-      body: JSON.stringify(Object.assign({ action }, payload||{})),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     const data = await res.json().catch(()=>({}));
     if(res.status===401){ handleSessionExpired(); return null; }
-    if(res.status===404 || data.error==='unknown_action'){
+    const functionMissing = res.status===404 && /not found or not deployed/i.test(String(data.message||data.detail||''));
+    if(functionMissing || data.error==='unknown_action'){
       if(state.writeSupported !== false){
         state.writeSupported = false;
         showUpdateToast('Hinweis: Speichern auf dem Server ist noch nicht aktiv – Änderungen bleiben nur auf diesem Tablet.');
       }
       return null;
     }
-    if(!res.ok) throw new Error(data.error || ('Fehler ' + res.status));
+    if(!res.ok){ const err = new Error(data.error || data.message || ('HTTP ' + res.status)); err.status = res.status; err.body = data; throw err; }
     state.writeSupported = true;
     return data;
   } catch(e){
-    console.warn('Speichern fehlgeschlagen ('+action+'):', e.message);
-    showUpdateToast('Speichern fehlgeschlagen – bitte Verbindung prüfen.');
+    const what = ACTION_LABELS[action] || action;
+    const reason = e.name==='AbortError' ? 'Zeitüberschreitung' : (e.status ? `${e.status} ${e.message}` : 'keine Verbindung');
+    state.lastWriteError = { action, reason, body: e.body || null, at: new Date().toISOString() };
+    console.warn('Speichern fehlgeschlagen', state.lastWriteError);
+    showUpdateToast(`${what} nicht gespeichert (${reason}).`);
     return null;
   } finally { clearTimeout(timeoutId); }
 }
