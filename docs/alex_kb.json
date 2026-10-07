@@ -1,0 +1,605 @@
+[
+ {
+  "category": "Diagnose-Workflow & Fehlercode-Grundlagen",
+  "title": "Systematischer Diagnose-Workflow bei unbekanntem Fehler",
+  "keywords": "diagnose, diagnostizieren, fehler, schritte, systematisch, vorgehen, workflow",
+  "content": "1. Fehlerspeicher komplett auslesen (alle Steuergeräte, nicht nur Motor) – auch gespeicherte/sporadische Codes mitnehmen\n2. Freeze-Frame-Daten zum Code prüfen: unter welchen Bedingungen (Drehzahl, Temperatur, Last) trat der Fehler auf\n3. Kundengespräch/Symptome abgleichen: passt das gemeldete Symptom zum gespeicherten Code, oder gibt es Zusatzsymptome ohne Code\n4. Plausibilitätsprüfung vor Bauteiltausch: Sensor/Aktor gezielt mit Live-Daten oder Multimeter verifizieren statt auf Verdacht tauschen\n5. Nach Reparatur: Fehler löschen, Probefahrt/Testzyklus, erneut auslesen zur Bestätigung",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Diagnose-Workflow & Fehlercode-Grundlagen",
+  "title": "Aufbau eines OBD-Fehlercodes (z.B. P0401)",
+  "keywords": "aufbau, bedeutet, code, fehlercode, obd, unterschied",
+  "content": "1. Buchstabe – System: P=Antrieb (Powertrain), B=Karosserie (Body), C=Fahrwerk (Chassis), U=Netzwerk/Kommunikation (Network)\n2. Ziffer – Norm: 0=generischer SAE-Code (herstellerübergreifend genormt), 1=herstellerspezifischer Code\n3. Ziffer – Subsystem-Gruppe: z.B. 1er/2er=Kraftstoff/Luft-Gemisch, 3er=Zündung/Aussetzer, 4er=Zusatzemission (AGR/Sekundärluft), 5er=Fahrzeuggeschwindigkeit/Leerlauf, 6er=Steuergerät/Ausgänge, 7er/8er=Getriebe\n4.–5. Ziffer – laufende Nummer innerhalb der Gruppe, identifiziert das konkrete Bauteil/die konkrete Störung",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Diagnose-Workflow & Fehlercode-Grundlagen",
+  "title": "Pending / Stored / Permanent – Fehlercode-Status verstehen",
+  "keywords": "bestätigt, code, fehlercode, pending, permanent, status, unbestätigt, unterschied",
+  "content": "Pending (anstehend): Fehler ist einmal aufgetreten, aber noch nicht in zwei aufeinanderfolgenden Fahrzyklen bestätigt – MIL/Warnleuchte i.d.R. noch aus\nStored/Confirmed (gespeichert/bestätigt): Fehler wurde in mehreren Zyklen bestätigt – MIL an, Freeze-Frame-Daten liegen vor\nPermanent: Code bleibt gespeichert, bis das Fahrzeug den Fehler selbst über mehrere saubere Fahrzyklen als behoben erkennt – lässt sich nicht per Diagnosegerät manuell löschen (Missbrauchsschutz für Abgasrelevanz)\nPraxisrelevanz: Ein \"Permanent\"-Code nach Reparatur ist normal und verschwindet erst nach erfolgreicher Selbstdiagnose des Fahrzeugs, nicht durch Löschen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Diagnose-Workflow & Fehlercode-Grundlagen",
+  "title": "Freeze-Frame-Daten interpretieren",
+  "keywords": "fehlerspeicher, frame, freeze, momentaufnahme, standbilddaten",
+  "content": "Freeze-Frame = Schnappschuss der Betriebsparameter (Drehzahl, Last, Temperatur, Geschwindigkeit, Kraftstoff-Trimmwerte) im Moment der Fehlererkennung\nHilft zu unterscheiden: last-/drehzahlabhängiger Fehler vs. Fehler im Leerlauf/Standgas\nKühlmitteltemperatur im Freeze-Frame prüfen: Fehler nur im Kaltlauf aufgetreten? → andere Ursachenrichtung als bei warmem Motor\nWichtig: Freeze-Frame zeigt die Bedingungen bei Fehler-erkennung, nicht zwingend die Grundursache selbst",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Diagnose-Workflow & Fehlercode-Grundlagen",
+  "title": "Sporadischen/intermittierenden Fehler diagnostizieren",
+  "keywords": "diagnose, fehler, geht, intermittierend, kommt, sporadisch, wackelkontakt",
+  "content": "Fehlerspeicher-Historie nutzen: Häufigkeit und Zeitabstand der Fehlerauslösung geben Hinweis auf Auslöser (Vibration, Temperatur, Feuchtigkeit)\nWackelkontakte gezielt provozieren: Kabelbaum/Steckverbinder im Verdachtsbereich unter Betrieb leicht bewegen/klopfen, dabei Live-Daten beobachten\nDatenlogger/Langzeitmessung sinnvoll, wenn Fehler im Werkstattbetrieb nicht reproduzierbar ist (z.B. nur bei Nässe oder nach langer Fahrt)\nSteckverbinder auf Korrosion/aufgeweitete Kontakte prüfen – häufigste Ursache für \"kommt und geht\"-Fehler bei Elektronik",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Diagnose-Workflow & Fehlercode-Grundlagen",
+  "title": "Fehlercode löschen ohne Ursachenbehebung – typischer Fallstrick",
+  "keywords": "bringt, fehlercode, fehlerspeicher, löschen, nur",
+  "content": "Löschen des Fehlerspeichers behebt nie die Ursache – der Code kommt nach dem nächsten passenden Fahrzyklus wieder, wenn der Defekt weiterbesteht\nVor dem Löschen: Freeze-Frame-Daten und Auftretenshäufigkeit dokumentieren, sonst gehen Diagnoseinformationen verloren\nSinnvoller Einsatz von \"Löschen\": gezielt nach abgeschlossener Reparatur, um die Selbstdiagnose des Fahrzeugs für Permanent-Codes neu zu starten\nKundenkommunikation: \"Lampe aus\" durch reines Löschen ohne Reparatur ist keine Lösung und sollte klar so benannt werden",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Diagnose-Workflow & Fehlercode-Grundlagen",
+  "title": "Diagnose bei Symptom ohne gespeicherten Fehlercode",
+  "keywords": "aber, code, dtc, fehler, fehlercode, gespeichert, kein, problem, vorhanden",
+  "content": "Nicht jeder wahrnehmbare Fehler erzeugt einen DTC – viele Systeme melden erst ab einer definierten Schwelle/Häufigkeit\nVorgehen: Live-Daten im Grenzbereich beobachten (z.B. Lambdawerte, Raildruck-Ist/Soll, Sensorspannungen), statt auf einen Code zu warten\nKundenbeschreibung strukturiert abfragen: wann genau, wie oft, unter welchen Bedingungen (kalt/warm, Last, Wetter)\nVergleichsmessung an einem baugleichen, fehlerfreien Fahrzeug kann bei unklaren Grenzwerten helfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Schaltpläne & Elektrik – Grundlagen",
+  "title": "CAN-Bus – Grundlagen & Diagnoseansatz",
+  "keywords": "abschlusswiderstand, bus, can, canbus, diagnose, fehler, terminierung",
+  "content": "Zwei Leitungen (CAN-High/CAN-Low), differentielles Signal – dadurch robust gegen elektromagnetische Störungen\nAbschlusswiderstände (i.d.R. 2× 120Ω an den Bus-Enden, zusammen ca. 60Ω messbar zwischen den Leitungen) – fehlender/defekter Widerstand verursacht Kommunikationsausfälle\nTypischer Fehler \"Steuergerät nicht erreichbar\": zuerst Spannungsversorgung/Masse des Steuergeräts prüfen, dann Bus-Pegel mit Oszilloskop, erst danach Steuergerät selbst verdächtigen\nMehrere Steuergeräte gleichzeitig nicht erreichbar deutet auf Bus-Problem (Kurzschluss/Unterbrechung/Abschlusswiderstand) statt Einzelbauteil hin",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Schaltpläne & Elektrik – Grundlagen",
+  "title": "LIN-Bus – Grundlagen",
+  "keywords": "bus, lin",
+  "content": "Single-Wire-Bus (eine Datenleitung + Masse) für einfache Komponenten – günstiger als CAN, aber langsamer und weniger störsicher\nTypischer Einsatz: Fensterheber, Sitzverstellung, Klimabedienteile, Regensensor – Komfortelektronik statt sicherheitsrelevante Systeme\nEin Master-Steuergerät steuert mehrere LIN-Slaves im Zeitschlitzverfahren – fällt der Master aus, sind alle angeschlossenen Slaves betroffen\nDiagnose ähnlich CAN: erst Spannungsversorgung/Masse der Teilnehmer prüfen, dann Signalpegel auf der einzelnen Datenleitung",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Schaltpläne & Elektrik – Grundlagen",
+  "title": "Spannungsabfalltest (Voltage Drop) – Vorgehen",
+  "keywords": "drop, leitungswiderstand, prüfen, spannungsabfall, voltage",
+  "content": "Prinzip: Multimeter parallel über den zu prüfenden Leitungs-/Kontaktabschnitt, Verbraucher dabei eingeschaltet (Strom muss fließen, sonst kein aussagekräftiges Ergebnis)\nDeutlich sinnvoller als reine Widerstandsmessung im spannungslosen Zustand – findet auch Übergangswiderstände, die erst unter Last auftreten\nTypische Prüfpunkte: Batterie-Pluspol bis Verbraucher, Verbraucher-Masse bis Batterie-Minuspol, einzelne Steckverbindungen im Verdachtsbereich\nAuffällig hoher Spannungsabfall an einem Abschnitt (deutlich höher als an vergleichbaren Abschnitten) markiert die Fehlerstelle – Korrosion, lockerer Kontakt oder Kabelbruch mit Teilkontakt",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Schaltpläne & Elektrik – Grundlagen",
+  "title": "Massefehler/Erdungsproblem finden",
+  "keywords": "erdungsfehler, masse, masseband, massefehler, masseproblem, schlechte",
+  "content": "Typische Symptome: mehrere, scheinbar unzusammenhängende elektrische Probleme gleichzeitig, flackernde Beleuchtung, unplausible Sensorwerte\nMassebänder (Motor-Karosserie, Getriebe-Karosserie) auf Korrosion/lockeren Sitz prüfen – häufigste Fehlerquelle bei Masseproblemen\nSpannungsabfalltest zwischen Bauteil-Masseanschluss und Batterie-Minuspol durchführen, um die genaue Stelle mit erhöhtem Übergangswiderstand einzugrenzen\nVorsicht bei Ersatz-/Behelfsmassen: unsachgemäß gesetzte Zusatzmassen können neue Ausgleichsströme und Folgefehler verursachen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Schaltpläne & Elektrik – Grundlagen",
+  "title": "Multimeter vs. Oszilloskop – wann was einsetzen",
+  "keywords": "multimeter, oszi, oszilloskop",
+  "content": "Multimeter: statische/quasi-statische Werte – Spannung, Widerstand, Strom, Spannungsabfall – reicht für die meisten Standardprüfungen\nOszilloskop: immer dann nötig, wenn sich ein Signal über die Zeit ändert – Sensorsignale (Kurbelwelle/Nockenwelle), PWM-Signale, Kommunikationsbusse (CAN/LIN), Zündsignale\nFaustregel: wackelt/schwankt ein Multimeter-Messwert unerklärlich, oder soll ein \"sporadischer\" Aussetzer im Signal selbst gefunden werden → zum Oszilloskop wechseln\nBus-Diagnose (CAN/LIN) ist ohne Oszilloskop nur eingeschränkt möglich – reine Spannungsmessung zeigt keine Signalqualität/Störungen im Datenverkehr",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Schaltpläne & Elektrik – Grundlagen",
+  "title": "Schaltplan lesen – Grundlagen & Symbole",
+  "keywords": "bedeutung, les, schaltplan, schaltplansymbole, schaltzeichen",
+  "content": "Leitungsfarben und Querschnittsangaben im Schaltplan mit der realen Verkabelung abgleichen – Farbcode ist herstellerspezifisch, immer die Legende des jeweiligen Plans nutzen\nBauteile werden meist als vereinfachte Symbole dargestellt (Schalter, Relais, Steckverbinder, Massepunkte) – Legende/Symbolverzeichnis am Anfang des Dokuments klärt die genaue Bedeutung\nSteckverbinder-Nummerierung und Pin-Bezeichnung im Plan mit der Beschriftung am realen Stecker abgleichen, bevor gemessen wird\nStromlaufrichtung meist von oben (Versorgung/Plus) nach unten (Masse) dargestellt – hilft beim schnellen Einordnen unbekannter Pläne",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Schaltpläne & Elektrik – Grundlagen",
+  "title": "Steckverbinder/Pins prüfen – Kontaktwiderstand",
+  "keywords": "kontaktwiderstand, pin, pinbelegung, prüfen, steckverbinder",
+  "content": "Sichtprüfung zuerst: Korrosion, aufgeweitete/verbogene Kontakte, Feuchtigkeitsspuren im Steckergehäuse\nKontaktwiderstand nie nur \"gesteckt\" prüfen – Spannungsabfalltest unter Last liefert das aussagekräftigere Ergebnis als eine Widerstandsmessung im spannungslosen Zustand\nBei Verdacht auf Wackelkontakt: Steckverbinder unter Betrieb/Live-Daten-Beobachtung leicht bewegen, um den Fehler gezielt zu provozieren\nPassende Pin-Auszieh-/Prüfwerkzeuge verwenden statt mit Prüfspitzen direkt in die Kontaktkammer zu gehen – vermeidet dauerhaft aufgeweitete Kontakte durch die Prüfung selbst",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Symptom-/Phänomen-Diagnose ohne DTC",
+  "title": "Ruckeln beim Beschleunigen – Diagnoseansatz",
+  "keywords": "beschleunig, beschleunigen, last, ruckel, ruckeln, ruckelt",
+  "content": "Kalt vs. warm unterscheiden: nur im Kaltlauf → oft Gemischaufbereitung/Sensorik noch nicht in Regelbereich; auch warm → eher mechanisch/elektrisch dauerhaft\nMögliche Ursachen: Zündaussetzer (Kerzen/Spulen), Kraftstoffdruck schwankt, verschmutzte Drosselklappe, Nebenluft, verstopfter Kraftstofffilter\nVorgehen: zuerst Fehlerspeicher auslesen (auch Sporadische/History), dann Fuel-Trims im Livedaten-Modus unter Last beobachten, danach gezielt Zündung/Einspritzung eingrenzen\nBei Automatik zusätzlich: Wandlerüberbrückungskupplung (Schlupf) als Ursache für last-abhängiges Ruckeln in Betracht ziehen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Symptom-/Phänomen-Diagnose ohne DTC",
+  "title": "Startprobleme bei Kälte – Diagnoseansatz",
+  "keywords": "kaltstart, kälte, problem, schlecht, schwer, startproblem, startprobleme",
+  "content": "Diesel: Glühkerzen/Glühzeitsteuergerät prüfen (Vorglühzeit, Anzahl defekter Kerzen per Stromzangenmessung), Kompression bei Verdacht auf Motoralter\nBenziner: Batteriezustand/Kaltstartstrom, Zündkerzen-Zustand, Kraftstoffdruckhaltung über Nacht (Standdruck-Abfall = undichtes Rückschlagventil/Injektor)\nBei beiden: Kühlmitteltemperatursensor-Plausibilität prüfen (falscher Wert → falsches Kaltstart-Kennfeld)\nSymptom \"dreht durch, springt aber nicht an\" bei Kälte spricht eher für Kraftstoff/Zündung als für den Anlasser selbst",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Symptom-/Phänomen-Diagnose ohne DTC",
+  "title": "Quietschen/Pfeifen/Zischen – Geräusch eingrenzen",
+  "keywords": "bremse, motor, pfeift, quietscht, zischt",
+  "content": "Hochfrequentes Quietschen beim Start/Kaltlauf: meist Keilrippenriemen (Spannrolle/Riemenscheiben-Fluchtung prüfen)\nPfeifen unter Last/bei Gas: Hinweis auf Unterdruck-/Ladeluftleck (Schläuche, Ladeluftkühler, Turboladerdichtungen)\nZischen aus dem Motorraum bei laufendem Motor: Abgasleck (Krümmerdichtung) oder Vakuumleck am Bremskraftverstärker\nVorgehen: Geräusch bei stehendem Fahrzeug mit Stethoskop/Hörrohr lokalisieren, danach gezielt Bauteil prüfen statt auf Verdacht tauschen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Symptom-/Phänomen-Diagnose ohne DTC",
+  "title": "Vibration bei bestimmter Geschwindigkeit – Diagnoseansatz",
+  "keywords": "fahrt, geschwindigkeit, tempo, vibration, vibriert",
+  "content": "Vibration tempoabhängig (nicht drehzahlabhängig) → meist Rad/Reifen: Unwucht, Reifenschaden, Felge verzogen\nVibration beim Bremsen: Bremsscheibe verzogen (Scheibendickenschwankung)\nVibration nur bei Beschleunigung/Last, unabhängig vom Tempo: Antriebswelle/Gelenkwelle (Gummilager, Gleichlaufgelenk) oder Motorlager\nVorgehen: Probefahrt mit Zuordnung Lenkrad (Vorderachse) vs. Sitz/Karosserie (Hinterachse/Antriebsstrang), danach gezielt Rad tauschen/Unwucht prüfen zur Eingrenzung",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Symptom-/Phänomen-Diagnose ohne DTC",
+  "title": "Automatikgetriebe ruckelt/schaltet hart – Diagnoseansatz",
+  "keywords": "automatik, getriebe, hart, ruckelt, schaltruck",
+  "content": "Getriebeöl-Zustand und -Stand prüfen (verbranntes/dunkles Öl, falscher Füllstand sehr häufige Ursache)\nFehlerspeicher Getriebesteuergerät separat auslesen (oft eigenes Modul, nicht immer über Standard-OBD sichtbar)\nAdaptionswerte/Anlernung: nach Ölwechsel oder Batterietrennung ggf. Getriebeadaption zurückgesetzt – Anlernfahrt nach Herstellervorgabe nötig\nHartes Schalten nur kalt, normal warm: meist unkritisch (Ölviskosität) – nur warm hart/ruckelnd: eher Kupplungspaket/Wandler-Thema",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Symptom-/Phänomen-Diagnose ohne DTC",
+  "title": "Verkokung der Einlassventile bei Direkteinspritzern – bekanntes Serienthema",
+  "keywords": "carbon, einlassventile, ventile, verkokt, verkokung, verrußt",
+  "content": "Betrifft v.a. Benzin-Direkteinspritzer (FSI/TSI/TFSI, viele BMW-N-Motoren, u.a.): Kraftstoff spült bei Saugrohreinspritzung die Ventile, bei Direkteinspritzung fehlt dieser Reinigungseffekt\nAnzeichen: Leistungsverlust, unruhiger Leerlauf, erhöhter Kraftstoffverbrauch, teils Zündaussetzer bei starker Verkokung\nDiagnose: Endoskopie durch die Zündkerzenbohrung zur Sichtprüfung der Einlassventile\nReparatur: Walnussschalen-Strahlen (Soda-/Walnuss-Reinigung) der Ventile bei ausgebautem Ansaugtrakt; vorbeugend: hochwertigen Kraftstoff, regelmäßige Additiv-Reinigung",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Symptom-/Phänomen-Diagnose ohne DTC",
+  "title": "Steuerkettenlängung – allgemeines Diagnoseprinzip (motorunabhängig)",
+  "keywords": "gelängt, kettenlängung, n47, steuerkette, verschleiß",
+  "content": "Kette \"längt\" sich durch Verschleiß an Bolzen/Buchsen, nicht durch tatsächliche Materialdehnung – Kettenspanner gleicht das bis zu einem Grenzwert aus\nTypisches Symptom: Rasseln/Klappern im Kaltstart (kurz, dann leiser durch Öldruckaufbau am Spanner)\nDiagnose: Nockenwellen-/Kurbelwellen-Sensorkorrelation im Diagnosegerät prüfen (Phasenabweichung = Indiz für gelängte Kette)\nWichtig: motorspezifische Ausfallmuster (z.B. bestimmte Baureihen) gesondert nachschlagen – Ausfallzeitpunkt/Kilometerlaufleistung variiert stark je Motor",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Komponentenwissen & Sensorik",
+  "title": "Hall- vs. Induktivgeber (Kurbel-/Nockenwellensensor)",
+  "keywords": "hallgeber, induktivgeber, kurbelwellensensor, nockenwellensensor, typ, unterschied",
+  "content": "Induktivgeber (passiv, 2-Draht): erzeugt Wechselspannung durch Zahnrad-Vorbeibewegung, Signalamplitude drehzahlabhängig, im Stillstand kein Signal messbar\nHallgeber (aktiv, 3-Draht: Versorgung/Masse/Signal): liefert Rechtecksignal, auch bei sehr niedriger Drehzahl/Stillstand auswertbar (wichtig fürs Anlassen)\nPrüfung Induktivgeber: Widerstandsmessung an den beiden Signalleitungen (Sollwert laut Hersteller, üblich einige hundert Ohm bis ca. 1–2 kΩ) plus Oszilloskop-Signalform (sauberer Sinus)\nPrüfung Hallgeber: Versorgungsspannung am Stecker prüfen, dann Rechtecksignal am Oszilloskop bei Motor durchdrehen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Komponentenwissen & Sensorik",
+  "title": "Breitband- vs. Sprung-Lambdasonde",
+  "keywords": "breitbandsonde, lambdasonde, sprungsonde",
+  "content": "Sprungsonde (Zirkondioxid): springt sprunghaft zwischen ca. 0,1 V (mager) und 0,9 V (fett) um Lambda=1 – nur Aussage \"zu fett/zu mager\", kein genauer Wert\nBreitbandsonde (Planarsonde, meist 5–6 Leitungen): liefert stufenlosen Strom-/Spannungswert proportional zum tatsächlichen Lambda-Wert, auch weit von Lambda=1 entfernt messbar (wichtig für Direkteinspritzer/Magerbetrieb)\nPosition: Sprungsonde meist hinter Kat (Diagnosesonde), Breitbandsonde vor Kat (Regelsonde)\nDiagnosehinweis: träge reagierende Sonde (verzögerte Spannungswechsel) = klassisches Alterungssymptom, oft mit P0420/P0430 verwechselt",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Komponentenwissen & Sensorik",
+  "title": "Piezo- vs. Magnetventil-Injektoren",
+  "keywords": "injektor, magnetventil, piezo, typ, unterschied",
+  "content": "Magnetventil-Injektor: klassische Bauart, Schaltzeiten im Bereich einiger hundert Mikrosekunden, robuster/günstiger, etwas trägere Ansteuerung\nPiezo-Injektor: Piezokristall dehnt sich unter Spannung, extrem schnelle Schaltzeiten (Mehrfacheinspritzung präziser möglich), typisch bei modernen Common-Rail-Dieseln und einigen Benzin-Direkteinspritzern\nDiagnose gemeinsam: Stromzangenmessung am Injektor-Steuersignal zeigt Ansteuerungsmuster; Mengenabgleich-Werte im Diagnosegerät je Zylinder vergleichen (Ausreißer = Injektor-Verdacht)\nWichtig: Piezo-Injektoren reagieren empfindlicher auf Kraftstoffverunreinigung – bei Tausch grundsätzlich Kraftstoffsystem auf Verschmutzung prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Komponentenwissen & Sensorik",
+  "title": "AGR/EGR-System – Diagnose ohne konkreten Fehlercode",
+  "keywords": "agr, diagnose, egr, klappe, prüfen, system",
+  "content": "Funktion: führt Abgas zurück in den Ansaugtrakt, senkt Verbrennungstemperatur, reduziert Stickoxide (NOx)\nTypische mechanische Symptome: AGR-Ventil hängt (verkokt) → unruhiger Leerlauf, Leistungsverlust, oder hängt offen → mageres Gemisch/Startprobleme\nPrüfung: Ansteuerung im Diagnosegerät aktivieren (Stellgliedtest) und Klappenbewegung/Ansaugdruckänderung beobachten; bei elektrischem AGR-Ventil zusätzlich Potentiometer-Rückmeldung live prüfen\nSichtprüfung: Ventil ausbauen, Verkokungsgrad beurteilen – bei Diesel meist deutlich stärker verkokt als bei Benziner",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Komponentenwissen & Sensorik",
+  "title": "DPF (Dieselpartikelfilter) – Regenerationsbedingungen",
+  "keywords": "bdpf, partikelfilter, russpartikelfilter",
+  "content": "Aktive Regeneration wird vom Steuergerät eingeleitet, wenn Beladung (Differenzdrucksensor + Ruß-Modell) einen Schwellwert erreicht – meist alle paar hundert km\nVoraussetzungen für erfolgreiche Regeneration: Motor auf Betriebstemperatur, längere Fahrt mit gleichmäßiger Last (Autobahn/Landstraße), ausreichend Kraftstoff im Tank\nHäufige Ursache für DPF-Probleme: reine Kurzstreckenfahrten verhindern Regeneration → Filter läuft voll, Warnleuchte, im Extremfall Leistungsreduzierung\nDiagnose: Beladungswert und Anzahl fehlgeschlagener Regenerationen im Diagnosegerät auslesen, vor Filtertausch immer Ursache (z.B. Injektor, AGR, Ölverdünnung) mitprüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Komponentenwissen & Sensorik",
+  "title": "ADAS-Kalibrierung (Kamera/Radar) & Lenkwinkelsensor – Grundprinzip",
+  "keywords": "adas, kalibrier, kamera, lenkwinkelsensor, radar",
+  "content": "Nach Arbeiten mit Bezug zu Achsgeometrie, Windschutzscheibentausch, Stoßfängerarbeiten oder Batterietrennung ist eine Neukalibrierung der Fahrerassistenzsysteme oft zwingend vorgeschrieben\nStatische Kalibrierung: Kalibriertafeln in exakt definiertem Abstand/Winkel vor dem Fahrzeug, Fahrzeug muss eben und exakt ausgerichtet stehen\nDynamische Kalibrierung: Kalibrierfahrt unter definierten Bedingungen (Geschwindigkeit, Fahrbahnmarkierungen, Diagnosegerät verbunden)\nLenkwinkelsensor-Anlernen: nach Reparaturen an Lenkung/Achsgeometrie zwingend, sonst fehlerhafte ESP-/Spurhalteassistent-Funktion – Ablauf grundsätzlich: Lenkung auf Geradeausstellung, Anlernvorgang über Diagnosegerät starten, danach Prüffahrt",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Anlernprozeduren & Codierungen",
+  "title": "Drosselklappen-Anlernen – Grundprinzip",
+  "keywords": "anlernen, drosselklappe, drosselklappenanpassung",
+  "content": "Nötig nach: Drosselklappentausch, Reinigung, Batterietrennung oder Fehlercode-Löschung bei elektronischer Drosselklappe (E-Gas)\nAblauf grundsätzlich: Zündung ein (Motor aus), Anlernvorgang über Diagnosegerät starten, Steuergerät fährt die Klappe selbstständig an Anschläge und lernt Grundstellung/Endanschläge\nNach dem Anlernen: Leerlaufverhalten und Gasannahme im Livedaten-Modus prüfen, Probefahrt zur Kontrolle\nOhne korrektes Anlernen drohen: unruhiger Leerlauf, Notlaufprogramm, ruckartige Gasannahme",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Anlernprozeduren & Codierungen",
+  "title": "Batterie-Anlernen/Registrierung (Batteriemanagement)",
+  "keywords": "agm, anlernen, batterie, codieren, efb, neue, registrieren, registrierung",
+  "content": "Grundprinzip: viele Fahrzeuge mit intelligentem Batteriemanagement (Batteriesensor/BMS) müssen nach Batterietausch über das Diagnosegerät die neue Batterie \"anmelden\" – sonst rechnet das System weiter mit dem alten Alterungszustand\nFolgen bei fehlender Registrierung: falsches Lademanagement, ggf. verkürzte Batterielebensdauer, Start-Stopp-Funktion kann deaktiviert bleiben\nAGM- vs. EFB-Batterie: AGM (meist bei Start-Stopp mit Rekuperation) hat höhere Zyklenfestigkeit als EFB – beim Tausch grundsätzlich denselben Batterietyp wie Original verwenden, sonst Ladestrategie/BMS-Fehlanpassung möglich\nAblauf grundsätzlich: Batteriekapazität (Ah) und -typ im Diagnosegerät hinterlegen, Anlernvorgang bestätigen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Anlernprozeduren & Codierungen",
+  "title": "DPF-Rückstellung nach Filtertausch – Grundprinzip",
+  "keywords": "dpf, getauscht, russfilter, rückstellung, servicereset, zurücksetzen",
+  "content": "Nach mechanischem DPF-Tausch muss der Beladungswert/Servicezähler im Steuergerät zurückgesetzt werden, sonst rechnet das System mit dem alten (vollen) Beladungsstand weiter\nAblauf grundsätzlich: über Diagnosegerät \"Bauteil ersetzt\"-Funktion oder gezielten Servicereset für den Partikelfilter auswählen und bestätigen\nWichtig: unterscheiden zwischen reinem Reset (nach Tausch) und aktiver Zwangsregeneration (bei zugesetztem, aber noch verbautem Filter) – unterschiedliche Menüpunkte im Diagnosegerät",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Anlernprozeduren & Codierungen",
+  "title": "EPB (Elektrische Parkbremse) in Servicestellung / Diagnose-Bremsenentlüftung",
+  "keywords": "bremsenentlüftung, diagnose, elektrische, epb, parkbremse, service, wartung, zurückfahren",
+  "content": "Vor Arbeiten an Bremsbelägen/Bremssattel bei elektrischer Parkbremse: Kolben müssen über Diagnosegerät in Service-/Wartungsposition zurückgefahren werden (nicht mechanisch gewaltsam zurückdrücken)\nNach Arbeiten: Anlernvorgang/Grundeinstellung über Diagnosegerät, danach Funktionstest (Anziehen/Lösen) vor der ersten Fahrt\nBremsenentlüftung per Diagnosegerät: bei modernen Systemen (v.a. mit ESP-Pumpe im Kreislauf) ist eine softwaregestützte Entlüftungsroutine oft vorgeschrieben, rein manuelles Pedal-Pumpen reicht nicht sicher aus\nSicherheitshinweis: Fahrzeug bei EPB-Arbeiten gegen Wegrollen zusätzlich mechanisch sichern (Unterlegkeile), da die elektrische Bremse während der Arbeit ausgehängt ist",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Fehlercodes – spezifische DTCs",
+  "title": "P0401 – AGR-System, unzureichender Durchfluss",
+  "keywords": "p0401",
+  "content": "Mögliche Ursache: AGR-Ventil verkokt oder klemmt\nReparatur: AGR-Ventil ausbauen, reinigen oder ersetzen\nBenötigte Teile: AGR-Ventil, Dichtsatz\nArbeitszeit: ca. 1,5 Std.\nHinweis: nach Reparatur Fehlerspeicher löschen & Probefahrt",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Fehlercodes – spezifische DTCs",
+  "title": "P0300 – Zündaussetzer (mehrere Zylinder)",
+  "keywords": "p0300, verbrennungsaussetzer, zündaussetzer",
+  "content": "Mögliche Ursachen: Zündkerzen verschlissen, Zündspule defekt, Kraftstoffzufuhr mangelhaft\nPrüfung: Zylinderindividuelle Aussetzererkennung im Diagnosegerät auslesen\nReparatur: Zündkerzen/-spulen tauschen, Kompression prüfen wenn Ursache unklar\nHinweis: bei Ruckeln unter Last zusätzlich Kraftstoffdruck prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Fehlercodes – spezifische DTCs",
+  "title": "P0420 – Katalysator-Wirkungsgrad unter Schwelle",
+  "keywords": "kat, katalysator, p0420",
+  "content": "Mögliche Ursachen: Katalysator gealtert/beschädigt, vorgelagerte Lambdasonde defekt, Abgasleck vor Sonde\nPrüfung: beide Lambdasonden-Signale vergleichen, Abgasanlage auf Undichtigkeiten prüfen\nReparatur: erst Sonden/Dichtigkeit prüfen, Katalysator nur bei bestätigtem Defekt tauschen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Fehlercodes – spezifische DTCs",
+  "title": "P0171/P0174 – Gemisch zu mager",
+  "keywords": "gemisch, mager, p0171, p0174",
+  "content": "Mögliche Ursachen: Nebenluft (undichter Ansaugtrakt), verschmutzter Luftmassenmesser, schwache Kraftstoffpumpe\nPrüfung: Rauchtest Ansaugtrakt, Luftmassenmesser reinigen/prüfen, Kraftstoffdruck messen\nHinweis: Bank 1 = Zylinder mit Zylinder 1, Bank 2 = gegenüberliegende Bank bei V-Motoren",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Fehlercodes – spezifische DTCs",
+  "title": "P0128 – Kühlmitteltemperatur unterhalb Regelwert",
+  "keywords": "kühlmitteltemperatur, p0128, thermostat",
+  "content": "Mögliche Ursache: Thermostat klemmt offen\nPrüfung: Warmlaufverhalten beobachten, Motor erreicht Betriebstemperatur nicht in erwarteter Zeit\nReparatur: Thermostat ersetzen, danach Kühlsystem entlüften",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Klackern im Fahrwerksbereich – typische Ursachen",
+  "keywords": "geräusch, klacker, klackert",
+  "content": "Koppelstange Stabilisator ausgeschlagen\nFederbeinlager defekt\nAchsmanschette gerissen\nPrüfung: Sichtprüfung + Abklopfen bei angehobener Achse\nArbeitszeit Koppelstange: ca. 0,5 Std. je Seite",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Bremsenprüfung – Richtwerte",
+  "keywords": "bremse, bremsen",
+  "content": "Mindestbelagstärke: 2 mm\nAnzugsdrehmoment Radschrauben: meist 100–140 Nm (Herstellerangabe beachten)\nNach Belagwechsel: Bremse mehrfach betätigen, Probefahrt mit Bremstest",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Ölwechsel – Standardablauf",
+  "keywords": "oel",
+  "content": "Motor auf Betriebstemperatur bringen\nAltöl ablassen, Ölfilter wechseln\nNeues Öl nach Herstellerfreigabe einfüllen\nÖlstand nach 5 Minuten Wartezeit kontrollieren",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Batterie & Starthilfe",
+  "keywords": "batterie, starthilfe",
+  "content": "Ruhestrom prüfen (Sollwert meist &lt; 50 mA, Herstellerangabe beachten)\nBatterietest: Ladezustand + Kaltstartstrom (CCA) mit Batterietester prüfen\nStarthilfe: Plus zuerst an leere Batterie, Minus an Massepunkt (nicht direkt an leere Batterie), Reihenfolge beim Abklemmen umgekehrt\nNach Batterietausch: Anlernvorgang/Registrierung bei vielen Fahrzeugen nötig (Batteriemanagement)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Zahnriemen/Steuerriemen – Wechsel",
+  "keywords": "steuerriemen, zahnriemen, zahnriemenwechsel",
+  "content": "Wechselintervall herstellerspezifisch, üblich 60.000–160.000 km oder 5–10 Jahre\nBei Wechsel: Wasserpumpe, Spannrolle & Umlenkrolle mittauschen (Satz)\nBei Riss/Sprung: Zylinderkopfschaden möglich (Ventilschäden bei Interferenzmotor prüfen)\nNach Einbau: Steuerzeiten mit Werkzeugsatz exakt nach Herstellervorgabe fixieren",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Kupplung – Verschleißanzeichen",
+  "keywords": "kupplung",
+  "content": "Rutschen: Motordrehzahl steigt ohne entsprechenden Vortrieb, v.a. bei Last/Steigung\nRupfen beim Anfahren: Mitnehmerscheibe verölt oder verschlissen\nKupplungspedal-Spiel/Geräusche: Ausrücklager prüfen\nArbeitszeit Kupplungssatz: stark modellabhängig (oft 3–6 Std., Getriebeausbau nötig)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Klimaanlage/Klimaservice",
+  "keywords": "klima, klimaanlage, klimaservice",
+  "content": "Klimaservice: Kältemittel absaugen, Anlage auf Dichtigkeit prüfen, evakuieren, neu befüllen (Menge nach Herstellerangabe)\nKältemitteltyp beachten: R134a oder R1234yf – nicht verwechseln\nSchwacher Kühleffekt: meist Kältemittelverlust durch Leckage, UV-Kontrastmittel zur Lecksuche nutzen\nUnangenehmer Geruch: Verdampfer-/Innenraumfilter prüfen, ggf. Klimaanlagen-Desinfektion",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Zündkerzenwechsel",
+  "keywords": "zündkerze",
+  "content": "Wechselintervall: meist 30.000–60.000 km (Iridium/Platin-Kerzen auch deutlich länger), Herstellerangabe beachten\nElektrodenabstand vor Einbau prüfen (falls nicht vorjustiert)\nAnzugsdrehmoment beachten – nicht überdrehen (Gewindeschaden im Zylinderkopf möglich)\nZündspule bei Wechsel auf Risse/Ölspuren im Kerzenschacht prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Kühlmittel wechseln",
+  "keywords": "kühlmittel, kühlsystem, kühlwasser",
+  "content": "Kühlsystem drucklos machen, Altkühlmittel vollständig ablassen (auch Motorblock-Ablassschraube falls vorhanden)\nNur freigegebenes Kühlmittel-Konzentrat mischen (Frostschutz i.d.R. bis -25°C bis -35°C je nach Klima)\nNach Befüllung: System entlüften (Entlüftungsschraube/-ventil), Motor mit offenem Deckel/Ventil warmlaufen lassen\nKühlmittelstand nach Abkühlen erneut kontrollieren",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Bremsflüssigkeit wechseln",
+  "keywords": "bremsflüssigkeit, dot",
+  "content": "Wechselintervall: meist alle 2 Jahre unabhängig vom Kilometerstand (Wasseraufnahme durch Hygroskopie)\nNur freigegebene Spezifikation verwenden (meist DOT 4, Herstellerangabe beachten)\nReihenfolge beim Entlüften: vom Rad mit dem längsten Bremsleitungsweg zum kürzesten (meist hinten rechts → vorne links)\nNach Wechsel: Bremspedalgefühl und Dichtigkeit prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Stoßdämpfer/Fahrwerk prüfen",
+  "keywords": "fahrwerk, stoßdämpfer",
+  "content": "Sichtprüfung: Ölaustritt am Dämpfer = Defekt, immer achsweise (paarweise) tauschen\nFunktionstest: Fahrzeugecke eindrücken – schwingt sie mehr als 1–1,5x nach, Dämpfer verschlissen\nBegleitend prüfen: Domlager, Federn auf Setzung/Bruch, Koppelstangen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Achsvermessung/Spureinstellung",
+  "keywords": "achsvermessung, spur, spureinstellung",
+  "content": "Vorher prüfen: Reifendruck korrekt, Fahrwerk unbeschädigt, Fahrzeug auf Nennlast/-beladung\nTypische Ursache für einseitigen Verschleiß: Spur oder Sturz außerhalb Toleranz\nNach Fahrwerksarbeiten (Federn, Querlenker, Spurstangen) immer Achsvermessung empfehlen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "HU/AU-Vorbereitung (TÜV)",
+  "keywords": "hauptuntersuchung, tüv",
+  "content": "Prüfpunkte vorab checken: Beleuchtung, Bremsen, Reifenprofil (min. 1,6 mm, empfohlen mehr), Abgaswerte\nFälligkeitsplakette am Kennzeichen kontrollieren, mit next_service_date im Auftrag abgleichen\nHäufige Mängel: Bremsscheiben korrodiert, Ölundichtigkeiten, defekte Beleuchtung, Achsspiel\nBei Mängeln: Frist zur Nachbesserung beachten (i.d.R. 1 Monat für Nachprüfung)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "AdBlue/SCR-System",
+  "keywords": "adblue",
+  "content": "Warnmeldung \"Restreichweite\" ernst nehmen – bei leerem Tank verweigert der Motor nach Fahrtende den Neustart\nNur AdBlue nach ISO 22241 verwenden (32,5% Harnstofflösung), Verunreinigung vermeiden\nFehlercodes im SCR-System: oft Dosierventil, NOx-Sensor oder Tankheizung betroffen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Anlasser/Startprobleme",
+  "keywords": "anlasser, nicht, springt, startet",
+  "content": "Kein Geräusch beim Startversuch: Batterie, Massepunkte, Zündschloss/Starterrelais prüfen\nKlacken ohne Durchdrehen: Anlasser-Magnetschalter oder Ritzel defekt, oder Batterie zu schwach\nMotor dreht durch, springt aber nicht an: Kraftstoffversorgung, Zündung, Wegfahrsperre prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Lichtmaschine/Ladeproblem",
+  "keywords": "generator, ladekontrolle, lichtmaschine",
+  "content": "Ladekontrollleuchte an bei laufendem Motor: Ladespannung messen (Sollwert meist 13,5–14,8 V)\nMögliche Ursachen: Keilrippenriemen gerissen/rutscht, Lichtmaschine oder Regler defekt\nBatterie entlädt sich trotz Fahrbetrieb: auf jeden Fall vor Batterietausch die Ladeleistung prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Scheibenwischer/Scheibenwaschanlage",
+  "keywords": "scheibenwaschanlage, scheibenwischer",
+  "content": "Schlierenbildung: Wischerblätter tauschen, Scheibe vorher fettfrei reinigen\nWaschanlage fördert nicht: Pumpe, Düsen (verstopft) und Sicherung prüfen\nBei Frost: nur frostsicheres Scheibenreinigungsmittel verwenden (Frostschutzgrad prüfen)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "Allgemeine Wartung & Service",
+  "title": "Auspuff/Abgasanlage – Rauchfarben-Diagnose",
+  "keywords": "abgasanlage, auspuff, rauch",
+  "content": "Blauer Rauch: Motor verbrennt Öl (Kolbenringe/Ventilschaftdichtungen)\nWeißer Rauch (dauerhaft, nicht nur Kondenswasser): Kühlmittel gelangt in Brennraum (Zylinderkopfdichtung)\nSchwarzer Rauch: Gemisch zu fett, oft Einspritzung oder Luftfilter betroffen\nZusätzlich: Anlage auf Durchrostung/Undichtigkeiten und Aufhängung prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true
+ },
+ {
+  "category": "BMW – markenübergreifend",
+  "title": "BMW N47 (Diesel) – Steuerkettenverschleiß",
+  "keywords": "bmw, diesel, kette, n47, steuerkette",
+  "content": "Betrifft v.a. BMW N47 (2007–2014, 118d/120d/318d/320d u.a.) – Steuerkette liegt motorseitig hinten, sehr aufwendiger Wechsel\nAnzeichen: Rasseln/Klappern beim Kaltstart, Fehlercode Nockenwellen-/Kurbelwellensensor-Korrelation\nBei Kettenriss: Motortotalschaden (Interferenzmotor) möglich – bei Verdacht keine Probefahrt mehr\nReparatur: Steuerkettensatz (Kette, Spanner, Führungsschienen) – Motor/Getriebe muss meist abgesenkt werden\nArbeitszeit: ca. 8–12 Std. je nach Modell",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW"
+ },
+ {
+  "category": "BMW – markenübergreifend",
+  "title": "BMW N52/N54/N55 – Ventildeckeldichtung/Ölundichtigkeit",
+  "keywords": "bmw, n52, n54, n55, undicht, ventildeckel, ventildeckeldichtung, öllecl",
+  "content": "Klassische Ölleckage-Stelle bei vielen BMW-Reihenmotoren: Ventildeckeldichtung wird mit den Jahren spröde\nKontrolle: Motor sauber machen, Probefahrt, danach auf frische Ölspuren am Ventildeckel/Zündspulenschächten prüfen\nReparatur: Ventildeckeldichtung inkl. Zündspulendichtringe ersetzen\nHinweis: Öl in Zündspulenschächten kann Zündaussetzer (P0300er-Codes) verursachen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW"
+ },
+ {
+  "category": "BMW – markenübergreifend",
+  "title": "BMW VANOS – Nockenwellenverstellung",
+  "keywords": "vanos",
+  "content": "Anzeichen für Defekt: Rasseln im Kaltstart (Rasselgeräusch von vorne am Motor), Leistungsloch im mittleren Drehzahlbereich\nHäufige Ursache: Magnetventil verschlammt/verklebt (Ölverkokung), Dichtringe am VANOS-Kolben porös\nPrüfung: VANOS-Solltest per Diagnosegerät, Ölzustand/Ölwechselintervall prüfen\nReparatur: VANOS-Magnetventile reinigen/tauschen, bei Verschleiß VANOS-Einheit überholen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW"
+ },
+ {
+  "category": "BMW – markenübergreifend",
+  "title": "BMW – Elektrische Wasserpumpe",
+  "keywords": "bmw, elektrische, kühlmittelverlust, wasserpumpe",
+  "content": "Viele BMW-Reihenmotoren (u.a. N20, N51, N52, N54, N55) nutzen eine elektrische Wasserpumpe – typisches Verschleißteil\nAnzeichen: Temperaturschwankungen, Kühlmittelverlust ohne sichtbares Leck, Fehlercode Kühlmittelpumpe/Regelung\nReparatur: Wasserpumpe komplett ersetzen (nicht reparierbar), gleichzeitig Thermostat prüfen\nHinweis: nach Tausch Kühlsystem sorgfältig entlüften (BMW-spezifisches Befüllverfahren beachten)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW"
+ },
+ {
+  "category": "BMW – markenübergreifend",
+  "title": "BMW N63/N63TU (V8) – bekannte Schwachstellen",
+  "keywords": "bmw, n63, ölverbrauch, ölverlust",
+  "content": "Erhöhter Ölverbrauch: Ventilschaftdichtungen/Kolbenringe – bei manchen Baujahren Kulanz-/Rückrufaktionen möglich, VIN prüfen\nAbgaskrümmerdichtungen (innenliegend, zwischen den Zylinderbänken) undicht – Ansaugung von Abgas, Klopfgeräusch\nHochdruckpumpe und Ladeluftkühler-Kondensat ebenfalls bekannte Ausfallpunkte\nEmpfehlung: Ölstand bei jedem Service besonders im Blick behalten, kurze Ölwechselintervalle einhalten",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW"
+ },
+ {
+  "category": "BMW – markenübergreifend",
+  "title": "BMW N54/N55 – Hochdruckpumpe (HPFP)",
+  "keywords": "hochdruckpumpe, hpfp, n54, n55",
+  "content": "Bekannte Schwachstelle bei Direkteinspritzer-Motoren N54/N55 – Ausfall meist ohne Vorwarnung\nAnzeichen: Motor startet nicht/stirbt ab, Leistungsverlust, Fehlercode Kraftstoffdruck-Regelabweichung\nReparatur: Hochdruckpumpe komplett ersetzen, Kraftstoffdrucksensor mitprüfen\nHinweis: bei manchen Modelljahren gab es Werksgarantie-Verlängerung – VIN/Servicehistorie prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW"
+ },
+ {
+  "category": "BMW E30 – Schaltplan/Verkabelung",
+  "title": "BMW E30 – Schaltplan-Übersicht (Verkabelungsschema)",
+  "keywords": "e30, farbcode, kabelbaum, schaltplan",
+  "content": "Deckt ab: 3er E30 (316–325i, auch Touring/Cabrio), 5er E28 & E34 als Referenz\nFarbcodes im Schaltplan: BK=Schwarz, BL=Blau, BR/TN=Braun, GE/Y=Gelb, GN=Grün, GR/GY=Grau, OR=Orange, PK/RS=Rosa, R/RT=Rot, V/VI=Violett, W/WS=Weiß\nEnthaltene Schaltpläne: Starten/Laden/Hupe/Blinker (S.2) · Scheinwerfer/Nebelscheinwerfer/Innenlicht (S.3) · Check Control/Spiegel/Brems-Parklicht (S.4) · Motronic-Motorsteuerung (S.5–7) · Tempomat (S.8–9) · Zentralverriegelung/Alarm/Bordcomputer/Zusatzheizung/Uhr (S.10–12) · Scheinwerferwaschanlage (S.13–14) · elektrische Fenster (S.15–16) · Klimaanlage/Heizung (S.17–18) · Sitzheizung (S.19–20) · Memory-Sitze (S.21–23) · Sitze ohne Memory (S.24–25) · Radio (S.26–27) · L-Jetronic (S.28)\nHinweis: Details (genaue Pinbelegung/Stecker) im hinterlegten PDF-Dokument nachschlagen\n&#128196; Komplettes Schaltplan-PDF öffnen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E30"
+ },
+ {
+  "category": "BMW E30 – Schaltplan/Verkabelung",
+  "title": "BMW E30 – Motronic-Kabelbaum (Schaltplan S.5–7)",
+  "keywords": "e30, motronic",
+  "content": "Zentrale Steuergeräte-Kennung: 1 = Elektronisches Steuergerät (ESG)\nSensoren/Aktoren im Diagramm: Drosselklappenschalter (6), Luftstromsensor (7), Referenzmarkensensor (9), Kraftstoffeinspritzdüsen (25), Kühlmitteltemperatursensor (24), Öldruckschalter (12), elektrische Kraftstoffpumpe (30)\nZündung/Start: Zündspule (19), Verteiler (18), Starter (20), Lichtmaschine (21)\nDiagnose: Diagnoseschaltung (14) am Motorstecker (15)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E30"
+ },
+ {
+  "category": "BMW E30 – Schaltplan/Verkabelung",
+  "title": "BMW E30 – Zentralverriegelung/Alarmanlage/Bordcomputer (Schaltplan S.10–12)",
+  "keywords": "alarm, bordcomputer, e30, zentralverriegelung, zzv",
+  "content": "Steuereinheit: zentrale Schlosssteuereinheit (4), Steuergerät Einbruchmeldeanlage (27)\nVerriegelungsmotoren pro Tür einzeln verkabelt: Fahrertür (11), Beifahrertür (15), hintere Türen (21/25), Tankklappe (19), Kofferraum (17)\nTürkontaktschalter (35–38) und Haubenkontakt (39) laufen zentral auf das Alarmsteuergerät\nBordcomputer-Anschluss an Instrumentencluster (61/63), Außentemperatursensor (53) und Digitaluhr (85)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E30"
+ },
+ {
+  "category": "BMW E30 – Schaltplan/Verkabelung",
+  "title": "BMW E30 – Elektrische Fensterheber (Schaltplan S.15–16)",
+  "keywords": "e30, fensterheber",
+  "content": "Relais (Pos. 20) versorgt die Fensterheber-Sammelschiene (31I/31II)\nMotoren einzeln je Tür: vorne links (16), vorne rechts (17), hinten links/rechts über separate Stecker (8/9)\nSicherheitsschalter (14) und Kindersicherung (15) unterbrechen bei Bedarf die Steuerleitung\nHäufige Praxis-Ursache bei Ausfall: Kontaktprobleme an den Fensterheberschaltern oder der Steckverbindung in der Tür (Kabelbruch durch Türbewegung)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E30"
+ },
+ {
+  "category": "BMW E30 – Schaltplan/Verkabelung",
+  "title": "BMW E30 – Klimaanlage/Heizung (Schaltplan S.17–18)",
+  "keywords": "e30, klima, klimaanlage",
+  "content": "Steuergerät Klimaanlage (16), Schalter Klimaanlage (13)\nTemperaturschalter zweistufig: 91°C Stufe I (11), 99°C Stufe II (12)\nElektromagnetische Kupplung Kompressor (28) wird über Hochdruck-Pressostat (20) abgesichert\nZusatzlüfter-Relais Stufe I/II (18/19) je nach Kühlmitteltemperatur",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E30"
+ },
+ {
+  "category": "BMW E30 – Schaltplan/Verkabelung",
+  "title": "BMW E30 – Sitzheizung & Memory-Sitze (Schaltplan S.19–23)",
+  "keywords": "e30, memory, sitz, sitzheizung",
+  "content": "Sitzheizung: separate Schalter/Relais je Fahrer-/Beifahrerseite (Pos. 3/8), einfacher Stromkreis ohne Steuergerät\nMemory-Sitze: elektronisches Steuergerät unter dem Sitz (Pos. 14), Speicherschalter (Pos. 25) sichert Rückenlehnen-, Höhen- und Kopfstützenposition\nMotoren bei Memory-Sitzen: Rückenlehne, Höhe vorne/hinten, Kopfstütze – je eigener Kanal am Steuergerät",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E30"
+ },
+ {
+  "category": "BMW E30 – Schaltplan/Verkabelung",
+  "title": "BMW E30 – Radio-Verkabelung (Schaltplan S.26–27, frühe Modelle)",
+  "keywords": "e30, radio",
+  "content": "Lautsprecher: vorne links/rechts (Pos. 1/2), hinten links/rechts (Pos. 3/13), Türlautsprecher links/rechts (Pos. 7/8)\nVerstärker (Pos. 6) sitzt zwischen Radio und Lautsprechern bei entsprechender Ausstattung\nStromantenne über eigene Steuerleitung (Pos. 10), Sondergeräte-Stecker RA12 für Nachrüstungen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E30"
+ },
+ {
+  "category": "BMW E30 – Schaltplan/Verkabelung",
+  "title": "BMW E30 – L-Jetronic-Kabelbaum (Schaltplan S.28)",
+  "keywords": "e30, jetronic, ljetronic",
+  "content": "Einspritzsteuergerät (Pos. 11) verarbeitet Signale von Luftstromsensor (14), Drosselklappenschalter (13), Kühlmittelsensor (10)\nKraftstoffpumpenrelais (Pos. 16) schaltet die Kraftstoffpumpe über Motorstecker-Pin C3/C13\nZündung: Zündspule (3), Verteiler (2) mit Impulsgeber, Zündmodul (17)\nDiagnosestecker vorhanden für Fehlerauslesung am Steuergerät",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E30"
+ },
+ {
+  "category": "BMW E92",
+  "title": "BMW E92 – Hinterachse/Differential-Aufhängung",
+  "keywords": "differential, e92, hinterachse, subframe",
+  "content": "Bekannte Schwachstelle bei E90/E92/E93: die Differential-Aufnahme kann aus dem Blech der Karosserie ausreißen (v.a. bei sportlicher Fahrweise/Leistungssteigerung)\nAnzeichen: dumpfes Klonken beim Gasgeben/-wegnehmen aus dem Heckbereich, sichtbare Risse am Blech bei Anhebung\nPrüfung: Fahrzeug anheben, Differential-Aufnahme und Hinterachsträger-Lagerung auf Risse/Verformung sichtprüfen\nReparatur: bei bestätigtem Riss Verstärkungsblech/-kit einschweißen (kein reiner Teiletausch ausreichend)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E92"
+ },
+ {
+  "category": "BMW E92",
+  "title": "BMW E92 M3 (S65 V8) – Pleuellager-Verschleiß",
+  "keywords": "e92, pleuellager, s65",
+  "content": "Bekanntes Thema beim S65-V8: erhöhter Verschleiß der Pleuellager, v.a. bei frühen Baujahren (2007–2008)\nAnzeichen: metallisches Klopfen/Rasseln aus dem Motorblock, oft last-/drehzahlabhängig, Warnleuchte Öldruck möglich\nPrüfung: unbedingt vor Kauf/nach Auffälligkeit Ölanalyse (Spektralanalyse auf Metallabrieb) und Motor-Abhörtest im Kaltstart\nReparatur: bei bestätigtem Verschleiß Pleuellager satzweise tauschen (Motor muss dafür ausgebaut werden) – frühzeitige Diagnose spart Folgeschäden",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E92"
+ },
+ {
+  "category": "BMW E92",
+  "title": "BMW N52 (u.a. E92 325i/328i/330i) – DISA-Ventil",
+  "keywords": "ansaugbrücke, disa, rasseln, saugrohrklappe",
+  "content": "DISA-Ventil (variable Saugrohrgeometrie) klappert im Leerlauf/unteren Drehzahlbereich, wenn die interne Feder bricht oder Lager verschleißen\nAnzeichen: rasselndes/klackerndes Geräusch aus dem Ansaugbereich, meist bei ca. 2000–4000 U/min am deutlichsten\nReparatur: DISA-Ventil-Reparatursatz (Feder+Lager) oder komplettes Ventil tauschen – kein Sicherheitsrisiko, aber Dauerbetrieb kann Kleinteile ins Saugrohr fallen lassen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E92"
+ },
+ {
+  "category": "BMW E92",
+  "title": "BMW E90/E92 – Fensterheber „One-Touch“-Ausfall",
+  "keywords": "anlernen, e92, fenster, fensterheber, one, reset, touch",
+  "content": "Typisches Symptom: Fenster lässt sich nur noch manuell (gehalten) auf/zu fahren, One-Touch-Automatik und Einklemmschutz reagieren nicht mehr\nUrsache meist: Fensterheber-Steuerung hat die Referenzposition verloren (z.B. nach Batterietrennung oder mechanischem Widerstand)\nReparatur: Fensterheber neu anlernen – Fenster von Hand ganz hochfahren, Taste 3× über Anschlag halten (Anlernvorgang), je Tür einzeln wiederholen\nBleibt der Fehler bestehen: Fensterheberschalter oder Steuergerät in der Tür prüfen",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E92"
+ },
+ {
+  "category": "BMW E92",
+  "title": "BMW E92 335i (N54) – Ladeluftrohr/Chargepipe-Riss",
+  "keywords": "335i, chargepipe, e92, ladeluft, ladeluftrohr, n54, riss, rohr",
+  "content": "Das werksseitige Kunststoff-Ladeluftrohr (Y-Pipe) zwischen den Turboladern neigt bei höherer Ladedrücken/Alterung zum Reißen\nAnzeichen: spürbarer Leistungsverlust, Fehlercode Ladedruck-Regelabweichung, teils hörbares Zischen unter Last\nReparatur: Ladeluftrohr ersetzen – im Nachrüstmarkt sind verstärkte Aluminium-Chargepipes üblich (haltbarer als Original-Kunststoffteil)\nZusätzlich prüfen: Wastegate-Rasseln im Leerlauf (separates, bekanntes N54-Thema, meist unkritisch aber hörbar störend)",
+  "source": "AutoLeitwerk ALEX-Wissensdatenbank",
+  "active": true,
+  "brand": "BMW E92"
+ }
+]
