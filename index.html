@@ -378,6 +378,20 @@
   .cat-chip.blue{background:var(--info-soft);color:var(--info);}
   .cat-chip.amber{background:var(--warning-soft);color:var(--warning);}
   .cat-chip.teal{background:var(--teal-soft);color:var(--teal);}
+  .cat-chip.red{background:rgba(239,68,68,.14);color:#f87171;}
+  .tsd{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px;display:flex;flex-direction:column;gap:12px;}
+  .tsd-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;} .tsd-head h3{margin:0;font-size:18px;} .tsd-sub{font-size:12.5px;color:var(--text-faint);margin-top:4px;}
+  .tsd-place{display:flex;gap:12px;align-items:center;padding:14px;border-radius:12px;background:var(--accent-soft);} .tsd-place svg{width:22px;height:22px;color:var(--accent-2);flex-shrink:0;}
+  .tsd-place span{display:block;font-size:11px;color:var(--text-faint);} .tsd-place b{font-size:17px;}
+  .tsd-hint{display:flex;gap:8px;align-items:center;font-size:12px;padding:8px 10px;border-radius:8px;background:var(--info-soft);color:var(--info);} .tsd-hint svg{width:14px;height:14px;flex-shrink:0;}
+  .tsd-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;} .tsd-grid>div{padding:10px;border-radius:10px;background:var(--panel-2);}
+  .tsd-grid span{display:block;font-size:10.5px;color:var(--text-faint);} .tsd-grid b{font-size:13px;overflow-wrap:anywhere;} .tsd-grid small{color:var(--text-faint);font-weight:500;}
+  .tsd .btn{align-self:flex-start;}
+  .tsd-edit{padding:12px;border-radius:12px;border:1px solid var(--accent);} .tsd-edit-t{font-weight:700;margin-bottom:10px;}
+  .tsd-edit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;}
+  .ts-in span{display:block;font-size:10.5px;color:var(--text-faint);margin-bottom:3px;}
+  .ts-in input,.ts-in select{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);font:inherit;font-size:13px;}
+  @media (max-width:980px){ .device .tsd-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
   .t-mech{font-size:11px;color:var(--text-faint);white-space:nowrap;}
   .t-dur{font-size:11px;color:var(--text-faint);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;margin-left:auto;}
   .t-dur svg{width:11px;height:11px;flex-shrink:0;}
@@ -1597,6 +1611,7 @@ async function loadFromBase44(){
   orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
   carryOverLocalState(prevOrders, orders);
   state.b44Appointments = Array.isArray(data.appointments) ? data.appointments : [];
+  state.tireSets = Array.isArray(data.tire_sets) ? data.tire_sets : null; // kommt mit getTabletData-Update
   state.apiUsers = data.employees.filter(e=>e.is_active).map(e => ({ id: e.id, name: e.name, email:'', role: e.role, active: 1 }));
   if(Array.isArray(data.lifts)){
     bays = data.lifts
@@ -1982,7 +1997,7 @@ function renderChrome(){
     {ic:iconSupport, label:'Support', view:'support'},
     {ic:iconGear, label:'Einstellungen', view:'einstellungen'},
   ];
-  const DEMO_VIEWS = ['nachrichten','dokumente','reifenlager'];
+  const DEMO_VIEWS = ['nachrichten','dokumente'];
   const navItems = navItemsAll.filter(n=>(!n.roles || n.roles.includes(role)) && !(PILOT_HIDE_DEMO && DEMO_VIEWS.includes(n.view)));
   document.getElementById('sidebarNav').innerHTML = navItems.map(n=>`
     <div class="nav-item ${state.mainView===n.view?'active':''}" data-mainview="${n.view}">
@@ -2078,6 +2093,7 @@ const HELP_TEXTS = {
   termine:{ t:'Termine.', d:'Fahrzeugannahmen und Übergaben für heute und morgen.', li:['Online-Buchungen der Kunden erscheinen hier automatisch.'] },
   benutzer:{ t:'Team.', d:'Alle aktiven Mitarbeiter dieser Werkstatt.', li:['Mitarbeiter anlegen, Rollen und PINs ändern geht im AutoLeitwerk-Dashboard.'] },
   auslastung:{ t:'Team-Auslastung.', d:'Verplante Zeit je Mitarbeiter, berechnet aus der geschätzten Dauer offener Aufgaben (8-Stunden-Tag).', li:['Über 100 % heißt: mehr Arbeit verplant, als an einem Tag schaffbar ist.'] },
+  reifenlager:{ t:'Eingelagerte Reifen.', d:'Hier findest du jeden eingelagerten Reifensatz mit Lagerplatz.', li:['Kunde, Kennzeichen oder Größe ins Suchfeld tippen','„Prüfen“ zeigt Sätze mit zu wenig Profil','Nach dem Messen Profil und Lagerplatz direkt aktualisieren'] },
   support:{ t:'Hilfe.', d:'ALEX beantwortet Technikfragen sofort, bei Problemen mit der App erreichst du uns per E-Mail oder Telefon.' },
   einstellungen:{ t:'Einstellungen.', d:'Dein Profil und die App-Einstellungen auf diesem Tablet.', li:['„Erklärungen wieder anzeigen“ blendet alle Hilfe-Boxen erneut ein.'] },
 };
@@ -2431,122 +2447,176 @@ function renderDokumenteView(ov){
   `;
 }
 
-function filteredTires(){
-  return tires.filter(t=>{
-    if(state.tireFilter!=='alle' && t.season!==state.tireFilter) return false;
-    if(state.selectedLocation && t.location!==state.selectedLocation) return false;
-    if(state.tireSearch){
-      const q = state.tireSearch.toLowerCase();
-      if(!t.name.toLowerCase().includes(q) && !t.size.toLowerCase().includes(q)) return false;
+/* ---------- Reifenlager (eingelagerte Kunden-Reifensätze aus Base44 TireSet) ---------- */
+const TS_SEASON = { sommer:{l:'Sommer', c:'amber'}, winter:{l:'Winter', c:'blue'}, ganzjahr:{l:'Ganzjahr', c:'violet'} };
+const TS_CONDITION = { neu:'Neu', gut:'Gut', mittel:'Mittel', abgefahren:'Abgefahren' };
+function tsPlace(t){
+  const parts = [t.storage_hall && `Halle ${t.storage_hall}`, t.storage_rack && `Regal ${t.storage_rack}`, t.storage_level && `Ebene ${t.storage_level}`, t.storage_compartment && `Fach ${t.storage_compartment}`].filter(Boolean);
+  return parts.length ? parts.join(' · ') : (t.storage_location || 'Kein Lagerplatz');
+}
+function tsCheckReason(t){
+  const d = Number(t.tread_depth);
+  if(t.condition==='abgefahren') return 'abgefahren';
+  if(d && d < 1.6) return `nur ${d.toLocaleString('de-DE')} mm – unter Minimum`;
+  if(d && t.season==='winter' && d < 4) return `${d.toLocaleString('de-DE')} mm – Winter unter 4 mm`;
+  if(d && d < 3) return `${d.toLocaleString('de-DE')} mm – unter 3 mm`;
+  return null;
+}
+function tsAll(){ return Array.isArray(state.tireSets) ? state.tireSets : []; }
+function tsFiltered(){
+  const q = (state.tireSearch||'').toLowerCase().replace(/[\s-]/g,'');
+  return tsAll().filter(t=>{
+    const f = state.tireFilter || 'alle';
+    if(f==='pruefen' && !tsCheckReason(t)) return false;
+    if(['sommer','winter','ganzjahr'].includes(f) && t.season!==f) return false;
+    if(state.selectedLocation && (t.storage_hall||'–')!==state.selectedLocation) return false;
+    if(q){
+      const hay = [t.customer_name,t.license_plate,t.vehicle_brand,t.vehicle_model,t.brand,t.model,t.size,t.storage_location,t.qr_code].join(' ').toLowerCase().replace(/[\s-]/g,'');
+      if(!hay.includes(q)) return false;
     }
     return true;
-  });
+  }).sort((a,b)=>String(a.customer_name||'').localeCompare(String(b.customer_name||''),'de'));
 }
-
+function tsListHtml(list){
+  if(!list.length) return `<div class="placeholder">${iconInbox}<b>Keine Treffer</b><p>Für diese Suche/diesen Filter ist kein Reifensatz eingelagert.</p></div>`;
+  return list.map(t=>{
+    const s = TS_SEASON[t.season] || {l:t.season||'–', c:'violet'};
+    const warn = tsCheckReason(t);
+    return `<div class="rl-tire ${t.id===state.selectedTireId?'selected':''}" data-tireset="${escHtml(t.id)}">
+      <div class="rl-tire-ic">${iconTire}</div>
+      <div class="rl-tire-info">
+        <div class="rl-tire-name">${escHtml(t.customer_name||'Ohne Kunde')}</div>
+        <div class="rl-tire-size">${escHtml([t.license_plate, t.size].filter(Boolean).join(' · ')||'–')}</div>
+        <span class="cat-chip ${s.c}">${s.l}</span>${warn?` <span class="cat-chip red">prüfen</span>`:''}
+      </div>
+      <div class="rl-tire-right"><div class="rl-tire-qty">${t.quantity||4}x</div><div class="rl-tire-loc">${escHtml(t.storage_hall?`H${t.storage_hall}·R${t.storage_rack||'–'}`:(t.storage_location||'–'))}</div></div>
+    </div>`;
+  }).join('');
+}
+function tsDetailHtml(t){
+  if(!t) return `<div class="placeholder" style="padding:40px 10px">${iconTire}<b>Reifensatz auswählen</b><p>Links einen Kunden antippen – hier siehst du Lagerplatz, Profil und kannst Werte aktualisieren.</p></div>`;
+  const s = TS_SEASON[t.season] || {l:t.season||'–', c:'violet'};
+  const warn = tsCheckReason(t);
+  const plateKey = String(t.license_plate||'').replace(/[\s-]/g,'').toUpperCase();
+  const order = plateKey ? orders.find(o=>String(o.plate||'').replace(/[\s-]/g,'').toUpperCase()===plateKey) : null;
+  const month = new Date().getMonth()+1;
+  const seasonHint = (month>=9 || month<=1) && t.season==='winter' ? 'Saison: Winterreifen jetzt montieren – Kunde für den Wechsel anrufen.'
+    : (month>=3 && month<=5 && t.season==='sommer') ? 'Saison: Sommerreifen jetzt montieren – Kunde für den Wechsel anrufen.' : '';
+  const age = t.storage_date ? Math.floor((Date.now()-new Date(t.storage_date))/86400000) : null;
+  const ed = state.tireEdit && state.tireEdit.id===t.id ? state.tireEdit : null;
+  const inp = (k,l,v,type)=>`<label class="ts-in"><span>${l}</span><input data-tsfield="${k}" type="text" ${type==='number'?'inputmode="decimal" placeholder="z. B. 4,5"':''} value="${escHtml(v==null?'':v)}"></label>`;
+  return `<div class="tsd">
+    <div class="tsd-head">
+      <div><h3>${escHtml(t.customer_name||'Ohne Kunde')}</h3><div class="tsd-sub">${escHtml([t.vehicle_brand,t.vehicle_model].filter(Boolean).join(' ')||'Fahrzeug unbekannt')}${t.license_plate?` · <span class="plate-chip">${escHtml(t.license_plate)}</span>`:''}</div></div>
+      <span class="cat-chip ${s.c}">${s.l}</span>
+    </div>
+    <div class="tsd-place">${iconRoute}<div><span>Lagerplatz</span><b>${escHtml(tsPlace(t))}</b></div></div>
+    ${warn?`<div class="alex-warn">${iconWarn} Profil prüfen: ${escHtml(warn)}</div>`:''}
+    ${seasonHint?`<div class="tsd-hint">${iconCalendar} ${seasonHint}</div>`:''}
+    <div class="tsd-grid">
+      <div><span>Reifen</span><b>${escHtml([t.brand,t.model].filter(Boolean).join(' ')||'–')}</b></div>
+      <div><span>Größe</span><b>${escHtml(t.size||'–')}</b></div>
+      <div><span>Profiltiefe</span><b>${t.tread_depth!=null&&t.tread_depth!==''?`${Number(t.tread_depth).toLocaleString('de-DE')} mm`:'–'}</b></div>
+      <div><span>Zustand</span><b>${escHtml(TS_CONDITION[t.condition]||t.condition||'–')}</b></div>
+      <div><span>Anzahl</span><b>${t.quantity||4} Stück</b></div>
+      <div><span>Eingelagert</span><b>${t.storage_date?formatDateDE(t.storage_date):'–'}${age!=null?` <small>(${age} Tage)</small>`:''}</b></div>
+    </div>
+    ${order?`<button class="btn" data-tsorder="${escHtml(order.id)}">${iconCar} Auftrag #${escHtml(order.orderNumber)} öffnen</button>`:''}
+    ${ed ? `<div class="tsd-edit">
+      <div class="tsd-edit-t">Werte aktualisieren</div>
+      <div class="tsd-edit-grid">
+        ${inp('tread_depth','Profiltiefe (mm)',ed.tread_depth===''||ed.tread_depth==null?'':String(ed.tread_depth).replace('.',','),'number')}
+        <label class="ts-in"><span>Zustand</span><select data-tsfield="condition">${Object.entries(TS_CONDITION).map(([k,l])=>`<option value="${k}" ${ed.condition===k?'selected':''}>${l}</option>`).join('')}</select></label>
+        <label class="ts-in"><span>Saison</span><select data-tsfield="season">${Object.entries(TS_SEASON).map(([k,v])=>`<option value="${k}" ${ed.season===k?'selected':''}>${v.l}</option>`).join('')}</select></label>
+        ${inp('storage_hall','Halle',ed.storage_hall)}${inp('storage_rack','Regal',ed.storage_rack)}${inp('storage_level','Ebene',ed.storage_level)}${inp('storage_compartment','Fach',ed.storage_compartment)}
+      </div>
+      ${ed.error?`<div class="alex-warn">${iconWarn} ${escHtml(ed.error)}</div>`:''}
+      <div class="alex-draft-actions"><button class="btn primary" id="tsSaveBtn" ${ed.busy?'disabled':''}>${iconCheck} ${ed.busy?'Speichert…':'Speichern'}</button><button class="btn" id="tsCancelBtn">Abbrechen</button></div>
+    </div>` : `<button class="btn primary" id="tsEditBtn">${iconWrench} Profil / Lagerplatz aktualisieren</button>`}
+  </div>`;
+}
 function renderReifenlagerView(ov){
-  const totalQty = tires.reduce((s,t)=>s+t.qty,0);
-  const sommerQty = tires.filter(t=>t.season==='sommer').reduce((s,t)=>s+t.qty,0);
-  const winterQty = tires.filter(t=>t.season==='winter').reduce((s,t)=>s+t.qty,0);
-  const ganzjahresQty = tires.filter(t=>t.season==='ganzjahres').reduce((s,t)=>s+t.qty,0);
-  const wert = tires.reduce((s,t)=>s+t.qty*(t.season==='sommer'?58:t.season==='winter'?64:71), 0);
-  const list = filteredTires();
-  const niedrig = tires.filter(t=>t.qty<=3).sort((a,b)=>a.qty-b.qty);
-  const kuerzlich = [tires[0], tires[2], tires[9]];
-
+  const all = tsAll();
+  const loaded = Array.isArray(state.tireSets);
+  const cnt = s => all.filter(t=>t.season===s).length;
+  const check = all.filter(t=>tsCheckReason(t)).length;
+  const halls = {};
+  all.forEach(t=>{ const h = t.storage_hall || '–'; halls[h] = (halls[h]||0) + 1; });
+  const list = tsFiltered();
+  if(state.selectedTireId && !all.some(t=>t.id===state.selectedTireId)) state.selectedTireId = null;
+  const sel = all.find(t=>t.id===state.selectedTireId) || null;
+  const f = state.tireFilter || 'alle';
   ov.innerHTML = `
-    <div class="ov-head">
-      <div><h1>Reifenlager</h1><div class="sub">Verwalte dein Reifenlager und behalte den Überblick.</div></div>
-    </div>
-
+    <div class="ov-head"><div><h1>Reifenlager</h1><div class="sub">Eingelagerte Reifensätze deiner Kunden – Lagerplatz finden, Profil prüfen.</div></div></div>
+    ${!loaded ? `<div class="alex-general" style="margin-bottom:14px;">Die Reifendaten kommen mit dem nächsten Server-Update. Bis dahin ist die Liste leer – eingelagerte Sätze siehst du im Base44-Dashboard.</div>` : ''}
     <div class="rl-stats">
-      <div class="rl-stat"><div class="rl-stat-ic gray">${iconDrum}</div><div><div class="rl-stat-top">Gesamtbestand</div><div class="rl-stat-val">${totalQty}</div><div class="rl-stat-lbl">Reifen</div></div></div>
-      <div class="rl-stat"><div class="rl-stat-ic amber">${svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>')}</div><div><div class="rl-stat-top">Sommerreifen</div><div class="rl-stat-val">${sommerQty}</div><div class="rl-stat-lbl">Reifen</div></div></div>
-      <div class="rl-stat"><div class="rl-stat-ic blue">${iconSnowflake}</div><div><div class="rl-stat-top">Winterreifen</div><div class="rl-stat-val">${winterQty}</div><div class="rl-stat-lbl">Reifen</div></div></div>
-      <div class="rl-stat"><div class="rl-stat-ic gray">${iconCloudRain}</div><div><div class="rl-stat-top">Ganzjahresreifen</div><div class="rl-stat-val green">${ganzjahresQty}</div><div class="rl-stat-lbl">Reifen</div></div></div>
-      <div class="rl-stat"><div class="rl-stat-ic violet">${iconDrum}</div><div><div class="rl-stat-top">Wertbestand</div><div class="rl-stat-val">${wert.toLocaleString('de-DE')} €</div><div class="rl-stat-lbl">Gesamtwert</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic gray">${iconDrum}</div><div><div class="rl-stat-top">Eingelagert</div><div class="rl-stat-val">${all.length}</div><div class="rl-stat-lbl">Reifensätze</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic amber">${iconTire}</div><div><div class="rl-stat-top">Sommer</div><div class="rl-stat-val">${cnt('sommer')}</div><div class="rl-stat-lbl">Sätze</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic blue">${iconSnowflake}</div><div><div class="rl-stat-top">Winter</div><div class="rl-stat-val">${cnt('winter')}</div><div class="rl-stat-lbl">Sätze</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic violet">${iconCloudRain}</div><div><div class="rl-stat-top">Ganzjahr</div><div class="rl-stat-val">${cnt('ganzjahr')}</div><div class="rl-stat-lbl">Sätze</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic ${check?'amber':'green'}">${iconWarn}</div><div><div class="rl-stat-top">Profil prüfen</div><div class="rl-stat-val">${check}</div><div class="rl-stat-lbl">Sätze</div></div></div>
     </div>
-
+    ${Object.keys(halls).length>1 ? `<div class="rl-filter-row" style="margin:-8px 0 14px;">${Object.entries(halls).sort().map(([h,n])=>`<div class="rl-filter-chip ${state.selectedLocation===h?'active':''}" data-tshall="${escHtml(h)}">${h==='–'?'Ohne Halle':'Halle '+escHtml(h)} · ${n}</div>`).join('')}</div>` : ''}
     <div class="rl-body">
       <div class="rl-left">
-        <div class="rl-search-box">${iconSearch}<input id="tireSearchInput" placeholder="Größe, Marke, Profil…" value="${state.tireSearch}"></div>
+        <div class="rl-search-box">${iconSearch}<input id="tireSearchInput" placeholder="Kunde, Kennzeichen, Größe…" value="${escHtml(state.tireSearch||'')}"></div>
         <div class="rl-filter-row">
-          ${['alle','sommer','winter','ganzjahres'].map(f=>`
-            <div class="rl-filter-chip ${state.tireFilter===f?'active':''}" data-tirefilter="${f}">${f==='alle'?'Alle':seasonLabel[f]}</div>
-          `).join('')}
+          ${[['alle','Alle'],['sommer','Sommer'],['winter','Winter'],['ganzjahr','Ganzjahr'],['pruefen','Prüfen']].map(([k,l])=>`<div class="rl-filter-chip ${f===k?'active':''}" data-tirefilter="${k}">${l}</div>`).join('')}
         </div>
-        <div class="rl-list-head">Reifenliste <span>${list.length} Reifen</span></div>
-        <div class="rl-list">
-          ${list.length===0?`<div class="placeholder">${iconInbox}<b>Keine Treffer</b><p>Für diese Suche/diesen Filter wurden keine Reifen gefunden.</p></div>`:''}
-          ${list.map(t=>`
-            <div class="rl-tire ${t.id===state.selectedTireId?'selected':''}" data-tire="${t.id}">
-              <div class="rl-tire-ic">${iconTire}</div>
-              <div class="rl-tire-info">
-                <div class="rl-tire-name">${t.name}</div>
-                <div class="rl-tire-size">${t.size}</div>
-                <span class="cat-chip ${seasonClass[t.season]}">${seasonLabel[t.season]}</span>
-              </div>
-              <div class="rl-tire-right"><div class="rl-tire-qty">${t.qty}x</div><div class="rl-tire-loc">${t.location}</div></div>
-              <button class="rl-find-btn" data-findtire="${t.id}" title="Finden">${iconRoute}</button>
-            </div>
-          `).join('')}
-        </div>
+        <div class="rl-list-head">Reifensätze <span>${list.length}</span></div>
+        <div class="rl-list">${tsListHtml(list)}</div>
       </div>
-
-      <div class="rl-right">
-        <div class="rl-loc-head">Lagerübersicht ${state.selectedLocation?`<span class="rl-loc-clear" id="clearLocFilter">Filter zurücksetzen ×</span>`:''}</div>
-        ${state.routeTireId ? renderRouteInfo(tires.find(t=>t.id===state.routeTireId)) : ''}
-        <div class="rl-loc-grid">
-          ${tireLocations.map(l=>{
-            const selTire = tires.find(t=>t.id===state.selectedTireId);
-            const isSelectedLoc = selTire && selTire.location===l.name;
-            const occupiedCount = Math.max(1, Math.round(l.pct/100*8));
-            const activeIdx = isSelectedLoc ? Math.min(parseInt(selTire.id.replace('r',''),10) % 8, occupiedCount-1) : -1;
-            const freeCount = 8 - occupiedCount;
-            const locTires = tires.filter(x=>x.location===l.name);
-            return `
-            <div class="rl-loc-card ${state.selectedLocation===l.name?'selected':''} ${isSelectedLoc?'has-selected':''}" data-loc="${l.name}">
-              <div class="rl-loc-top"><span>${l.name}</span><span class="rl-loc-badge">${l.count} Reifen</span></div>
-              <div class="rl-loc-rack">
-                ${Array.from({length:8}).map((_,i)=>{
-                  const isFree = i>=occupiedCount;
-                  const seasonCls = (!isFree && locTires[i % Math.max(locTires.length,1)]) ? `season-${locTires[i % Math.max(locTires.length,1)].season}` : '';
-                  const seasonClsSafe = seasonCls==='season-ganzjahres' ? '' : seasonCls;
-                  return `<div class="rl-tire-dot ${isFree?'free':seasonClsSafe} ${i===activeIdx?'active-green':''}" title="${isFree?'Frei':'Belegt'}"></div>`;
-                }).join('')}
-              </div>
-              <div class="rl-loc-bottom">
-                <div class="rl-loc-bar"><div class="rl-loc-fill" style="width:${l.pct}%"></div></div>
-                <span>${l.pct}% belegt</span>
-                ${freeCount>0?`<span class="rl-loc-free">${freeCount} frei</span>`:''}
-              </div>
-            </div>`;
-          }).join('')}
-        </div>
-
-        <div class="rl-panels">
-          <div class="rl-panel">
-            <div class="rl-panel-head warn">${iconWarn} Niedriger Bestand <span>${niedrig.length} Reifen</span></div>
-            ${niedrig.map(t=>`
-              <div class="rl-panel-row" data-tire="${t.id}">
-                <div><div class="rl-panel-name">${t.name}</div><div class="rl-panel-sub">${t.size} · ${t.location}</div></div>
-                <span class="rl-panel-qty low">${t.qty}x</span>
-              </div>
-            `).join('')}
-          </div>
-          <div class="rl-panel">
-            <div class="rl-panel-head">Kürzlich hinzugefügt</div>
-            ${kuerzlich.map(t=>`
-              <div class="rl-panel-row" data-tire="${t.id}">
-                <div><div class="rl-panel-name">${t.name}</div><div class="rl-panel-sub">${t.size} · ${t.location}</div></div>
-                <span class="rl-panel-qty">+${Math.max(2,Math.floor(t.qty/3))}x</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
+      <div class="rl-right">${tsDetailHtml(sel)}</div>
+    </div>`;
 }
+function rerenderReifenlager(){ const ov = document.getElementById('otherView'); if(ov && state.mainView==='reifenlager') renderReifenlagerView(ov); }
+async function saveTireSetEdit(){
+  const ed = state.tireEdit; if(!ed || ed.busy) return;
+  const t = tsAll().find(x=>x.id===ed.id); if(!t) return;
+  const fields = {};
+  ['tread_depth','condition','season','storage_hall','storage_rack','storage_level','storage_compartment'].forEach(k=>{
+    let v = ed[k]; if(k==='tread_depth'){ if(v===''||v==null) return; v = Number(String(v).replace(',','.')); if(!(v>=0 && v<=12)){ ed.error='Profiltiefe zwischen 0 und 12 mm eingeben.'; return; } }
+    if(String(v??'') !== String(t[k]??'')) fields[k] = v;
+  });
+  if(ed.error){ rerenderReifenlager(); ed.error=null; return; }
+  if(!Object.keys(fields).length){ state.tireEdit = null; rerenderReifenlager(); return; }
+  if(fields.storage_hall!==undefined || fields.storage_rack!==undefined || fields.storage_level!==undefined || fields.storage_compartment!==undefined){
+    fields.storage_location = [ed.storage_hall, ed.storage_rack, ed.storage_level, ed.storage_compartment].filter(Boolean).join('-');
+  }
+  ed.busy = true; ed.error = null; rerenderReifenlager();
+  const r = await tabletRequest('tire_update', Object.assign({ id: t.id }, fields), 15000);
+  ed.busy = false;
+  if(r.ok){ Object.assign(t, fields); state.tireEdit = null; showUpdateToast('Reifensatz aktualisiert'); }
+  else ed.error = r.missing ? 'Speichern ist auf dem Server noch nicht freigeschaltet.' : `Nicht gespeichert (${r.reason}).`;
+  rerenderReifenlager();
+}
+function handleReifenlagerClick(e){
+  if(state.mainView!=='reifenlager') return false;
+  const chip = e.target.closest('[data-tirefilter]');
+  if(chip){ state.tireFilter = chip.dataset.tirefilter; rerenderReifenlager(); return true; }
+  const hall = e.target.closest('[data-tshall]');
+  if(hall){ state.selectedLocation = state.selectedLocation===hall.dataset.tshall ? null : hall.dataset.tshall; rerenderReifenlager(); return true; }
+  const row = e.target.closest('[data-tireset]');
+  if(row){ state.selectedTireId = row.dataset.tireset; state.tireEdit = null; rerenderReifenlager(); return true; }
+  const ord = e.target.closest('[data-tsorder]');
+  if(ord){ state.selectedOrderId = ord.dataset.tsorder; state.detailTab = 'aufgaben'; setMainView('auftraege'); return true; }
+  if(e.target.closest('#tsEditBtn')){
+    const t = tsAll().find(x=>x.id===state.selectedTireId);
+    if(t) state.tireEdit = { id:t.id, tread_depth:t.tread_depth??'', condition:t.condition||'gut', season:t.season||'sommer', storage_hall:t.storage_hall||'', storage_rack:t.storage_rack||'', storage_level:t.storage_level||'', storage_compartment:t.storage_compartment||'' };
+    rerenderReifenlager(); return true;
+  }
+  if(e.target.closest('#tsCancelBtn')){ state.tireEdit = null; rerenderReifenlager(); return true; }
+  if(e.target.closest('#tsSaveBtn')){ saveTireSetEdit(); return true; }
+  return false;
+}
+document.addEventListener('input', (e)=>{
+  const f = e.target.closest && e.target.closest('[data-tsfield]');
+  if(f && state.tireEdit) state.tireEdit[f.dataset.tsfield] = f.value;
+});
+document.addEventListener('change', (e)=>{
+  const f = e.target.closest && e.target.closest('[data-tsfield]');
+  if(f && state.tireEdit) state.tireEdit[f.dataset.tsfield] = f.value;
+});
 
 /* ---------- 12. Mechaniker-Dashboard ---------- */
 function renderDashboardView(ov){
@@ -3720,41 +3790,7 @@ document.addEventListener('click', (e)=>{
   }
 
   /* --- reifenlager --- */
-  const filterChip = e.target.closest('[data-tirefilter]');
-  if(filterChip){
-    state.tireFilter = filterChip.dataset.tirefilter;
-    renderReifenlagerView(document.getElementById('otherView'));
-    return;
-  }
-  const tireRow = e.target.closest('[data-tire]');
-  if(tireRow){
-    state.selectedTireId = tireRow.dataset.tire;
-    renderReifenlagerView(document.getElementById('otherView'));
-    return;
-  }
-  const locCard = e.target.closest('[data-loc]');
-  if(locCard){
-    state.selectedLocation = state.selectedLocation===locCard.dataset.loc ? null : locCard.dataset.loc;
-    renderReifenlagerView(document.getElementById('otherView'));
-    return;
-  }
-  if(e.target.closest('#clearLocFilter')){
-    state.selectedLocation = null;
-    renderReifenlagerView(document.getElementById('otherView'));
-    return;
-  }
-  const findBtn = e.target.closest('[data-findtire]');
-  if(findBtn){
-    state.routeTireId = findBtn.dataset.findtire;
-    state.selectedTireId = findBtn.dataset.findtire;
-    renderReifenlagerView(document.getElementById('otherView'));
-    return;
-  }
-  if(e.target.closest('#clearRouteFinder')){
-    state.routeTireId = null;
-    renderReifenlagerView(document.getElementById('otherView'));
-    return;
-  }
+  if(handleReifenlagerClick(e)) return;
 
   /* --- pdf viewer modal --- */
   if(e.target.closest('#pdfModalClose') || e.target.id==='pdfModal'){
@@ -4001,26 +4037,11 @@ document.addEventListener('change', (e)=>{
 document.addEventListener('input', (e)=>{
   if(e.target.id==='tireSearchInput'){
     state.tireSearch = e.target.value;
-    const list = filteredTires();
+    const list = tsFiltered();
     const listEl = document.querySelector('.rl-list');
     const headEl = document.querySelector('.rl-list-head span');
-    if(listEl && headEl){
-      headEl.textContent = `${list.length} Reifen`;
-      listEl.innerHTML = list.length===0
-        ? `<div class="placeholder">${iconInbox}<b>Keine Treffer</b><p>Für diese Suche/diesen Filter wurden keine Reifen gefunden.</p></div>`
-        : list.map(t=>`
-          <div class="rl-tire ${t.id===state.selectedTireId?'selected':''}" data-tire="${t.id}">
-            <div class="rl-tire-ic">${iconTire}</div>
-            <div class="rl-tire-info">
-              <div class="rl-tire-name">${t.name}</div>
-              <div class="rl-tire-size">${t.size}</div>
-              <span class="cat-chip ${seasonClass[t.season]}">${seasonLabel[t.season]}</span>
-            </div>
-            <div class="rl-tire-right"><div class="rl-tire-qty">${t.qty}x</div><div class="rl-tire-loc">${t.location}</div></div>
-            <button class="rl-find-btn" data-findtire="${t.id}" title="Finden">${iconRoute}</button>
-          </div>
-        `).join('');
-    }
+    if(listEl) listEl.innerHTML = tsListHtml(list);
+    if(headEl) headEl.textContent = list.length;
   }
   if(e.target.id==='toolSearchInput'){
     const q = e.target.value.toLowerCase();
