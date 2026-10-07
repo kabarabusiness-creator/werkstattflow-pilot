@@ -1012,6 +1012,47 @@
   .ai-msg.user{align-self:flex-end;background:var(--accent-grad);color:#fff;border-bottom-right-radius:3px;}
   .ai-msg ul{margin:6px 0 0 16px;padding:0;}
   .ai-msg li{margin-bottom:3px;}
+  .ai-msg p{margin:0 0 6px;} .ai-msg p:last-child{margin-bottom:0;} .ai-msg ol{margin:6px 0 6px 18px;padding:0;}
+  .alex-h{font-weight:700;margin:8px 0 4px;} .alex-ref{color:var(--accent-2,#c026d3);font-size:10px;}
+  .alex-sources{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;} .alex-sources span{display:inline-block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px;line-height:1.4;padding:2px 7px;border-radius:999px;background:var(--panel,#191932);border:1px solid var(--border,#26264a);color:var(--text-faint);}
+  .alex-general{font-size:11px;margin:6px 0;padding:5px 8px;border-radius:8px;background:rgba(245,158,11,.12);color:#f59e0b;}
+  .alex-docs{margin-top:8px;font-size:12px;}
+  .alex-ctx{display:flex;align-items:center;gap:8px;margin:0 12px 6px;padding:6px 10px;border-radius:10px;background:var(--panel-2);font-size:11.5px;}
+  .alex-ctx svg{width:14px;height:14px;flex-shrink:0;} .alex-ctx span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .alex-ctx button{background:none;border:0;color:var(--text-faint);cursor:pointer;padding:2px;display:flex;} .alex-ctx button svg{width:12px;height:12px;}
+  .alex-chips{display:flex;flex-wrap:wrap;gap:6px;} .alex-chip{font:inherit;font-size:11.5px;padding:6px 10px;border-radius:999px;border:1px solid var(--border,#26264a);background:transparent;color:var(--text);cursor:pointer;}
+  .alex-foot{font-size:10px;color:var(--text-faint);text-align:center;padding:0 12px 8px;}
+  .alex-typing{display:inline-flex;gap:4px;align-items:center;} .alex-typing i{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.4;animation:alexDot 1.2s infinite;} .alex-typing i:nth-child(2){animation-delay:.2s;} .alex-typing i:nth-child(3){animation-delay:.4s;}
+  @keyframes alexDot{0%,80%,100%{opacity:.25}40%{opacity:1}}
+  .alex-cards{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+  .alex-card{padding:8px 10px;border-radius:10px;background:var(--panel,#191932);border:1px solid var(--border,#26264a);border-left:3px solid var(--border,#26264a);}
+  .alex-card.lvl-green,.ts-dmg-item.lvl-green{border-left-color:#22c55e;} .alex-card.lvl-yellow,.ts-dmg-item.lvl-yellow{border-left-color:#f59e0b;} .alex-card.lvl-red,.ts-dmg-item.lvl-red{border-left-color:#ef4444;}
+  .alex-card-t{font-weight:700;font-size:12.5px;} .alex-card-s{font-size:11.5px;color:var(--text-faint);margin-top:2px;} .alex-line{font-size:11.5px;margin-top:2px;}
+  .alex-row{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:2px 0;} .alex-row span{color:var(--text-faint);} .alex-row b{text-align:right;overflow-wrap:anywhere;}
+  .alex-draft{margin-top:10px;padding:10px;border-radius:10px;border:1px solid var(--accent,#8b5cf6);background:var(--panel,#191932);}
+  .alex-draft-t{display:flex;align-items:center;gap:6px;font-weight:700;margin-bottom:6px;} .alex-draft-t svg{width:14px;height:14px;}
+  .alex-warn{display:flex;gap:6px;align-items:flex-start;font-size:11.5px;margin:6px 0;padding:6px 8px;border-radius:8px;background:rgba(239,68,68,.1);color:#f87171;} .alex-warn svg{width:13px;height:13px;flex-shrink:0;margin-top:1px;}
+  .alex-draft-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .alex-done{display:flex;align-items:center;gap:6px;margin-top:10px;font-weight:700;color:#22c55e;font-size:12.5px;} .alex-done svg{width:14px;height:14px;}
+  .alex-muted{margin-top:10px;font-size:11.5px;color:var(--text-faint);} .alex-hint{margin-top:8px;font-size:10.5px;color:var(--text-faint);}
+  .ts-wrap{display:flex;flex-direction:column;gap:12px;}
+  .ts-intro{display:flex;gap:10px;align-items:flex-start;} .ts-intro svg{width:22px;height:22px;flex-shrink:0;color:var(--accent,#8b5cf6);} .ts-intro b{display:block;} .ts-intro span{font-size:12.5px;color:var(--text-faint);}
+  .ts-slots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  .ts-slot{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:var(--panel-2);border:1px dashed var(--border,#26264a);}
+  .ts-slot.has{border-style:solid;} .ts-slot img,.ts-slot-empty{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px;}
+  .ts-slot-empty{display:flex;align-items:center;justify-content:center;background:var(--panel,#191932);color:var(--text-faint);} .ts-slot-empty svg{width:26px;height:26px;}
+  .ts-slot-l b{display:block;font-size:13px;} .ts-slot-l span{font-size:11px;color:var(--text-faint);}
+  .ts-slot .btn{justify-content:center;cursor:pointer;}
+  .ts-go{align-self:flex-start;} .ts-go[disabled]{opacity:.5;pointer-events:none;}
+  .ts-busy{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--text-faint);}
+  .ts-result{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;background:var(--panel-2);}
+  .ts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;}
+  .ts-f{padding:8px;border-radius:8px;background:var(--panel,#191932);border:1px solid var(--border,#26264a);} .ts-f span{display:block;font-size:10.5px;color:var(--text-faint);} .ts-f b{font-size:13px;overflow-wrap:anywhere;}
+  .ts-f.ts-chk{border-color:#f59e0b;background:rgba(245,158,11,.08);} .ts-f em{display:block;font-style:normal;font-size:10px;color:#f59e0b;} .ts-f.ts-empty b{color:var(--text-faint);}
+  .ts-result .alex-warn{margin:0;}
+  .ts-dmg b{display:block;font-size:12.5px;margin-bottom:4px;} .ts-dmg-item{font-size:12px;padding:5px 8px;margin-bottom:4px;border-radius:6px;background:var(--panel,#191932);border-left:3px solid var(--border,#26264a);} .ts-dmg-item span{color:var(--text-faint);}
+  .ts-dmg-none{display:flex;gap:6px;align-items:center;font-size:12px;color:#22c55e;} .ts-dmg-none svg{width:13px;height:13px;}
+  @media (max-width:760px){ .device .ts-slots{grid-template-columns:1fr;} }
   .ai-panel-input-row{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border-soft);}
   .ai-panel-input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--text);font-size:12.5px;font-family:inherit;}
   .ai-panel-input:focus{outline:none;border-color:var(--accent);}
@@ -1359,7 +1400,7 @@ const SUPPORT_EMAIL = 'info@kabaradigital.de';
 /* Schreibaktionen ans Backend (Base44-Funktion tabletAction, Bearer-Token wie getTabletData).
    Solange die Funktion fehlt, bleiben Änderungen lokal auf diesem Tablet erhalten (siehe
    carryOverLocalState) und es erscheint einmalig ein Hinweis. */
-const ACTION_LABELS = { task_update:'Aufgabe', worktime_start:'Zeiterfassung', worktime_stop:'Zeiterfassung', media_upload:'Foto', note_add:'Notiz', order_complete:'Auftragsabschluss' };
+const ACTION_LABELS = { tire_scan:'Reifenscan', task_update:'Aufgabe', worktime_start:'Zeiterfassung', worktime_stop:'Zeiterfassung', media_upload:'Foto', note_add:'Notiz', order_complete:'Auftragsabschluss' };
 async function tabletAction(action, payload){
   if(state.writeSupported === false) return null;
   if(!state.sessionToken) return null;
@@ -1480,7 +1521,7 @@ function b44MapOrder(o, allTasks, demoImageByBrand){
     plate: o.license_plate || '–',
     customer: o.customer_name || '–',
     km: o.mileage!=null ? `${o.mileage.toLocaleString('de-DE')} km` : '–',
-    erst: '–',
+    erst: o.first_registration ? formatDateDE(o.first_registration) : '–',
     status: b44SimplifiedStatus(o.status),
     _b44Status: o.status,
     _b44StatusLabel: B44_STATUS_LABELS[o.status] || o.status,
@@ -1490,7 +1531,11 @@ function b44MapOrder(o, allTasks, demoImageByBrand){
     created: o.created_date ? formatDateTimeDE(o.created_date) : '–',
     _serverPhoto: o.vehicle_photo || o.image_url || null,
     image: (state.localVehiclePhoto && state.localVehiclePhoto[o.id]) || o.vehicle_photo || o.image_url || FALLBACK_CAR_IMAGE, // keine Marken-Beispielfotos mehr – sonst sieht es aus, als gäbe es schon ein echtes Foto
-    vin: '–', farbe: '–', motor: '–', kraftstoff: '–', getriebe: '–', tuev: (o.tuv_next_date ? formatDateDE(o.tuv_next_date) : '–'),
+    vin: o.vin || '–', farbe: o.color || '–',
+    motor: [o.power_kw ? `${o.power_kw} kW (${Math.round(o.power_kw*1.35962)} PS)` : '', o.displacement_ccm ? `${Number(o.displacement_ccm).toLocaleString('de-DE')} ccm` : ''].filter(Boolean).join(' · ') || '–',
+    kraftstoff: o.fuel_type || '–', getriebe: o.transmission || '–',
+    hsnTsn: (o.hsn || o.tsn) ? `${o.hsn||'–'} / ${o.tsn||'–'}` : '–',
+    tuev: (o.next_hu || o.tuv_next_date) ? formatDateDE(o.next_hu || o.tuv_next_date) : '–',
     tel: o.phone || '',
     desc: o.description || '',
     qc: defaultQC(),
@@ -2124,7 +2169,7 @@ function openVehicleModal(o){
       <div class="vm-field"><div class="lbl">Farbe</div><div class="val">${o.farbe||'—'}</div></div>
       <div class="vm-field"><div class="lbl">Motorisierung</div><div class="val">${o.motor||'—'}</div></div>
       <div class="vm-field"><div class="lbl">Kraftstoff</div><div class="val">${o.kraftstoff||'—'}</div></div>
-      <div class="vm-field"><div class="lbl">Getriebe</div><div class="val">${o.getriebe||'—'}</div></div>
+      <div class="vm-field"><div class="lbl">HSN / TSN</div><div class="val">${o.hsnTsn||'—'}</div></div>
       <div class="vm-field"><div class="lbl">Km-Stand</div><div class="val">${o.km}</div></div>
       <div class="vm-field"><div class="lbl">Erstzulassung</div><div class="val">${o.erst}</div></div>
       <div class="vm-field"><div class="lbl">TÜV gültig bis</div><div class="val">${o.tuev||'—'}</div></div>
@@ -3032,6 +3077,7 @@ function renderDetail(){
       </div>
       <div class="dh-right">
         ${PILOT_HIDE_DEMO ? '' : `<div class="btn">${iconMsg} Nachricht</div>`}
+        <div class="btn" id="askAlexOrderBtn">${iconBot} ALEX fragen</div>
         <div class="btn" id="vehicleDetailsBtn">${iconCar} Fahrzeugdetails</div>
         <div class="btn primary" id="closeOrderBtn">${iconCheck} Auftrag abschließen ${iconChevDown}</div>
       </div>
@@ -3081,6 +3127,7 @@ function renderDetail(){
       <div class="tabs">
         <div class="tab ${state.detailTab==='aufgaben'?'active':''}" data-dtab="aufgaben">${iconTasks} Aufgaben</div>
         <div class="tab ${state.detailTab==='checkliste'?'active':''}" data-dtab="checkliste">${iconCheckSquare} Checkliste</div>
+        <div class="tab ${state.detailTab==='reifen'?'active':''}" data-dtab="reifen">${iconTire} Reifenscan</div>
         ${PILOT_HIDE_DEMO ? '' : `<div class="tab ${state.detailTab==='teile'?'active':''}" data-dtab="teile">${iconBox} Teile &amp; Material</div>
         <div class="tab ${state.detailTab==='dokumente'?'active':''}" data-dtab="dokumente">${iconFolder} Dokumente</div>
         <div class="tab ${state.detailTab==='verlauf'?'active':''}" data-dtab="verlauf">${iconHistory} Verlauf</div>`}
@@ -3095,6 +3142,7 @@ function renderDetail(){
 function renderTabPanel(){
   const o = getSelectedOrder();
   const el = document.getElementById('tabPanel');
+  if(state.detailTab==='reifen'){ el.innerHTML = renderTireScanPanel(o); return; }
   if(state.detailTab==='aufgaben'){
     const done = o.tasks.filter(t=>t.status==='done').length;
     const selectedTask = o.tasks.find(t=>t.id===state.selectedTaskId) || o.tasks[0];
@@ -3791,6 +3839,8 @@ document.addEventListener('click', (e)=>{
     aiAsk();
     return;
   }
+  if(handleAlexClick(e)) return;
+  if(handleTireScanClick(e)) return;
 
   /* --- schnellnotiz --- */
   if(e.target.closest('#noteFabBtn')){
@@ -4099,52 +4149,8 @@ function updateNoteBadge(){
 }
 
 const aiChat = [
-  {from:'bot', text:'Hallo, ich bin ALEX! Frag mich nach Fehlercodes, Geräuschen oder Reparaturschritten – z.B. "Fehlercode P0401" oder "BMW F31 klackert vorne".'},
+  {from:'bot', text:'Hallo, ich bin ALEX! Frag mich nach Fehlercodes, Geräuschen oder Reparaturschritten – oder öffne einen Auftrag und tippe „ALEX fragen“, dann kenne ich das Fahrzeug schon.'},
 ];
-// PROVISORISCH: eingelagerte Reifensätze (Base44 TireSet-Entity) laufen
-// noch nicht über getTabletData in die App. Bis der Backend-Fix da ist,
-// werden sie hier für die KI-Namenssuche manuell gepflegt. Neuen
-// Reifensatz ergänzen: einfach ein Objekt unten anhängen.
-const TIRE_SETS = [
-  { customer:'Max Mustermann', brand:'Michelin', model:'Pilot Sport 4', size:'225/45 R17 94Y', season:'sommer', hall:'A', rack:'01', level:'01', compartment:'01', plate:'M-AB-123', condition:'mittel', tread:3.5 },
-  { customer:'Max Mustermann', brand:'Michelin', model:'Pilot Sport 4', size:'225/45 R17 Y97', season:'sommer', hall:'A', rack:'01', level:'01', compartment:'01', plate:'AB-M-2510', condition:'gut', tread:4 },
-  { customer:'Frank Zimmer', brand:'Michelin', model:'Pilot Sport 4', size:'245/40 R18 93Y', season:'sommer', hall:'B', rack:'01', level:'01', compartment:'01', plate:'M-QR 2468', condition:'gut', tread:4 },
-  { customer:'Nina Lang', brand:'Continental', model:'WinterContact TS870', size:'215/60 R16 95H', season:'winter', hall:'B', rack:'01', level:'02', compartment:'01', plate:'M-ST 9753', condition:'mittel', tread:7.7 },
-  { customer:'Max Mustermann', brand:'Bridgestone', model:'Turanza T005', size:'235/55 R19 105V', season:'sommer', hall:'B', rack:'02', level:'01', compartment:'02', plate:'M-AB 1234', condition:'gut', tread:7.9 },
-  { customer:'Anna Schmidt', brand:'Michelin', model:'CrossClimate 2', size:'195/65 R15 91T', season:'ganzjahr', hall:'B', rack:'02', level:'02', compartment:'02', plate:'M-CD 5678', condition:'neu', tread:7.2 },
-  { customer:'Tom Weber', brand:'Continental', model:'PremiumContact 6', size:'225/45 R17 94Y', season:'sommer', hall:'B', rack:'03', level:'01', compartment:'03', plate:'M-EF 9012', condition:'neu', tread:4.2 },
-  { customer:'Lisa Klein', brand:'Dunlop', model:'Winter Sport 5', size:'205/55 R16 91H', season:'winter', hall:'B', rack:'03', level:'02', compartment:'03', plate:'M-GH 3456', condition:'gut', tread:6 },
-  { customer:'Peter Müller', brand:'Pirelli', model:'Cinturato P7', size:'245/40 R18 93Y', season:'sommer', hall:'B', rack:'04', level:'01', compartment:'04', plate:'M-IJ 7890', condition:'gut', tread:6.1 },
-  { customer:'Sara Jones', brand:'Goodyear', model:'UltraGrip 9', size:'215/60 R16 95H', season:'winter', hall:'B', rack:'04', level:'02', compartment:'04', plate:'M-KL 2345', condition:'mittel', tread:3.6 },
-  { customer:'Klaus Bauer', brand:'Michelin', model:'Pilot Sport 4', size:'235/55 R19 105V', season:'sommer', hall:'C', rack:'01', level:'01', compartment:'01', plate:'M-MN 6789', condition:'gut', tread:3.1 },
-  { customer:'Julia Roth', brand:'Continental', model:'WinterContact TS870', size:'195/65 R15 91T', season:'winter', hall:'C', rack:'01', level:'02', compartment:'01', plate:'M-OP 1357', condition:'neu', tread:7.6 },
-  { customer:'Frank Zimmer', brand:'Bridgestone', model:'Turanza T005', size:'225/45 R17 94Y', season:'sommer', hall:'C', rack:'02', level:'01', compartment:'02', plate:'M-QR 2468', condition:'neu', tread:5.6 },
-  { customer:'Nina Lang', brand:'Michelin', model:'CrossClimate 2', size:'205/55 R16 91H', season:'ganzjahr', hall:'C', rack:'02', level:'02', compartment:'02', plate:'M-ST 9753', condition:'gut', tread:7.1 },
-  { customer:'Max Mustermann', brand:'Michelin', model:'Pilot Sport 4', size:'225/45 R17 94Y', season:'sommer', hall:'A', rack:'01', level:'01', compartment:'01', plate:'M-AB 1234', condition:'neu', tread:5.9 },
-  { customer:'Anna Schmidt', brand:'Continental', model:'WinterContact TS870', size:'205/55 R16 91H', season:'winter', hall:'A', rack:'01', level:'02', compartment:'01', plate:'M-CD 5678', condition:'gut', tread:3.5 },
-  { customer:'Tom Weber', brand:'Bridgestone', model:'Turanza T005', size:'245/40 R18 93Y', season:'sommer', hall:'A', rack:'02', level:'01', compartment:'02', plate:'M-EF 9012', condition:'gut', tread:5.1 },
-  { customer:'Lisa Klein', brand:'Michelin', model:'CrossClimate 2', size:'215/60 R16 95H', season:'ganzjahr', hall:'A', rack:'02', level:'02', compartment:'02', plate:'M-GH 3456', condition:'mittel', tread:7.3 },
-  { customer:'Peter Müller', brand:'Continental', model:'PremiumContact 6', size:'235/55 R19 105V', season:'sommer', hall:'A', rack:'03', level:'01', compartment:'03', plate:'M-IJ 7890', condition:'gut', tread:3.2 },
-  { customer:'Sara Jones', brand:'Dunlop', model:'Winter Sport 5', size:'195/65 R15 91T', season:'winter', hall:'A', rack:'03', level:'02', compartment:'03', plate:'M-KL 2345', condition:'neu', tread:5.8 },
-  { customer:'Klaus Bauer', brand:'Pirelli', model:'Cinturato P7', size:'225/45 R17 94Y', season:'sommer', hall:'A', rack:'04', level:'01', compartment:'04', plate:'M-MN 6789', condition:'neu', tread:5.6 },
-  { customer:'Julia Roth', brand:'Goodyear', model:'UltraGrip 9', size:'205/55 R16 91H', season:'winter', hall:'A', rack:'04', level:'02', compartment:'04', plate:'M-OP 1357', condition:'gut', tread:4.2 },
-];
-const tireSeasonLabel = { sommer:'Sommerreifen', winter:'Winterreifen', ganzjahr:'Ganzjahresreifen' };
-// Findet eingelagerte Reifensätze anhand eines frei formulierten Namens
-// in der Nutzerfrage (z.B. "wo ist der reifensatz von Max Mustermann").
-function findTireSets(query){
-  const stop = ['wo','ist','sind','wer','der','die','das','von','fuer','für','hat','reifensatz','reifensätze','reifensaetze','reifen','satz','saetze','kunde','kunden','kundin','herr','herrn','frau','bitte','mal','finde','find','such','suche','lager','lagert','steht','stehen','liegt','liegen'];
-  const words = query.toLowerCase()
-    .replace(/[^a-zà-ÿäöüß0-9\s]/gi,' ')
-    .split(/\s+/)
-    .filter(w => w.length > 1 && !stop.includes(w));
-  if(!words.length) return [];
-  return TIRE_SETS.filter(t=>{
-    const name = t.customer.toLowerCase();
-    return words.some(w => name.includes(w));
-  });
-}
-
 // BMW E30 Schaltplan-PDF (vom Nutzer bereitgestellt, als data-URI eingebettet, damit ALEX es direkt anbieten kann - kein Server-Upload noetig)
 const BMW_E30_SCHALTPLAN_PDF = 'docs/BMW_E30_Schaltplan.pdf'; // ausgelagert (vorher base64 in dieser Datei)
 const AI_KB = [
@@ -4583,53 +4589,344 @@ const AI_KB = [
       <li>Zusätzlich prüfen: Wastegate-Rasseln im Leerlauf (separates, bekanntes N54-Thema, meist unkritisch aber hörbar störend)</li>
     </ul>` },
 ];
+/* ---------- ALEX mit KI-Backend (Base44 alexChat über tabletAction alex_ask) ---------- */
+// Eigene Anfrage-Funktion: ALEX/Reifenscan dürfen NICHT state.writeSupported umschalten,
+// wenn eine neue Aktion (z. B. alex_execute) auf dem Server noch fehlt.
+async function tabletRequest(action, payload, timeoutMs){
+  if(!state.sessionToken) return { ok:false, reason:'nicht angemeldet' };
+  if(navigator.onLine === false) return { ok:false, reason:'offline' };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(()=>controller.abort(), timeoutMs || 30000);
+  const body = { action };
+  Object.entries(payload||{}).forEach(([k,v])=>{ if(v!==null && v!==undefined) body[k]=v; });
+  try{
+    const res = await fetch(BASE44_ACTION_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + state.sessionToken },
+      body: JSON.stringify(body), signal: controller.signal,
+    });
+    const data = await res.json().catch(()=>({}));
+    if(res.status===401){ handleSessionExpired(); return { ok:false, status:401, reason:'Sitzung abgelaufen' }; }
+    const missing = data.error==='unknown_action' || (res.status===404 && /not found or not deployed/i.test(String(data.message||'')));
+    if(missing) return { ok:false, status:res.status, missing:true, reason:'noch nicht freigeschaltet' };
+    if(!res.ok || data.ok===false) return { ok:false, status:res.status, data, reason: data.message || data.error || ('HTTP '+res.status) };
+    return { ok:true, status:res.status, data };
+  }catch(e){
+    return { ok:false, reason: e.name==='AbortError' ? 'Zeitüberschreitung' : 'keine Verbindung' };
+  }finally{ clearTimeout(timeoutId); }
+}
+function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// Klartext-Antwort der KI in einfaches, sicheres HTML umwandeln (Listen, fett, Absätze)
+function formatAlexAnswer(text){
+  const inline = t => escHtml(t)
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+    .replace(/\[Eintrag (\d+)\]/g,'<sup class="alex-ref">[$1]</sup>');
+  const lines = String(text||'').replace(/\r/g,'').split('\n');
+  let html = '', list = null, olNext = 1;
+  const close = ()=>{ if(list){ html += `</${list}>`; list = null; } };
+  lines.forEach(raw=>{
+    const line = raw.trim();
+    if(!line) return; // Leerzeilen trennen keine Listen – sonst beginnt die Nummerierung neu
+    let m;
+    if((m = line.match(/^(\d+)[.)]\s+(.*)$/))){ const n = parseInt(m[1],10); if(list!=='ol'){ close(); if(n===1) olNext = 1; html+=`<ol start="${n||olNext}">`; list='ol'; } olNext = (n||olNext)+1; html += `<li>${inline(m[2])}</li>`; return; }
+    if((m = line.match(/^[-•*]\s+(.*)$/))){ if(list!=='ul'){ close(); html+='<ul>'; list='ul'; } html += `<li>${inline(m[1])}</li>`; return; }
+    if((m = line.match(/^#{1,4}\s+(.*)$/))){ close(); html += `<div class="alex-h">${inline(m[1])}</div>`; return; }
+    close(); olNext = 1; html += `<p>${inline(line)}</p>`;
+  });
+  close();
+  return html;
+}
+const ALEX_LABELS = { customer_name:'Kunde', license_plate:'Kennzeichen', vehicle_brand:'Marke', vehicle_model:'Modell', vin:'FIN', hsn:'HSN', tsn:'TSN',
+  mileage:'Km-Stand', description:'Beschreibung', priority:'Priorität', assigned_mechanic:'Mechaniker', planned_completion:'Fertig geplant',
+  appointment_date:'Datum', time_slot:'Uhrzeit', end_time:'bis', service_name:'Dienstleistung', estimated_duration:'Dauer (Min.)', appointment_type:'Termintyp',
+  part_name:'Teil', part_number:'Teilenummer', quantity:'Menge', supplier_name:'Lieferant', stock_quantity:'Bestand', location:'Lagerort',
+  size:'Größe', season:'Saison', tread_depth:'Profil (mm)', storage_location:'Lagerplatz', status:'Status', phone:'Telefon', email:'E-Mail' };
+function alexLabel(k){ return ALEX_LABELS[k] || k.replace(/_/g,' ').replace(/^./, c=>c.toUpperCase()); }
+function alexPrimitiveRows(obj, max){
+  return Object.entries(obj||{})
+    .filter(([k,v])=> v!==null && v!=='' && typeof v!=='object' && !/(^id$|_id$|token|^type$|^title$|^name$|^subtitle$|^level$)/.test(k))
+    .slice(0, max||8)
+    .map(([k,v])=>`<div class="alex-row"><span>${escHtml(alexLabel(k))}</span><b>${escHtml(typeof v==='boolean'?(v?'ja':'nein'):v)}</b></div>`).join('');
+}
+function alexLevelClass(c){
+  const l = String(c.level||c.ampel||c.severity||'').toLowerCase();
+  if(/rot|red|hoch|high|ueberbucht|überbucht|kritisch/.test(l)) return 'lvl-red';
+  if(/gelb|yellow|mittel|medium|knapp|warn/.test(l)) return 'lvl-yellow';
+  if(/gr(ü|ue)n|green|ok|niedrig|low/.test(l)) return 'lvl-green';
+  return '';
+}
+function renderAlexCards(cards){
+  if(!Array.isArray(cards) || !cards.length) return '';
+  return `<div class="alex-cards">${cards.slice(0,8).map(c=>{
+    const title = c.title || c.name || c.customer_name || c.label || '';
+    const sub = c.subtitle || c.description || c.summary || c.message || '';
+    const lines = Array.isArray(c.lines) ? c.lines.map(l=>`<div class="alex-line">${escHtml(typeof l==='string'?l:(l.text||l.label||''))}</div>`).join('') : alexPrimitiveRows(c, 6);
+    return `<div class="alex-card ${alexLevelClass(c)}">${title?`<div class="alex-card-t">${escHtml(title)}</div>`:''}${sub?`<div class="alex-card-s">${escHtml(sub)}</div>`:''}${lines}</div>`;
+  }).join('')}</div>`;
+}
+function alexCanWrite(){ return state.currentUser && ['admin','serviceberater'].includes(state.currentUser.role); }
+function renderAlexDraft(draft, idx, m){
+  if(!draft || typeof draft!=='object') return '';
+  const fields = draft.fields || draft.data || draft.order || draft.appointment || draft.part_order || draft;
+  const kindLabel = { order:'Auftrag', auftrag:'Auftrag', appointment:'Termin', termin:'Termin', part_order:'Teilebestellung', teilebestellung:'Teilebestellung' }[String(draft.kind||draft.type||'').toLowerCase()] || 'Entwurf';
+  const warnings = [].concat(draft.warnings||[], draft.capacity && (draft.capacity.message||draft.capacity.warning) ? [draft.capacity.message||draft.capacity.warning] : []);
+  const items = Array.isArray(draft.services) ? draft.services : (Array.isArray(draft.items) ? draft.items : []);
+  let actions;
+  if(m.draftState==='done') actions = `<div class="alex-done">${iconCheck} Angelegt</div>`;
+  else if(m.draftState==='discarded') actions = `<div class="alex-muted">Verworfen</div>`;
+  else if(m.draftState==='busy') actions = `<div class="alex-muted">Wird angelegt…</div>`;
+  else if(!alexCanWrite()) actions = `<div class="alex-muted">Anlegen dürfen Admin und Serviceberater.</div>`;
+  else actions = `<div class="alex-draft-actions"><button class="btn primary" data-alex-exec="${idx}">${iconCheck} Anlegen</button><button class="btn" data-alex-discard="${idx}">Verwerfen</button></div>`;
+  return `<div class="alex-draft">
+    <div class="alex-draft-t">${iconSparkle} ${escHtml(draft.title || kindLabel + ' – bitte prüfen')}</div>
+    ${warnings.map(w=>`<div class="alex-warn">${iconWarn} ${escHtml(w)}</div>`).join('')}
+    <div class="alex-rows">${alexPrimitiveRows(fields, 16)}</div>
+    ${items.length?`<div class="alex-items">${items.map(it=>`<div class="alex-line">• ${escHtml(typeof it==='string'?it:(it.name||it.title||it.description||''))}</div>`).join('')}</div>`:''}
+    ${m.draftError?`<div class="alex-warn">${iconWarn} ${escHtml(m.draftError)}</div>`:''}
+    ${actions}
+    <div class="alex-hint">ALEX schlägt vor – angelegt wird erst nach deiner Bestätigung.</div>
+  </div>`;
+}
+let alexBusy = false;
+let alexCtxOrderId = null;      // gesetzt über „ALEX fragen“ im Auftrag
+let alexCtxCleared = false;     // Nutzer hat den Fahrzeugkontext entfernt
+function alexCurrentOrder(){
+  if(alexCtxCleared) return null;
+  const id = alexCtxOrderId || (state.mainView==='auftraege' ? state.selectedOrderId : null);
+  return id ? orders.find(o=>o.id===id) || null : null;
+}
+const ALEX_CHIPS = ['Was steht heute an?','Fehlercode P0401','Bremsbeläge auf Lager?','Wie voll sind wir Freitag?'];
 function renderAiPanel(){
   const panel = document.getElementById('aiPanel');
+  const ctx = alexCurrentOrder();
   panel.innerHTML = `
     <div class="ai-panel-head">
       <div class="ic">${iconBot}</div>
-      <div><b>ALEX</b><span>● Online</span></div>
+      <div><b>ALEX</b><span>${alexBusy ? '● denkt nach…' : (navigator.onLine===false ? '● offline – lokales Wissen' : '● KI-Assistent')}</span></div>
       <div class="ai-panel-close" id="aiPanelClose">${iconClose}</div>
     </div>
+    ${ctx ? `<div class="alex-ctx">${iconCar}<span>Auftrag #${escHtml(ctx.orderNumber)} · ${escHtml(ctx.vehicle)} · ${escHtml(ctx.plate)}</span><button id="alexCtxClear" title="Ohne Fahrzeug fragen">${iconClose}</button></div>` : ''}
     <div class="ai-panel-body" id="aiPanelBody">
-      ${aiChat.map(m=>`<div class="ai-msg ${m.from==='bot'?'bot':'user'}">${m.text}</div>`).join('')}
+      ${aiChat.map((m,i)=>`<div class="ai-msg ${m.from==='bot'?'bot':'user'}">${m.text}${m.draft?renderAlexDraft(m.draft,i,m):''}</div>`).join('')}
+      ${aiChat.length<=1 ? `<div class="alex-chips">${ALEX_CHIPS.map(c=>`<button class="alex-chip" data-alex-chip="${escHtml(c)}">${escHtml(c)}</button>`).join('')}</div>` : ''}
     </div>
     <div class="ai-panel-input-row">
-      <input class="ai-panel-input" id="aiInput" placeholder="Frag ALEX…">
-      <button class="ai-panel-send" id="aiSendBtn">${svg('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>')}</button>
+      <input class="ai-panel-input" id="aiInput" placeholder="${ctx?'Frag ALEX zu diesem Fahrzeug…':'Frag ALEX…'}" ${alexBusy?'disabled':''}>
+      <button class="ai-panel-send" id="aiSendBtn" ${alexBusy?'disabled':''}>${svg('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>')}</button>
     </div>
+    <div class="alex-foot">ALEX ist eine KI-Hilfe und ersetzt keine Herstellerdaten.</div>
   `;
   const body = document.getElementById('aiPanelBody');
   if(body) body.scrollTop = body.scrollHeight;
 }
-function aiAsk(){
-  const input = document.getElementById('aiInput');
-  if(!input || !input.value.trim()) return;
-  const q = input.value.trim();
-  aiChat.push({from:'user', text:q});
-
-  let replyHtml = null;
-  if(/reifen/i.test(q)){
-    const matches = findTireSets(q);
-    if(matches.length){
-      replyHtml = `<b>${matches.length===1?'Reifensatz gefunden':'Reifensätze gefunden ('+matches.length+')'}</b><ul>` +
-        matches.map(t=>`<li><b>${t.customer}</b> – ${t.brand} ${t.model}, ${t.size} (${tireSeasonLabel[t.season]||t.season})<br>
-          📍 Halle ${t.hall}, Regal ${t.rack}, Ebene ${t.level}, Fach ${t.compartment}${t.plate?` · Kennzeichen ${t.plate}`:''} · Zustand: ${t.condition}, Profil ${t.tread} mm</li>`).join('') +
-        `</ul>`;
-    } else {
-      replyHtml = `Für diese Suche habe ich keinen eingelagerten Reifensatz gefunden. Prüfe die Schreibweise des Namens oder wirf einen Blick ins Reifenlager.`;
-    }
-  }
-  if(!replyHtml){
-    const hit = AI_KB.find(k=>k.match.test(q));
-    replyHtml = hit ? hit.reply : 'Dazu habe ich aktuell keine hinterlegten Informationen. Die KI-Wissensdatenbank wird laufend erweitert – versuch es z.B. mit einem Fehlercode, Stichwort wie "Bremse" oder "Öl", oder frag nach einem Reifensatz per Kundenname.';
-  }
-  aiChat.push({from:'bot', text: replyHtml});
-  input.value='';
+function openAlexPanel(orderId){
+  alexCtxOrderId = orderId || null;
+  alexCtxCleared = false;
+  document.getElementById('notePanel').style.display='none';
   renderAiPanel();
-  const inp = document.getElementById('aiInput');
-  if(inp) inp.focus();
+  document.getElementById('aiPanel').style.display='flex';
+  const inp = document.getElementById('aiInput'); if(inp) inp.focus();
 }
+function alexLocalAnswer(q){
+  const hit = AI_KB.find(k=>k.match.test(q));
+  return hit ? hit.reply : null;
+}
+async function aiAsk(prefill){
+  if(alexBusy) return;
+  const input = document.getElementById('aiInput');
+  const q = String(prefill || (input && input.value) || '').trim();
+  if(!q) return;
+  aiChat.push({ from:'user', text: escHtml(q), plain: q });
+  aiChat.push({ from:'bot', text:'<span class="alex-typing"><i></i><i></i><i></i></span>', pending:true });
+  alexBusy = true; renderAiPanel();
+  const ctx = alexCurrentOrder();
+  const messages = aiChat.filter(m=>!m.pending && m.plain).slice(-10).map(m=>({ role: m.from==='user' ? 'user' : 'assistant', content: m.plain }));
+  const r = await tabletRequest('alex_ask', { messages, order_id: ctx ? ctx.id : null }, 60000);
+  aiChat.pop();
+  const local = alexLocalAnswer(q);
+  if(r.ok && r.data && r.data.answer){
+    const d = r.data;
+    let html = formatAlexAnswer(d.answer);
+    html += renderAlexCards(d.cards);
+    // Dokumente aus der lokalen Wissensdatenbank (z. B. E30-Schaltplan) zusätzlich anbieten
+    if(local && /openPdfModal/.test(local)){
+      const links = local.match(/<a [^>]*openPdfModal[^>]*>[\s\S]*?<\/a>/g) || [];
+      if(links.length) html += `<div class="alex-docs">${links.join('<br>')}</div>`;
+    }
+    if(Array.isArray(d.sources) && d.sources.length) html += `<div class="alex-sources">${d.sources.slice(0,3).map((s,i)=>`<span>[${i+1}] ${escHtml(s.title||s)}</span>`).join('')}</div>`;
+    if(d.used_general_knowledge) html += `<div class="alex-general">Allgemeines KI-Wissen – bitte prüfen</div>`;
+    aiChat.push({ from:'bot', text: html, plain: d.answer, draft: d.draft || null });
+  } else if(r.status===429 || /rate|limit|zu viele/i.test(String(r.reason||''))){
+    aiChat.push({ from:'bot', text:'Du hast in dieser Stunde schon viele Fragen gestellt. Bitte versuch es gleich noch einmal.' });
+  } else {
+    const why = r.missing ? 'ALEX ist auf dem Server noch nicht freigeschaltet' : `Keine Verbindung zu ALEX (${escHtml(r.reason||'Fehler')})`;
+    aiChat.push({ from:'bot', text: `<div class="alex-general">${why} – Antwort aus dem lokalen Wissen:</div>` + (local || 'Dazu habe ich lokal nichts hinterlegt. Versuch es mit einem Fehlercode oder Stichwort wie „Bremse“ oder „Öl“.') });
+  }
+  alexBusy = false;
+  if(input) input.value = '';
+  renderAiPanel();
+  const inp = document.getElementById('aiInput'); if(inp) inp.focus();
+}
+async function alexExecuteDraft(idx){
+  const m = aiChat[idx];
+  if(!m || !m.draft || m.draftState==='busy' || m.draftState==='done') return;
+  m.draftState = 'busy'; m.draftError = null; renderAiPanel();
+  const r = await tabletRequest('alex_execute', { draft: m.draft }, 30000);
+  if(r.ok){
+    m.draftState = 'done';
+    const what = (r.data && (r.data.message || r.data.summary)) || 'Angelegt.';
+    aiChat.push({ from:'bot', text: `${iconCheck} ${escHtml(what)}` });
+    showUpdateToast('ALEX: ' + what);
+    try{ await loadFromBase44(); renderChrome(); setMainView(state.mainView || 'dashboard'); }catch(_){}
+  } else {
+    m.draftState = null;
+    m.draftError = r.missing ? 'Anlegen über das Tablet ist noch nicht freigeschaltet – bitte im Base44-Dashboard anlegen.' : `Nicht angelegt: ${r.reason}`;
+  }
+  renderAiPanel();
+}
+function handleAlexClick(e){
+  const chip = e.target.closest('[data-alex-chip]');
+  if(chip){ aiAsk(chip.dataset.alexChip); return true; }
+  if(e.target.closest('#alexCtxClear')){ alexCtxCleared = true; alexCtxOrderId = null; renderAiPanel(); return true; }
+  if(e.target.closest('#askAlexOrderBtn')){ openAlexPanel(state.selectedOrderId); return true; }
+  const ex = e.target.closest('[data-alex-exec]');
+  if(ex){ alexExecuteDraft(parseInt(ex.dataset.alexExec,10)); return true; }
+  const dis = e.target.closest('[data-alex-discard]');
+  if(dis){ const m = aiChat[parseInt(dis.dataset.alexDiscard,10)]; if(m){ m.draftState='discarded'; renderAiPanel(); } return true; }
+  return false;
+}
+
+/* ---------- Reifenscan (Base44 tabletAction tire_scan) ---------- */
+const TIRE_SLOTS = [
+  { key:'flanke', label:'Flanke', hint:'Reifenbeschriftung mit Größe & DOT' },
+  { key:'laufflaeche', label:'Lauffläche', hint:'Profil von vorne, gut ausgeleuchtet' },
+  { key:'felge', label:'Felge', hint:'Felge komplett, Schäden nah' },
+];
+const TIRE_FIELDS = [
+  ['brand','Marke'],['model','Modell'],['size','Größe'],['load_index','Lastindex'],['speed_index','Geschw.-Index'],
+  ['season','Saison'],['dot_code','DOT'],['production_week','Prod.-Woche'],['production_year','Prod.-Jahr'],
+  ['tire_age_years','Alter (Jahre)'],['tread_depth_mm','Profiltiefe (mm)'],['overall_condition','Zustand'],
+];
+function tireState(o){
+  if(!state.tireScan || state.tireScan.orderId !== o.id) state.tireScan = { orderId:o.id, photos:{}, busy:false, result:null, imageUrls:[], saved:false, error:null };
+  return state.tireScan;
+}
+function tireVal(f){ return f && typeof f==='object' && 'value' in f ? f.value : f; }
+function tireConf(f){ return f && typeof f==='object' && 'confidence' in f ? Number(f.confidence)||0 : 1; }
+function tireWarnings(res){
+  const w = [];
+  const age = Number(tireVal(res.tire_age_years))||0;
+  const tread = Number(tireVal(res.tread_depth_mm))||0;
+  const season = String(tireVal(res.season)||'');
+  const mm = n => n.toLocaleString('de-DE');
+  if(age > 6) w.push(`Reifen ist ca. ${age} Jahre alt – Austausch empfehlen.`);
+  if(tread > 0 && tread < 1.6) w.push(`Profil ${mm(tread)} mm – unter dem gesetzlichen Minimum von 1,6 mm!`);
+  else if(tread > 0 && season==='winter' && tread < 4) w.push(`Winterreifen mit ${mm(tread)} mm – unter 4 mm empfohlen tauschen.`);
+  else if(tread > 0 && tread < 3) w.push(`Profil ${mm(tread)} mm – unter 3 mm empfohlen tauschen.`);
+  return w;
+}
+function renderDamageList(title, list){
+  if(!Array.isArray(list) || !list.length) return `<div class="ts-dmg-none">${iconCheck} ${title}: keine Schäden erkannt</div>`;
+  return `<div class="ts-dmg"><b>${title}</b>${list.map(d=>{
+    const txt = typeof d==='string' ? d : [d.type||d.damage||d.title, d.description||d.detail, d.location||d.position].filter(Boolean).join(' – ');
+    const sev = typeof d==='object' ? (d.severity||d.level||'') : '';
+    return `<div class="ts-dmg-item ${alexLevelClass({level:sev})}">${escHtml(txt||'Schaden')}${sev?` <span>(${escHtml(sev)})</span>`:''}</div>`;
+  }).join('')}</div>`;
+}
+function renderTireScanPanel(o){
+  if(!o) return '';
+  const ts = tireState(o);
+  const count = Object.keys(ts.photos).length;
+  const slots = TIRE_SLOTS.map(s=>{
+    const ph = ts.photos[s.key];
+    return `<div class="ts-slot ${ph?'has':''}">
+      ${ph ? `<img src="${ph}" alt="${s.label}">` : `<div class="ts-slot-empty">${iconCamera}</div>`}
+      <div class="ts-slot-l"><b>${s.label}</b><span>${s.hint}</span></div>
+      <label class="btn ${ph?'':'primary'}">${iconCamera} ${ph?'Neu':'Foto'}<input type="file" accept="image/*" capture="environment" data-tireslot="${s.key}" hidden></label>
+    </div>`;
+  }).join('');
+  let result = '';
+  if(ts.busy) result = `<div class="ts-busy"><span class="alex-typing"><i></i><i></i><i></i></span> Reifen wird ausgewertet… (bis zu 30 Sek.)</div>`;
+  else if(ts.result){
+    const r = ts.result;
+    const warns = tireWarnings(r);
+    result = `<div class="ts-result">
+      <div class="ts-grid">${TIRE_FIELDS.map(([k,l])=>{
+        const v = tireVal(r[k]); const c = tireConf(r[k]);
+        const empty = v===null || v===undefined || v==='' || v===0;
+        return `<div class="ts-f ${!empty && c<0.7?'ts-chk':''} ${empty?'ts-empty':''}"><span>${l}</span><b>${empty?'–':escHtml(v)}</b>${!empty && c<0.7?'<em>bitte prüfen</em>':''}</div>`;
+      }).join('')}</div>
+      ${warns.map(w=>`<div class="alex-warn">${iconWarn} ${escHtml(w)}</div>`).join('')}
+      ${renderDamageList('Reifen', r.tire_damages)}
+      ${renderDamageList('Felge', r.rim_damages)}
+      <div class="alex-hint">KI-Einschätzung – ersetzt keine Sichtprüfung durch den Mechaniker.</div>
+      ${ts.saved ? `<div class="alex-done">${iconCheck} Fotos und Befund am Auftrag gespeichert</div>`
+        : `<div class="alex-draft-actions"><button class="btn primary" id="tireSaveBtn">${iconCheck} Übernehmen &amp; am Auftrag speichern</button><button class="btn" id="tireResetBtn">Neu scannen</button></div>`}
+    </div>`;
+  }
+  return `<div class="ts-wrap">
+    <div class="ts-intro">${iconTire}<div><b>Reifenscan</b><span>Fotos machen – ALEX liest Größe, DOT und Profil aus und prüft Reifen und Felge auf Schäden.</span></div></div>
+    <div class="ts-slots">${slots}</div>
+    ${ts.error ? `<div class="alex-warn">${iconWarn} ${escHtml(ts.error)}</div>` : ''}
+    ${!ts.result && !ts.busy ? `<button class="btn primary ts-go" id="tireScanBtn" ${count?'':'disabled'}>${iconScan} ${count?`Auswerten (${count} Foto${count>1?'s':''})`:'Mindestens ein Foto aufnehmen'}</button>` : ''}
+    ${result}
+  </div>`;
+}
+function rerenderTirePanel(){ if(state.detailTab==='reifen'){ const el = document.getElementById('tabPanel'); if(el) el.innerHTML = renderTireScanPanel(getSelectedOrder()); } }
+document.addEventListener('change', async (e)=>{
+  const inp = e.target.closest && e.target.closest('[data-tireslot]');
+  if(!inp || !inp.files || !inp.files[0]) return;
+  const o = getSelectedOrder(); if(!o) return;
+  const ts = tireState(o);
+  try{ ts.photos[inp.dataset.tireslot] = await compressImage(inp.files[0], 1600, 0.82); ts.result = null; ts.saved = false; ts.error = null; }
+  catch(_){ ts.error = 'Foto konnte nicht verarbeitet werden.'; }
+  rerenderTirePanel();
+});
+async function runTireScan(){
+  const o = getSelectedOrder(); if(!o) return;
+  const ts = tireState(o);
+  const images = TIRE_SLOTS.map(s=>ts.photos[s.key]).filter(Boolean);
+  if(!images.length || ts.busy) return;
+  ts.busy = true; ts.error = null; rerenderTirePanel();
+  const r = await tabletRequest('tire_scan', { order_id:o.id, images }, 90000);
+  ts.busy = false;
+  if(r.ok && r.data && r.data.result){ ts.result = r.data.result; ts.imageUrls = r.data.image_urls || []; }
+  else ts.error = r.missing ? 'Reifenscan ist auf dem Server noch nicht freigeschaltet.' : `Auswertung fehlgeschlagen (${r.reason}). Bitte erneut versuchen.`;
+  if(state.tireScan === ts) rerenderTirePanel();
+}
+async function saveTireScan(){
+  const o = getSelectedOrder(); if(!o) return;
+  const ts = tireState(o);
+  if(!ts.result || ts.saved) return;
+  const btn = document.getElementById('tireSaveBtn'); if(btn){ btn.textContent = 'Speichert…'; btn.style.pointerEvents='none'; }
+  const r = ts.result;
+  for(const s of TIRE_SLOTS){
+    const ph = ts.photos[s.key]; if(!ph) continue;
+    await tabletAction('media_upload', { order_id:o.id, filename:`reifenscan-${o.orderNumber}-${s.key}-${Date.now()}.jpg`, data_url:ph, caption:`Reifenscan – ${s.label}` });
+  }
+  const fmt = k => { const v = tireVal(r[k]); return (v===null||v===undefined||v===''||v===0) ? '–' : v; };
+  const dmg = (list)=> Array.isArray(list)&&list.length ? list.map(d=>typeof d==='string'?d:[d.type||d.damage||d.title, d.description, d.location, d.severity&&`(${d.severity})`].filter(Boolean).join(' ')).join('; ') : 'keine erkannt';
+  const lines = [
+    `Reifenscan (KI) – ${state.currentUser ? state.currentUser.name : 'Tablet'}`,
+    `Reifen: ${fmt('brand')} ${fmt('model')}, ${fmt('size')} ${fmt('load_index')}${fmt('speed_index')}, Saison ${fmt('season')}`,
+    `DOT ${fmt('dot_code')} (ca. ${fmt('tire_age_years')} Jahre), Profil ${fmt('tread_depth_mm')} mm, Zustand ${fmt('overall_condition')}`,
+    `Schäden Reifen: ${dmg(r.tire_damages)}`,
+    `Schäden Felge: ${dmg(r.rim_damages)}`,
+    ...tireWarnings(r).map(w=>'Hinweis: '+w),
+    'KI-Einschätzung – Sichtprüfung durch Mechaniker erforderlich.',
+  ];
+  const note = await tabletAction('note_add', { order_id:o.id, content: lines.join('\n') });
+  ts.saved = !!note;
+  if(note) showUpdateToast('Reifenscan am Auftrag gespeichert');
+  rerenderTirePanel();
+}
+function handleTireScanClick(e){
+  if(e.target.closest('#tireScanBtn')){ runTireScan(); return true; }
+  if(e.target.closest('#tireSaveBtn')){ saveTireScan(); return true; }
+  if(e.target.closest('#tireResetBtn')){ const o = getSelectedOrder(); if(o){ state.tireScan = null; tireState(o); rerenderTirePanel(); } return true; }
+  return false;
+}
+
 
 /* ---------- 14. Offline-Modus ---------- */
 function renderOfflineBanner(online){
