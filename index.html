@@ -1043,6 +1043,14 @@
   .alex-card.lvl-green,.ts-dmg-item.lvl-green{border-left-color:#22c55e;} .alex-card.lvl-yellow,.ts-dmg-item.lvl-yellow{border-left-color:#f59e0b;} .alex-card.lvl-red,.ts-dmg-item.lvl-red{border-left-color:#ef4444;}
   .alex-card-t{font-weight:700;font-size:12.5px;} .alex-card-s{font-size:11.5px;color:var(--text-faint);margin-top:2px;} .alex-line{font-size:11.5px;margin-top:2px;}
   .alex-row{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:2px 0;} .alex-row span{color:var(--text-faint);} .alex-row b{text-align:right;overflow-wrap:anywhere;}
+  .alex-card-btn{margin-top:6px;display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:11px;font-weight:600;padding:5px 9px;border-radius:7px;border:1px solid var(--border,#26264a);background:transparent;color:var(--text);cursor:pointer;} .alex-card-btn svg{width:12px;height:12px;}
+  .alex-line svg{width:12px;height:12px;vertical-align:-2px;}
+  .alex-cap{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:5px;}
+  .alex-cap-d{position:relative;overflow:hidden;padding:6px;border-radius:8px;background:var(--panel,#191932);border:1px solid var(--border,#26264a);font-size:10.5px;}
+  .alex-cap-d span{display:block;color:var(--text-faint);} .alex-cap-d b{font-size:12.5px;} .alex-cap-d i{position:absolute;left:0;bottom:0;height:3px;background:#22c55e;}
+  .alex-cap-d.lvl-yellow i{background:#f59e0b;} .alex-cap-d.lvl-red i{background:#ef4444;}
+  .alex-capline{margin-top:6px;font-size:11.5px;padding:5px 8px;border-radius:8px;border-left:3px solid #22c55e;background:var(--panel-2);} .alex-capline.lvl-yellow{border-left-color:#f59e0b;} .alex-capline.lvl-red{border-left-color:#ef4444;}
+  .alex-sub{font-size:10.5px;color:var(--text-faint);margin-top:6px;}
   .alex-draft{margin-top:10px;padding:10px;border-radius:10px;border:1px solid var(--accent,#8b5cf6);background:var(--panel,#191932);}
   .alex-draft-t{display:flex;align-items:center;gap:6px;font-weight:700;margin-bottom:6px;} .alex-draft-t svg{width:14px;height:14px;}
   .alex-warn{display:flex;gap:6px;align-items:flex-start;font-size:11.5px;margin:6px 0;padding:6px 8px;border-radius:8px;background:rgba(239,68,68,.1);color:#f87171;} .alex-warn svg{width:13px;height:13px;flex-shrink:0;margin-top:1px;}
@@ -1414,6 +1422,8 @@ const SUPPORT_EMAIL = 'info@kabaradigital.de';
 /* Schreibaktionen ans Backend (Base44-Funktion tabletAction, Bearer-Token wie getTabletData).
    Solange die Funktion fehlt, bleiben Änderungen lokal auf diesem Tablet erhalten (siehe
    carryOverLocalState) und es erscheint einmalig ein Hinweis. */
+const CREDITS_MSG = 'Monatskontingent für Uploads/KI bei Base44 aufgebraucht – bitte Admin informieren';
+function isCreditsLimit(data){ return !!data && ((data.extra_data && data.extra_data.reason==='integration_credits_limit_reached') || /limit of integrations/i.test(String(data.message||data.detail||''))); }
 const ACTION_LABELS = { tire_scan:'Reifenscan', task_update:'Aufgabe', worktime_start:'Zeiterfassung', worktime_stop:'Zeiterfassung', media_upload:'Foto', note_add:'Notiz', order_complete:'Auftragsabschluss' };
 async function tabletAction(action, payload){
   if(state.writeSupported === false) return null;
@@ -1441,12 +1451,13 @@ async function tabletAction(action, payload){
       }
       return null;
     }
+    if(isCreditsLimit(data)){ const err = new Error(CREDITS_MSG); err.credits = true; err.body = data; throw err; }
     if(!res.ok){ const err = new Error(data.error || data.message || ('HTTP ' + res.status)); err.status = res.status; err.body = data; throw err; }
     state.writeSupported = true;
     return data;
   } catch(e){
     const what = ACTION_LABELS[action] || action;
-    const reason = e.name==='AbortError' ? 'Zeitüberschreitung' : (e.status ? `${e.status} ${e.message}` : 'keine Verbindung');
+    const reason = e.credits ? CREDITS_MSG : e.name==='AbortError' ? 'Zeitüberschreitung' : (e.status ? `${e.status} ${e.message}` : 'keine Verbindung');
     state.lastWriteError = { action, reason, body: e.body || null, at: new Date().toISOString() };
     console.warn('Speichern fehlgeschlagen', state.lastWriteError);
     showUpdateToast(`${what} nicht gespeichert (${reason}).`);
@@ -4630,6 +4641,7 @@ async function tabletRequest(action, payload, timeoutMs){
     if(res.status===401){ handleSessionExpired(); return { ok:false, status:401, reason:'Sitzung abgelaufen' }; }
     const missing = data.error==='unknown_action' || (res.status===404 && /not found or not deployed/i.test(String(data.message||'')));
     if(missing) return { ok:false, status:res.status, missing:true, reason:'noch nicht freigeschaltet' };
+    if(isCreditsLimit(data)) return { ok:false, status:res.status, credits:true, reason: CREDITS_MSG };
     if(!res.ok || data.ok===false) return { ok:false, status:res.status, data, reason: data.message || data.error || ('HTTP '+res.status) };
     return { ok:true, status:res.status, data };
   }catch(e){
@@ -4665,7 +4677,7 @@ const ALEX_LABELS = { customer_name:'Kunde', license_plate:'Kennzeichen', vehicl
 function alexLabel(k){ return ALEX_LABELS[k] || k.replace(/_/g,' ').replace(/^./, c=>c.toUpperCase()); }
 function alexPrimitiveRows(obj, max){
   return Object.entries(obj||{})
-    .filter(([k,v])=> v!==null && v!=='' && typeof v!=='object' && !/(^id$|_id$|token|^type$|^title$|^name$|^subtitle$|^level$)/.test(k))
+    .filter(([k,v])=> v!==null && v!=='' && typeof v!=='object' && !/(^id$|_id$|_ids$|token|^type$|^title$|^name$|^subtitle$|^level$|photo|_url$|^summary$)/.test(k))
     .slice(0, max||8)
     .map(([k,v])=>`<div class="alex-row"><span>${escHtml(alexLabel(k))}</span><b>${escHtml(typeof v==='boolean'?(v?'ja':'nein'):v)}</b></div>`).join('');
 }
@@ -4676,21 +4688,50 @@ function alexLevelClass(c){
   if(/gr(ü|ue)n|green|ok|niedrig|low/.test(l)) return 'lvl-green';
   return '';
 }
+const ALEX_WEEKDAY = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+function alexCardHtml({title, sub, lines, lvl, action}){
+  const btn = action && action.kind==='open_order' && action.order_id && orders.some(o=>o.id===action.order_id)
+    ? `<button class="alex-card-btn" data-alex-open="${escHtml(action.order_id)}">${iconCar} Auftrag öffnen</button>` : '';
+  return `<div class="alex-card ${lvl||''}">${title?`<div class="alex-card-t">${escHtml(title)}</div>`:''}${sub?`<div class="alex-card-s">${escHtml(sub)}</div>`:''}${lines||''}${btn}</div>`;
+}
 function renderAlexCards(cards){
   if(!Array.isArray(cards) || !cards.length) return '';
-  return `<div class="alex-cards">${cards.slice(0,8).map(c=>{
-    const title = c.title || c.name || c.customer_name || c.label || '';
-    const sub = c.subtitle || c.description || c.summary || c.message || '';
-    const lines = Array.isArray(c.lines) ? c.lines.map(l=>`<div class="alex-line">${escHtml(typeof l==='string'?l:(l.text||l.label||''))}</div>`).join('') : alexPrimitiveRows(c, 6);
-    return `<div class="alex-card ${alexLevelClass(c)}">${title?`<div class="alex-card-t">${escHtml(title)}</div>`:''}${sub?`<div class="alex-card-s">${escHtml(sub)}</div>`:''}${lines}</div>`;
-  }).join('')}</div>`;
+  const out = [], cap = [];
+  cards.forEach(c=>{
+    if(!c || typeof c!=='object' || c.type==='draft') return;
+    if(c.type==='empfehlungen' && Array.isArray(c.items)){
+      c.items.slice(0,8).forEach(it=>out.push(alexCardHtml({ title:it.title, sub:it.detail, lvl: it.priority>=3?'lvl-red':(it.priority==2?'lvl-yellow':''), action:it.action })));
+      return;
+    }
+    if(c.type==='kapazitaet'){ cap.push(c); return; }
+    if(c.type==='kunde' && c.customer){
+      const k = c.customer;
+      const lines = [
+        ...(k.vehicles||[]).map(v=>`<div class="alex-line">${iconCar} ${escHtml(v)}</div>`),
+        k.last_visit ? `<div class="alex-line">Letzter Besuch: ${formatDateDE(k.last_visit)}</div>` : '',
+        k.open_orders ? `<div class="alex-line">Offene Aufträge: ${k.open_orders}</div>` : '',
+        Array.isArray(k.tires)&&k.tires.length ? `<div class="alex-line">${iconTire} ${k.tires.length} Reifensatz/-sätze eingelagert: ${k.tires.map(t=>escHtml([t.season, t.brand, t.storage_location].filter(Boolean).join(' '))).join(' · ')}</div>` : '',
+      ].join('');
+      out.push(alexCardHtml({ title:k.name, sub:k.license_plate, lines, action: (k.open_order_ids||[])[0] ? {kind:'open_order', order_id:k.open_order_ids[0]} : null }));
+      return;
+    }
+    const obj = c.tire || c.reifen || c.part || c.teil || c.customer || c.item || c;
+    out.push(alexCardHtml({ title: obj.title || obj.name || obj.customer_name || obj.part_name || obj.label || '', sub: obj.subtitle || obj.description || obj.detail || obj.summary || obj.message || '', lines: Array.isArray(obj.lines) ? obj.lines.map(l=>`<div class="alex-line">${escHtml(typeof l==='string'?l:(l.text||l.label||''))}</div>`).join('') : alexPrimitiveRows(obj, 6), lvl: alexLevelClass(obj), action: obj.action }));
+  });
+  if(cap.length){
+    out.push(`<div class="alex-cap">${cap.slice(0,7).map(k=>{
+      const d = new Date(k.datum+'T12:00:00'); const lvl = /rot/.test(k.status)?'lvl-red':/gelb/.test(k.status)?'lvl-yellow':'lvl-green';
+      return `<div class="alex-cap-d ${lvl}"><span>${ALEX_WEEKDAY[d.getDay()]} ${d.getDate()}.${d.getMonth()+1}.</span><b>${Math.round(k.pct||0)} %</b><i style="width:${Math.min(100,k.pct||0)}%"></i></div>`;
+    }).join('')}</div>`);
+  }
+  return out.length ? `<div class="alex-cards">${out.join('')}</div>` : '';
 }
 function alexCanWrite(){ return state.currentUser && ['admin','serviceberater'].includes(state.currentUser.role); }
 function renderAlexDraft(draft, idx, m){
   if(!draft || typeof draft!=='object') return '';
   const fields = draft.fields || draft.data || draft.order || draft.appointment || draft.part_order || draft;
   const kindLabel = { order:'Auftrag', auftrag:'Auftrag', appointment:'Termin', termin:'Termin', part_order:'Teilebestellung', teilebestellung:'Teilebestellung' }[String(draft.kind||draft.type||'').toLowerCase()] || 'Entwurf';
-  const warnings = [].concat(draft.warnings||[], draft.capacity && (draft.capacity.message||draft.capacity.warning) ? [draft.capacity.message||draft.capacity.warning] : []);
+  const warnings = [].concat(draft.warnings||[], draft.capacity && (draft.capacity.message||draft.capacity.warning) ? [draft.capacity.message||draft.capacity.warning] : []).map(w=>typeof w==='string'?w:(w.message||w.text||''));
   const items = Array.isArray(draft.services) ? draft.services : (Array.isArray(draft.items) ? draft.items : []);
   let actions;
   if(m.draftState==='done') actions = `<div class="alex-done">${iconCheck} Angelegt</div>`;
@@ -4702,7 +4743,14 @@ function renderAlexDraft(draft, idx, m){
     <div class="alex-draft-t">${iconSparkle} ${escHtml(draft.title || kindLabel + ' – bitte prüfen')}</div>
     ${warnings.map(w=>`<div class="alex-warn">${iconWarn} ${escHtml(w)}</div>`).join('')}
     <div class="alex-rows">${alexPrimitiveRows(fields, 16)}</div>
-    ${items.length?`<div class="alex-items">${items.map(it=>`<div class="alex-line">• ${escHtml(typeof it==='string'?it:(it.name||it.title||it.description||''))}</div>`).join('')}</div>`:''}
+    ${items.length?`<div class="alex-items"><div class="alex-sub">Leistungen</div>${items.map(it=>`<div class="alex-line">• ${escHtml(typeof it==='string'?it:[it.name||it.title||it.description, it.duration?it.duration+' Min':'', it.price!=null?Number(it.price).toLocaleString('de-DE',{style:'currency',currency:'EUR'}):''].filter(Boolean).join(' · '))}</div>`).join('')}</div>`:''}
+    ${(draft.suggested_mechanic||draft.lift_name||draft.planned_completion||draft.estimated_price!=null)?`<div class="alex-rows">
+      ${draft.suggested_mechanic?`<div class="alex-row"><span>Mechaniker</span><b>${escHtml(draft.suggested_mechanic)}</b></div>`:''}
+      ${draft.lift_name?`<div class="alex-row"><span>Bühne</span><b>${escHtml(draft.lift_name)}</b></div>`:''}
+      ${draft.planned_completion?`<div class="alex-row"><span>Fertig geplant</span><b>${escHtml(formatDateTimeDE(draft.planned_completion))}</b></div>`:''}
+      ${draft.estimated_price!=null?`<div class="alex-row"><span>Preis ca.</span><b>${Number(draft.estimated_price).toLocaleString('de-DE',{style:'currency',currency:'EUR'})}</b></div>`:''}
+    </div>`:''}
+    ${draft.capacity && draft.capacity.pct!=null?`<div class="alex-capline ${/rot/.test(draft.capacity.status)?'lvl-red':/gelb/.test(draft.capacity.status)?'lvl-yellow':'lvl-green'}">Auslastung ${draft.capacity.datum?formatDateDE(draft.capacity.datum):''}: ${Math.round(draft.capacity.pct)} %</div>`:''}
     ${m.draftError?`<div class="alex-warn">${iconWarn} ${escHtml(m.draftError)}</div>`:''}
     ${actions}
     <div class="alex-hint">ALEX schlägt vor – angelegt wird erst nach deiner Bestätigung.</div>
@@ -4780,7 +4828,7 @@ async function aiAsk(prefill){
   } else if(r.status===429 || /rate|limit|zu viele/i.test(String(r.reason||''))){
     aiChat.push({ from:'bot', text:'Du hast in dieser Stunde schon viele Fragen gestellt. Bitte versuch es gleich noch einmal.' });
   } else {
-    const why = r.missing ? 'ALEX ist auf dem Server noch nicht freigeschaltet' : `Keine Verbindung zu ALEX (${escHtml(r.reason||'Fehler')})`;
+    const why = r.missing ? 'ALEX ist auf dem Server noch nicht freigeschaltet' : r.credits ? 'Das KI-Kontingent dieses Monats ist aufgebraucht' : `Keine Verbindung zu ALEX (${escHtml(r.reason||'Fehler')})`;
     aiChat.push({ from:'bot', text: `<div class="alex-general">${why} – Antwort aus dem lokalen Wissen:</div>` + (local || 'Dazu habe ich lokal nichts hinterlegt. Versuch es mit einem Fehlercode oder Stichwort wie „Bremse“ oder „Öl“.') });
   }
   alexBusy = false;
@@ -4810,6 +4858,8 @@ function handleAlexClick(e){
   if(chip){ aiAsk(chip.dataset.alexChip); return true; }
   if(e.target.closest('#alexCtxClear')){ alexCtxCleared = true; alexCtxOrderId = null; renderAiPanel(); return true; }
   if(e.target.closest('#askAlexOrderBtn')){ openAlexPanel(state.selectedOrderId); return true; }
+  const op = e.target.closest('[data-alex-open]');
+  if(op){ state.selectedOrderId = op.dataset.alexOpen; state.detailTab='aufgaben'; document.getElementById('aiPanel').style.display='none'; setMainView('auftraege'); return true; }
   const ex = e.target.closest('[data-alex-exec]');
   if(ex){ alexExecuteDraft(parseInt(ex.dataset.alexExec,10)); return true; }
   const dis = e.target.closest('[data-alex-discard]');
@@ -4912,7 +4962,7 @@ async function runTireScan(){
   const r = await tabletRequest('tire_scan', { order_id:o.id, images }, 90000);
   ts.busy = false;
   if(r.ok && r.data && r.data.result){ ts.result = r.data.result; ts.imageUrls = r.data.image_urls || []; }
-  else ts.error = r.missing ? 'Reifenscan ist auf dem Server noch nicht freigeschaltet.' : `Auswertung fehlgeschlagen (${r.reason}). Bitte erneut versuchen.`;
+  else ts.error = r.missing ? 'Reifenscan ist auf dem Server noch nicht freigeschaltet.' : r.credits ? 'Reifenscan gerade nicht möglich: ' + CREDITS_MSG + '.' : `Auswertung fehlgeschlagen (${r.reason}). Bitte erneut versuchen.`;
   if(state.tireScan === ts) rerenderTirePanel();
 }
 async function saveTireScan(){
