@@ -1406,9 +1406,22 @@ const API_BASE = 'https://werkstattflow-pilot-production.up.railway.app';
    Öffentlicher, unauthentifizierter Endpunkt - liefert Aufträge/Aufgaben/Mitarbeiter/
    Zeiterfassung/Teile. Nur LESEND angebunden: es gibt (noch) keine Schreib-Endpunkte,
    daher wirken alle Interaktionen in der App nur lokal und werden nicht zurückgeschrieben. */
-const BASE44_URL = 'https://autoleitwerk.base44.app/functions/getTabletData';
-const BASE44_LOGIN_URL = 'https://autoleitwerk.base44.app/functions/workshopLogin';
-const BASE44_ACTION_URL = 'https://autoleitwerk.base44.app/functions/tabletAction';
+// Server-Auswahl: eigener Server (Cloudflare Worker) oder – als Rückfall – die Base44-Funktionen.
+// Zum Testen lässt sich die Adresse per ?api=<url> (wird gemerkt) bzw. ?api=reset überschreiben.
+const API_WORKER = '';   // z. B. 'https://autoleitwerk-api.<konto>.workers.dev' – leer = Base44-Funktionen
+const API_BASE44 = 'https://autoleitwerk.base44.app/functions';
+const SERVER_BASE = (()=>{
+  try{
+    const q = new URLSearchParams(location.search).get('api');
+    if(q === 'reset') localStorage.removeItem('autoleitwerk.apiBase');
+    else if(q && (/^https:\/\/[a-z0-9.-]+(\/[\w/-]*)?$/i.test(q) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(q))) localStorage.setItem('autoleitwerk.apiBase', q.replace(/\/+$/,''));
+    const o = localStorage.getItem('autoleitwerk.apiBase'); if(o) return o;
+  }catch(_){}
+  return API_WORKER || API_BASE44;
+})();
+const BASE44_URL = SERVER_BASE + '/getTabletData';
+const BASE44_LOGIN_URL = SERVER_BASE + '/workshopLogin';
+const BASE44_ACTION_URL = SERVER_BASE + '/tabletAction';
 
 /* ---------- Pilotbetrieb ----------
    Bereiche, die noch mit festen Beispieldaten arbeiten, werden im Pilot ausgeblendet,
@@ -1443,6 +1456,14 @@ async function tabletAction(action, payload){
     });
     const data = await res.json().catch(()=>({}));
     if(res.status===401){ handleSessionExpired(); return null; }
+    if(data && data.error==='not_available'){
+      state.notAvailableShown = state.notAvailableShown || {};
+      if(!state.notAvailableShown[action]){
+        state.notAvailableShown[action] = true;
+        showUpdateToast(action==='media_upload' ? 'Fotos werden gerade nicht hochgeladen – sie bleiben auf diesem Tablet.' : `${ACTION_LABELS[action]||action} ist gerade nicht verfügbar.`);
+      }
+      return null;
+    }
     const functionMissing = res.status===404 && /not found or not deployed/i.test(String(data.message||data.detail||''));
     if(functionMissing || data.error==='unknown_action'){
       if(state.writeSupported !== false){
@@ -1591,7 +1612,7 @@ async function workshopLogin(code, name, pin){
 async function fetchBase44Data(){
   if(!state.sessionToken){ const e = new Error('unauthorized'); e.code = 'unauthorized'; throw e; }
   const controller = new AbortController();
-  const timeoutId = setTimeout(()=>controller.abort(), 8000);
+  const timeoutId = setTimeout(()=>controller.abort(), 15000);
   try{
     const res = await fetch(BASE44_URL, {
       headers: { 'Authorization': 'Bearer ' + state.sessionToken },
@@ -1661,7 +1682,7 @@ function startBase44Polling(){
       if(e.code==='unauthorized'){ handleSessionExpired(); return; }
       console.warn('Base44-Abgleich fehlgeschlagen:', e.message);
     }
-  }, 30000);
+  }, 60000); // 60 s – schont Server-Kontingent; nach eigenen Änderungen wird sofort lokal aktualisiert
 }
 function stopBase44Polling(){
   if(b44PollInterval){ clearInterval(b44PollInterval); b44PollInterval = null; }
@@ -4639,7 +4660,7 @@ async function tabletRequest(action, payload, timeoutMs){
     });
     const data = await res.json().catch(()=>({}));
     if(res.status===401){ handleSessionExpired(); return { ok:false, status:401, reason:'Sitzung abgelaufen' }; }
-    const missing = data.error==='unknown_action' || (res.status===404 && /not found or not deployed/i.test(String(data.message||'')));
+    const missing = data.error==='unknown_action' || data.error==='not_available' || (res.status===404 && /not found or not deployed/i.test(String(data.message||'')));
     if(missing) return { ok:false, status:res.status, missing:true, reason:'noch nicht freigeschaltet' };
     if(isCreditsLimit(data)) return { ok:false, status:res.status, credits:true, reason: CREDITS_MSG };
     if(!res.ok || data.ok===false) return { ok:false, status:res.status, data, reason: data.message || data.error || ('HTTP '+res.status) };

@@ -168,7 +168,17 @@
 <footer class="legal-links"><a href="impressum.html">Impressum</a> · <a href="datenschutz.html">Datenschutz</a></footer>
 
 <script>
-const PORTAL_URL = 'https://autoleitwerk.base44.app/functions/portalApi';
+const API_WORKER = '';   // eigener Server, z. B. 'https://autoleitwerk-api.<konto>.workers.dev' – leer = Base44-Funktionen
+const API_BASE = (()=>{
+  try{
+    const q = new URLSearchParams(location.search).get('api');
+    if(q === 'reset') localStorage.removeItem('autoleitwerk.apiBase');
+    else if(q && (/^https:\/\/[a-z0-9.-]+(\/[\w/-]*)?$/i.test(q) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(q))) localStorage.setItem('autoleitwerk.apiBase', q.replace(/\/+$/,''));
+    const o = localStorage.getItem('autoleitwerk.apiBase'); if(o) return o;
+  }catch(_){}
+  return API_WORKER || 'https://autoleitwerk.base44.app/functions';
+})();
+const PORTAL_URL = API_BASE + '/portalApi';
 const LOGO_SRC = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHhtbG5zOmMycGE9Imh0dHA6Ly9jMnBhLm9yZy9tYW5pZmVzdCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjOGI1Y2Y2Ij48L3N0b3A+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjYzAyNmQzIj48L3N0b3A+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHBvbHlnb24gcG9pbnRzPSIyNCw4IDM2LDggMjcsNDQgNTYsNDQgNTMsNTYgMTIsNTYiIGZpbGw9InVybCgjZykiPjwvcG9seWdvbj48cG9seWdvbiBwb2ludHM9IjQxLDggNTMsOCA1MCwyMCAzOCwyMCIgZmlsbD0iI2ZmZmZmZiI+PC9wb2x5Z29uPjwvc3ZnPg==';
 
 const STEP_SEQUENCE = [

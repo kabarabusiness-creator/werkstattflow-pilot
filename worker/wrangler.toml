@@ -1,0 +1,16 @@
+name = "autoleitwerk-api"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[vars]
+BASE44_APP_ID = "6a6bfc939e9105b8cb310113"
+ALLOWED_ORIGINS = "https://kabarabusiness-creator.github.io"
+
+[observability]
+enabled = true
+
+# Secrets NICHT hier eintragen, sondern in Cloudflare:
+# Workers & Pages → autoleitwerk-api → Settings → Variables and Secrets
+#   BASE44_TOKEN  (Typ: Secret)
+#   ADMIN_KEY     (Typ: Secret)
