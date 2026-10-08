@@ -3,3 +3,4 @@ files.zip
 .DS_Store
 backend/venv/
 backend/venv/
+backend/werkstattflow.db

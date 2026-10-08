@@ -9,10 +9,10 @@ Base44-Integrations-Kontingent abhängen.
 1. **Cloudflare** → Workers & Pages → *Create* → *Import a repository* → GitHub `werkstattflow-pilot`
    - Root directory: `worker`
    - Deploy command: `npx wrangler deploy` (Standard)
-2. **Secrets** setzen: Workers & Pages → `autoleitwerk-api` → Settings → Variables and Secrets → *Add* (Typ **Secret**)
+2. **Secrets** setzen: Workers & Pages → `werkstattflow-pilot` → Settings → Variables and Secrets → *Add* (Typ **Secret**)
    - `BASE44_TOKEN` – Base44 Personal Access Token (Workspace → Personal access tokens, **nicht** read-only)
    - `ADMIN_KEY` – langes, frei gewähltes Passwort (mind. 16 Zeichen) für das Daten-Backup
-3. Adresse prüfen: `https://autoleitwerk-api.<konto>.workers.dev/health` → `"configured": true`
+3. Adresse prüfen: `https://werkstattflow-pilot.<konto>.workers.dev/health` → `"configured": true`
 
 Danach deployt Cloudflare jeden Push auf `main` automatisch.
 
