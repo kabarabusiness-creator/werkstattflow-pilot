@@ -7,7 +7,7 @@ Base44-Integrations-Kontingent abhängen.
 ## Einrichtung (einmalig)
 
 1. **Cloudflare** → Workers & Pages → *Create* → *Import a repository* → GitHub `werkstattflow-pilot`
-   - Root directory: `worker`
+   - Root directory: leer lassen (die `wrangler.toml` im Hauptordner zeigt auf `worker/src/index.js`)
    - Deploy command: `npx wrangler deploy` (Standard)
 2. **Secrets** setzen: Workers & Pages → `werkstattflow-pilot` → Settings → Variables and Secrets → *Add* (Typ **Secret**)
    - `BASE44_TOKEN` – Base44 Personal Access Token (Workspace → Personal access tokens, **nicht** read-only)
