@@ -24,6 +24,8 @@ Danach deployt Cloudflare jeden Push auf `main` automatisch.
 | `GET /getTabletData` | Daten der eigenen Werkstatt (Bearer-Token) |
 | `POST /tabletAction` | `task_update`, `worktime_start/stop`, `note_add`, `order_complete`, `tire_update`, `media_upload`, `send_portal_link`, `alex_ask`, `tire_scan` |
 | `POST /portalApi` | Kundenportal: `get`, `book`, `cancel`, `respond` |
+| `POST /fn/<name>` | Ersatz für Base44-Dashboard-Funktionen: `scanTire`, `scanRegistration`, `createTireScanToken`, `tireScanPublic`, `createRegistrationScanToken`, `registrationScanPublic`, `createPhotoUploadToken`, `uploadVehiclePhotoByToken` (Login per Base44-Zugangstoken des Nutzers; Handy-Seiten per Einmal-Token). Das Dashboard leitet diese Aufrufe in `src/lib/serverFunctions.js` hierher um. |
+| `GET /demo` | Demo-Dashboard (Einmal-Login als demo@autoleitwerk.de, sieht nur AL-DEMO) |
 | `GET /admin/export` | Komplettes Daten-Backup als JSON (Header `X-Admin-Key`) |
 | `GET /health` | Status |
 
