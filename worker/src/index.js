@@ -398,7 +398,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
-      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, time: nowIso() }, 200, cors);
+      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
       const db = new Base44(env);
       let body = {};
       if (request.method === 'POST') {
