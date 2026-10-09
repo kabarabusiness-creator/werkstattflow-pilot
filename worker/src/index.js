@@ -172,7 +172,7 @@ async function getTabletData(db, sess) {
     workshop: { name: ws.name || '', trial_ends_at: ws.trial_ends_at || null, subscription_status: ws.subscription_status || null },
     orders: orders.map(stripOrder),
     tasks: by.OrderTask.filter(t => t.workshop_code === code || orderIds.has(t.order_id)),
-    employees: mine(by.Employee).map(stripEmployee),
+    employees: mine(by.Employee).filter(e => e.is_active !== false).map(stripEmployee),
     worktimes: mine(by.WorkTime).slice(0, 300),
     parts: [],
     lifts: mine(by.Lift),

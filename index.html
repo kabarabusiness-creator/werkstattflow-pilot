@@ -1408,7 +1408,7 @@ const API_BASE = 'https://werkstattflow-pilot-production.up.railway.app';
    daher wirken alle Interaktionen in der App nur lokal und werden nicht zurückgeschrieben. */
 // Server-Auswahl: eigener Server (Cloudflare Worker) oder – als Rückfall – die Base44-Funktionen.
 // Zum Testen lässt sich die Adresse per ?api=<url> (wird gemerkt) bzw. ?api=reset überschreiben.
-const API_WORKER = '';   // z. B. 'https://autoleitwerk-api.<konto>.workers.dev' – leer = Base44-Funktionen
+const API_WORKER = 'https://werkstattflow-pilot.werkstattflow.workers.dev';   // z. B. 'https://autoleitwerk-api.<konto>.workers.dev' – leer = Base44-Funktionen
 const API_BASE44 = 'https://autoleitwerk.base44.app/functions';
 const SERVER_BASE = (()=>{
   try{
