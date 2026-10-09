@@ -11,11 +11,49 @@
  * Fotos: Cloudflare KV (statt Base44 UploadFile). Fahrzeugschein-Fotos: nur temporär (30 Min.),
  * nie öffentlich abrufbar, nach der Auswertung gelöscht. KI: Cloudflare Workers AI.
  */
-import { tireScanImages, registrationScan } from './ai.js';
+import { tireScanImages, registrationScan, capacityDays } from './ai.js';
 
 const TOKEN_TTL_MIN = 30;
 const SLOT_LABELS = { 1: 'Reifenflanke', 2: 'Lauffläche', 3: 'Felge' };
 const userCache = new Map();
+const recCache = new Map();
+const OPEN_DONE = ['abholbereit', 'abgeschlossen'];
+const fmtDT = iso => { const d = new Date(iso); if (isNaN(d)) return ''; return new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(d).replace(',', ''); };
+const fmtD = iso => { const [y, m, d] = String(iso).slice(0, 10).split('-'); return d && m ? `${d}.${m}.` : ''; };
+const euro = n => Number(n || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+const berlinIso = (offsetDays = 0) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(Date.now() + offsetDays * 86400_000));
+
+// „ALEX empfiehlt“ – feste Regeln, keine KI. Gleiches Format wie die Base44-Funktion alexRecommendations.
+export function computeRecommendations({ orders, approvals, appointments, inventory, tires, employees }) {
+  const now = Date.now(); const today = berlinIso(0); const in30 = berlinIso(30);
+  const recs = [];
+  const ref = o => [`#${o.order_number || '?'}`, [o.vehicle_brand, o.vehicle_model].filter(Boolean).join(' '), o.license_plate].filter(Boolean).join(' · ');
+  const open = orders.filter(o => !OPEN_DONE.includes(o.status));
+  for (const o of open) {
+    const due = o.planned_completion ? new Date(o.planned_completion).getTime() : null;
+    if (due && due < now) recs.push({ priority: 3, sort: due, title: `Überfällig: ${ref(o)}`, detail: `Fertig geplant ${fmtDT(o.planned_completion)} · Kunde ${o.customer_name || '–'} informieren`, action: { kind: 'open_order', order_id: o.id } });
+    else if (o.priority === 'eilig') recs.push({ priority: 3, sort: due || now, title: `Eilig: ${ref(o)}`, detail: `${o.description || 'Eilauftrag'}${o.assigned_mechanic ? ' · ' + o.assigned_mechanic : ' · noch niemand zugewiesen'}`, action: { kind: 'open_order', order_id: o.id } });
+    else if (o.planned_completion && String(o.planned_completion).slice(0, 10) === today) recs.push({ priority: 2, sort: due, title: `Heute fertig: ${ref(o)}`, detail: `bis ${fmtDT(o.planned_completion).split(' ')[1] || ''} Uhr · ${o.assigned_mechanic || 'kein Mechaniker zugewiesen'}`, action: { kind: 'open_order', order_id: o.id } });
+    if (o.next_hu && o.next_hu >= today && o.next_hu <= in30) recs.push({ priority: 1, sort: now, title: `HU fällig: ${ref(o)}`, detail: `Nächste HU am ${fmtD(o.next_hu)} – gleich mit anbieten`, action: { kind: 'open_order', order_id: o.id } });
+  }
+  const orderById = Object.fromEntries(orders.map(o => [o.id, o]));
+  for (const a of approvals.filter(a => a.status === 'ausstehend')) {
+    const o = orderById[a.order_id];
+    recs.push({ priority: 3, sort: now - 1, title: `Freigabe offen: ${a.title || 'Zusatzarbeit'} (${euro(a.additional_cost)})`, detail: `${a.customer_name || (o && o.customer_name) || 'Kunde'} · ${[a.vehicle_brand, a.license_plate].filter(Boolean).join(' ') || (o ? ref(o) : '')} – nachfassen`, action: o ? { kind: 'open_order', order_id: o.id } : null });
+  }
+  const waiting = orders.filter(o => ['warte_auf_ersatzteile', 'ersatzteile_bestellt'].includes(o.status));
+  if (waiting.length) recs.push({ priority: 1, sort: now, title: waiting.length === 1 ? '1 Auftrag wartet auf Teile' : `${waiting.length} Aufträge warten auf Teile`, detail: waiting.slice(0, 3).map(ref).join(' · '), action: { kind: 'open_order', order_id: waiting[0].id } });
+  for (const i of inventory.filter(i => Number(i.min_stock) > 0 && Number(i.stock_quantity || 0) <= Number(i.min_stock)).slice(0, 2)) {
+    recs.push({ priority: 2, sort: now, title: `Nachbestellen: ${i.name}`, detail: `Bestand ${i.stock_quantity || 0} ${i.unit || 'Stück'} (Mindestbestand ${i.min_stock})${i.supplier_name ? ' · ' + i.supplier_name : ''}`, action: null });
+  }
+  const cap = capacityDays(appointments, employees.length ? employees : [{}], 6).filter(c => c.status === 'rot');
+  if (cap.length) recs.push({ priority: 2, sort: now, title: `Werkstatt voll: ${cap.map(c => fmtD(c.datum)).join(', ')}`, detail: `Auslastung ${cap.map(c => c.pct + ' %').join(' / ')} – keine weiteren Termine annehmen oder umplanen`, action: { kind: 'capacity' } });
+  const todays = appointments.filter(a => a.appointment_date === today && a.status !== 'storniert').sort((a, b) => String(a.time_slot).localeCompare(String(b.time_slot)));
+  if (todays.length) recs.push({ priority: 1, sort: now, title: `Heute ${todays.length} Termin${todays.length > 1 ? 'e' : ''}`, detail: todays.slice(0, 3).map(a => `${a.time_slot || ''} ${a.customer_name || ''} (${a.service_name || a.appointment_type || 'Termin'})`.trim()).join(' · '), action: { kind: 'capacity' } });
+  const worn = tires.filter(t => (Number(t.tread_depth) > 0 && Number(t.tread_depth) < 3) || t.condition === 'abgefahren');
+  if (worn.length) recs.push({ priority: 1, sort: now, title: `${worn.length} eingelagerte Reifensätze abgefahren`, detail: `${worn.slice(0, 3).map(t => `${t.customer_name || ''} ${t.tread_depth ? t.tread_depth + ' mm' : ''}`.trim()).join(' · ')} – neue Reifen anbieten`, action: { kind: 'tire_list' } });
+  return recs.sort((a, b) => b.priority - a.priority || a.sort - b.sort).slice(0, 5).map(({ sort, ...r }) => (r.action ? r : { ...r, action: undefined }));
+}
 
 function b64(bytes) {
   let s = ''; const chunk = 0x8000;
@@ -83,6 +121,21 @@ export async function handleFunction(name, body, c) {
   const readJson = (s, d) => { try { return s ? (typeof s === 'string' ? JSON.parse(s) : s) : d; } catch { return d; } };
 
   /* ---- Mit Login ---- */
+  if (name === 'alexRecommendations') {
+    const user = await authUser();
+    let code = user.workshop_code;
+    if (!code) { const ws = await db.list('Workshop', { owner_user_id: user.id }, { limit: 1 }); code = ws[0] ? ws[0].code : ''; }
+    if (!code) return { recommendations: [] };
+    const hit = recCache.get(code);
+    if (hit && Date.now() - hit.ts < 60_000) return { recommendations: hit.recs };
+    const q = { workshop_code: code };
+    const [orders, approvals, appointments, inventory, tires, employees] = await Promise.all(
+      ['Order', 'ApprovalRequest', 'Appointment', 'InventoryItem', 'TireSet', 'Employee'].map(e => db.list(e, q)));
+    const recs = computeRecommendations({ orders, approvals, appointments, inventory, tires, employees: employees.filter(e => e.is_active !== false) });
+    recCache.set(code, { ts: Date.now(), recs });
+    return { recommendations: recs };
+  }
+
   if (name === 'scanTire') {
     const user = await authUser();
     const dataUrls = (Array.isArray(body.images) ? body.images : []).slice(0, 3);

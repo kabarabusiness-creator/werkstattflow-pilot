@@ -304,5 +304,18 @@ await t('Dashboard-Funktionen: Fahrzeugfoto per Handy (Entwurf → an Auftrag bi
   assert.equal((await fn('uploadVehiclePhotoByToken', { token: tk.data.token, action: 'status' })).status, 401, 'Token nach Binden gelöscht');
   const res = await worker.fetch(new Request(up.data.file_url.replace(/^https:\/\/api\.test/, 'https://api.test')), env); assert.equal(res.status, 200);
 });
+await t('ALEX empfiehlt (Dashboard): Regeln ohne KI, nur eigene Werkstatt', async () => {
+  const U = { Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' };
+  Object.assign(db.Order.find(o => o.id === 'o1'), { status: 'reparatur_laeuft', planned_completion: new Date(Date.now() - 3600_000).toISOString() });
+  db.Order.find(o => o.id === 'o2').priority = 'eilig';
+  db.ApprovalRequest.push({ id: 'a9', order_id: 'o1', workshop_code: 'AL-T1', status: 'ausstehend', title: 'Bremsscheiben', additional_cost: 180 });
+  const r = await worker.fetch(new Request('https://api.test/fn/alexRecommendations', { method: 'POST', headers: { 'Content-Type': 'application/json', ...U }, body: '{}' }), env, ctx);
+  const d = await r.json();
+  assert.equal(r.status, 200, JSON.stringify(d));
+  const titles = d.recommendations.map(x => x.title).join(' | ');
+  assert.match(titles, /Überfällig: #2001 · VW Golf · AB-C-1/); assert.match(titles, /Freigabe offen: Bremsscheiben/);
+  assert.ok(!/Fremd|#X/.test(titles), 'fremde Werkstatt in Empfehlungen: ' + titles);
+  assert.ok(d.recommendations.length <= 5 && d.recommendations[0].priority === 3);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
