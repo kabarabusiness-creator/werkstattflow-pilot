@@ -111,6 +111,15 @@ await t('Aufgabe erledigen', async () => {
   const r = await call('/tabletAction', { action: 'task_update', task_id: 't1', status: 'erledigt' }, token);
   assert.equal(r.data.ok, true); assert.equal(db.OrderTask[0].status, 'erledigt'); assert.equal(db.OrderTask[0].completed_by, 'Erika Muster');
 });
+await t('Erste Aufgabe startet → Auftrag „Reparatur läuft“ (nur aus „Fahrzeug angenommen“)', async () => {
+  db.Order.push({ id: 'o3', workshop_code: 'AL-T1', status: 'fahrzeug_angenommen', customer_name: 'C' });
+  db.OrderTask.push({ id: 't3', order_id: 'o3', workshop_code: 'AL-T1', title: 'X', status: 'offen' });
+  const r = await call('/tabletAction', { action: 'task_update', task_id: 't3', status: 'in_arbeit' }, token);
+  assert.equal(r.data.order_status, 'reparatur_laeuft'); assert.equal(db.Order.at(-1).status, 'reparatur_laeuft');
+  db.Order.at(-1).status = 'diagnose_laeuft';
+  await call('/tabletAction', { action: 'task_update', task_id: 't3', status: 'erledigt' }, token);
+  assert.equal(db.Order.at(-1).status, 'diagnose_laeuft');
+});
 await t('Fremde Aufgabe nicht änderbar', async () => {
   const r = await call('/tabletAction', { action: 'task_update', task_id: 't2', status: 'erledigt' }, token);
   assert.equal(r.status, 404); assert.equal(db.OrderTask[1].status, 'offen');

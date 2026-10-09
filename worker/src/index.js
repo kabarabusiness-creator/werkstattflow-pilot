@@ -272,7 +272,16 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     if (status === 'erledigt') { upd.completed_by = emp.name; upd.completed_date = nowIso(); }
     await db.update('OrderTask', task.id, upd);
     invalidate('OrderTask');
-    return { ok: true };
+    // Erste Aufgabe begonnen/erledigt → Auftrag von „Fahrzeug angenommen“ auf „Reparatur läuft“ (sichtbar in Base44 + Kundenportal)
+    let orderStatus = null;
+    if (status !== 'offen' && task.order_id) {
+      const order = await db.get('Order', task.order_id).catch(() => null);
+      if (order && order.workshop_code === code && order.status === 'fahrzeug_angenommen') {
+        await db.update('Order', order.id, { status: 'reparatur_laeuft' });
+        invalidate('Order'); orderStatus = 'reparatur_laeuft';
+      }
+    }
+    return { ok: true, order_status: orderStatus };
   }
   if (action === 'worktime_start') {
     if (body.order_id) await ownRecord(db, 'Order', body.order_id, code);
