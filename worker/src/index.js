@@ -398,10 +398,10 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
-      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
       const db = new Base44(env);
       let body = {};
-      if (request.method === 'POST') {
+      if (request.method === 'POST' && !(request.headers.get('Content-Type') || '').includes('form')) {
         const len = Number(request.headers.get('Content-Length') || 0);
         if (len > 2_000_000) throw new HttpError(413, 'too_large');
         body = await request.json().catch(() => ({}));
@@ -410,9 +410,21 @@ export default {
       if (path === '/getTabletData') return json(await getTabletData(db, await requireSession(db, request)), 200, cors);
       if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body), 200, cors);
       if (path === '/portalApi') return json(await portalApi(db, body), 200, cors);
+      if (path === '/admin' && request.method === 'GET') {
+        return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoLeitwerk – Daten-Backup</title>
+<style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:40px 16px;color:#1a1a2e}main{max-width:420px;margin:auto;background:#fff;padding:24px;border-radius:14px;box-shadow:0 2px 12px #0001}input,button{width:100%;box-sizing:border-box;font:inherit;padding:12px;border-radius:10px;margin-top:10px}input{border:1px solid #ccd}button{background:#7c3aed;color:#fff;border:0;font-weight:600;cursor:pointer}p{color:#556;font-size:14px}</style></head>
+<body><main><h2>Daten-Backup</h2><p>Lädt alle AutoLeitwerk-Daten als JSON-Datei herunter. Datei sicher aufbewahren – sie enthält Kundendaten.</p>
+<form method="POST" action="/admin/export"><input type="password" name="key" placeholder="ADMIN_KEY" autocomplete="current-password" required><button type="submit">Backup herunterladen</button></form></main></body></html>`,
+          { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY' } });
+      }
       if (path === '/admin/export') {
-        const key = request.headers.get('X-Admin-Key') || url.searchParams.get('key') || '';
-        if (!env.ADMIN_KEY || env.ADMIN_KEY.length < 16 || !safeEqual(key, env.ADMIN_KEY)) throw new HttpError(401, 'unauthorized');
+        let formKey = '';
+        if (request.method === 'POST' && (request.headers.get('Content-Type') || '').includes('form')) {
+          formKey = String((await request.formData()).get('key') || '').trim();
+        }
+        const key = formKey || request.headers.get('X-Admin-Key') || url.searchParams.get('key') || '';
+        const adminKey = String(env.ADMIN_KEY || '').trim();
+        if (adminKey.length < 16 || !safeEqual(String(key).trim(), adminKey)) throw new HttpError(401, 'unauthorized');
         const data = await exportAll(db);
         return new Response(JSON.stringify(data, null, 1), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="autoleitwerk-daten-${berlinToday()}.json"`, 'Cache-Control': 'no-store', ...cors } });
       }
