@@ -581,6 +581,18 @@ export default {
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
       if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/demo' && request.method === 'GET') {
+        // Demo-Dashboard: frischer Einmal-Login (60 s gültig) für den Demo-Nutzer, sieht per RLS nur AL-DEMO
+        rateLimit('demo:' + (request.headers.get('CF-Connecting-IP') || 'x'), 20, 60_000);
+        if (!env.BASE44_TOKEN) throw new HttpError(500, 'server_not_configured');
+        const res = await fetch(`${env.BASE44_API_BASE || 'https://app.base44.com'}/api/apps/${env.BASE44_APP_ID}/embed-url`, {
+          method: 'POST', headers: { 'Authorization': `Bearer ${env.BASE44_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: env.DEMO_EMAIL || 'demo@autoleitwerk.de', target: 'live_site' }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || !d.embed_url) { console.log('demo_embed', res.status, JSON.stringify(d).slice(0, 200)); throw new HttpError(502, 'demo_unavailable'); }
+        return new Response(null, { status: 302, headers: { Location: d.embed_url, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
+      }
       if (path.startsWith('/photo/') && request.method === 'GET') {
         const key = decodeURIComponent(path.slice('/photo/'.length));
         if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp)$/i.test(key)) throw new HttpError(404, 'not_found');
