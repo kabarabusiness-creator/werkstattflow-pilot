@@ -191,7 +191,8 @@ Regeln:
 - Nutze zuerst die WERKSTATTDATEN und die WISSENSEINTRÄGE. Wenn du einen Wissenseintrag verwendest, schreibe dahinter [Eintrag N].
 - Erfinde niemals Drehmomente, Füllmengen, Teilenummern, Preise, Termine oder Bestände. Steht etwas nicht in den Daten, sage das und verweise auf Herstellerdaten bzw. das Dashboard.
 - Bei Bremsen, Lenkung, Airbag und Hochvolt immer auf die Herstellervorgaben hinweisen.
-- Du kannst selbst nichts anlegen oder ändern. Für neue Aufträge/Termine auf das Dashboard verweisen.`;
+- Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sag, dass das im Dashboard geht.
+- Aufzählungen von Aufträgen kurz halten (höchstens 5, die wichtigsten zuerst) – die Details zeigt das Tablet als Karten.`;
 
 export async function alexAsk(db, sess, body, env, data) {
   limitPerHour('ask:' + sess.employee_id, ASK_PER_HOUR);
