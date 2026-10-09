@@ -15,3 +15,7 @@ enabled = true
 # Workers & Pages → autoleitwerk-api → Settings → Variables and Secrets
 #   BASE44_TOKEN  (Typ: Secret)
 #   ADMIN_KEY     (Typ: Secret)
+
+# Foto-Speicher (Cloudflare KV, kostenlos bis 1 GB) – wird beim Deploy automatisch angelegt
+[[kv_namespaces]]
+binding = "PHOTOS"

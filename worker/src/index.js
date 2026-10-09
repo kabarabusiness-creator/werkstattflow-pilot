@@ -183,7 +183,17 @@ async function getTabletData(db, sess) {
 }
 
 /* ---------------- Tablet-Aktionen ---------------- */
-const NOT_AVAILABLE = ['media_upload', 'tire_scan', 'alex_ask', 'alex_execute'];
+const NOT_AVAILABLE = ['tire_scan', 'alex_ask', 'alex_execute'];
+const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+function decodeDataUrl(dataUrl) {
+  const m = /^data:(image\/(jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/.exec(String(dataUrl || ''));
+  if (!m) throw new HttpError(400, 'invalid_image');
+  const bin = atob(m[3].replace(/\s+/g, ''));
+  if (bin.length > MAX_PHOTO_BYTES) throw new HttpError(413, 'too_large');
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { bytes, contentType: m[1], ext: m[2] === 'jpeg' ? 'jpg' : m[2] };
+}
 async function ownRecord(db, entity, id, code) {
   if (!id) throw new HttpError(400, 'params');
   let rec;
@@ -199,11 +209,26 @@ async function employeeOf(db, sess) {
   cache.set(key, { ts: Date.now(), row });
   return row || { name: 'Tablet', role: sess.role };
 }
-async function tabletAction(db, sess, body) {
+async function tabletAction(db, sess, body, env, origin) {
   const action = body.action;
   const code = sess.workshop_code;
   if (NOT_AVAILABLE.includes(action)) throw new HttpError(503, 'not_available', { message: 'Diese Funktion ist auf dem eigenen Server noch nicht eingerichtet.' });
   const emp = await employeeOf(db, sess);
+
+  if (action === 'media_upload') {
+    if (!env.PHOTOS) throw new HttpError(503, 'not_available', { message: 'Foto-Speicher ist noch nicht eingerichtet.' });
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    const { bytes, contentType, ext } = decodeDataUrl(body.data_url);
+    const key = `${code}/${order.id}/${randomHex(16)}.${ext}`;
+    await env.PHOTOS.put(key, bytes, { metadata: { contentType, uploaded_by: emp.name, uploaded_at: nowIso() } });
+    const fileUrl = `${origin}/photo/${key}`;
+    const media = await db.create('MediaItem', {
+      file_url: fileUrl, media_type: 'foto', order_id: order.id, workshop_code: code,
+      caption: String(body.caption || '').slice(0, 200), uploaded_by_name: emp.name,
+    });
+    if (body.set_as_vehicle_photo) { await db.update('Order', order.id, { vehicle_photo: fileUrl }); invalidate('Order'); }
+    return { ok: true, file_url: fileUrl, media_id: media.id };
+  }
 
   if (action === 'task_update') {
     const task = await db.get('OrderTask', body.task_id).catch(() => null);
@@ -398,7 +423,14 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
-      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path.startsWith('/photo/') && request.method === 'GET') {
+        const key = decodeURIComponent(path.slice('/photo/'.length));
+        if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp)$/i.test(key)) throw new HttpError(404, 'not_found');
+        const obj = await env.PHOTOS.getWithMetadata(key, { type: 'stream' });
+        if (!obj || !obj.value) throw new HttpError(404, 'not_found');
+        return new Response(obj.value, { headers: { 'Content-Type': (obj.metadata && obj.metadata.contentType) || 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff' } });
+      }
       const db = new Base44(env);
       let body = {};
       if (request.method === 'POST' && !(request.headers.get('Content-Type') || '').includes('form')) {
@@ -408,7 +440,7 @@ export default {
       }
       if (path === '/workshopLogin') return json(await workshopLogin(db, body), 200, cors);
       if (path === '/getTabletData') return json(await getTabletData(db, await requireSession(db, request)), 200, cors);
-      if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body), 200, cors);
+      if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body, env, url.origin), 200, cors);
       if (path === '/portalApi') return json(await portalApi(db, body), 200, cors);
       if (path === '/admin' && request.method === 'GET') {
         return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoLeitwerk – Daten-Backup</title>

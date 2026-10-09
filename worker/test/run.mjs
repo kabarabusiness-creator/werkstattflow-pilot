@@ -44,7 +44,12 @@ globalThis.fetch = async (url, init = {}) => {
   return ok(rec);
 };
 
-const env = { BASE44_TOKEN: 'TEST', BASE44_APP_ID: APP, ALLOWED_ORIGINS: 'https://kabarabusiness-creator.github.io', ADMIN_KEY: 'x'.repeat(20) };
+const kv = new Map();
+const PHOTOS = {
+  async put(k, v, o) { kv.set(k, { v: new Uint8Array(v), m: o && o.metadata }); },
+  async getWithMetadata(k) { const e = kv.get(k); return e ? { value: new Blob([e.v]).stream(), metadata: e.m } : { value: null, metadata: null }; },
+};
+const env = { PHOTOS, BASE44_TOKEN: 'TEST', BASE44_APP_ID: APP, ALLOWED_ORIGINS: 'https://kabarabusiness-creator.github.io', ADMIN_KEY: 'x'.repeat(20) };
 async function call(path, body, token, method = 'POST', headers = {}) {
   const res = await worker.fetch(new Request('https://api.test/functions' + path, {
     method, headers: { 'Content-Type': 'application/json', Origin: 'https://kabarabusiness-creator.github.io', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...headers },
@@ -114,9 +119,20 @@ await t('Reifensatz aktualisieren + Validierung', async () => {
   assert.equal(db.TireSet[0].tread_depth, 3.5);
   assert.equal((await call('/tabletAction', { action: 'tire_update', id: 'r1', season: 'herbst' }, token)).status, 400);
 });
-await t('Foto/KI → not_available (kein Absturz)', async () => {
-  const r = await call('/tabletAction', { action: 'media_upload', order_id: 'o1' }, token);
+await t('KI → not_available (kein Absturz)', async () => {
+  const r = await call('/tabletAction', { action: 'tire_scan', order_id: 'o1' }, token);
   assert.equal(r.status, 503); assert.equal(r.data.error, 'not_available');
+});
+await t('Foto hochladen, als Fahrzeugfoto setzen und ausliefern', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const r = await call('/tabletAction', { action: 'media_upload', order_id: 'o1', data_url: png, caption: 'Fahrzeugfoto', set_as_vehicle_photo: true }, token);
+  assert.equal(r.data.ok, true); assert.match(r.data.file_url, /^https:\/\/api\.test\/photo\/AL-T1\/o1\/[a-f0-9]{32}\.png$/);
+  assert.equal(db.Order[0].vehicle_photo, r.data.file_url); assert.equal(db.MediaItem.at(-1).file_url, r.data.file_url);
+  const img = await worker.fetch(new Request(r.data.file_url), env);
+  assert.equal(img.status, 200); assert.equal(img.headers.get('Content-Type'), 'image/png'); assert.equal((await img.arrayBuffer()).byteLength, 70);
+  assert.equal((await call('/tabletAction', { action: 'media_upload', order_id: 'o2', data_url: png }, token)).status, 404);
+  assert.equal((await call('/tabletAction', { action: 'media_upload', order_id: 'o1', data_url: 'data:text/html;base64,PGI+' }, token)).data.error, 'invalid_image');
+  assert.equal((await worker.fetch(new Request('https://api.test/photo/../../x'), env)).status, 404);
 });
 await t('Portal: get liefert nur eigenen Auftrag, ohne Token/Rechnungsadresse', async () => {
   const r = await call('/portalApi', { action: 'get', token: 'tok-aaaaaa' });
