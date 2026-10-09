@@ -6,7 +6,7 @@ keep_vars = true  # im Dashboard gesetzte Variablen bei jedem Deploy behalten
 
 [vars]
 BASE44_APP_ID = "6a6bfc939e9105b8cb310113"
-ALLOWED_ORIGINS = "https://kabarabusiness-creator.github.io"
+ALLOWED_ORIGINS = "https://kabarabusiness-creator.github.io,https://autoleitwerk.base44.app"
 
 [observability]
 enabled = true

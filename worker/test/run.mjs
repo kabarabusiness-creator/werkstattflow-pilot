@@ -28,6 +28,11 @@ const mails = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url); const method = init.method || 'GET';
   if (u.host === 'api.resend.com') { assert.equal(init.headers.Authorization, 'Bearer RE_TEST'); mails.push(JSON.parse(init.body)); return new Response('{"id":"m1"}', { status: 200 }); }
+  if (u.pathname.endsWith('/entities/User/me')) {
+    const a = (init.headers && (init.headers.Authorization || init.headers.authorization)) || '';
+    if (a === 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') return new Response(JSON.stringify({ id: 'u1', role: 'user', workshop_code: 'AL-T1' }), { status: 200 });
+    return new Response('{"detail":"unauthorized"}', { status: 401 });
+  }
   assert.equal(init.headers.Authorization, 'Bearer TEST');
   const m = u.pathname.match(/^\/api\/apps\/app1\/entities\/(\w+)(?:\/(v2\/list|[^/]+))?$/);
   assert.ok(m, 'unexpected url ' + u.pathname);
@@ -43,13 +48,15 @@ globalThis.fetch = async (url, init = {}) => {
   const rec = table.find(r => r.id === decodeURIComponent(rest));
   if (!rec) return new Response('{"detail":"not found"}', { status: 404 });
   if (method === 'PUT') { Object.assign(rec, JSON.parse(init.body)); return ok(rec); }
+  if (method === 'DELETE') { table.splice(table.indexOf(rec), 1); return ok({}); }
   return ok(rec);
 };
 
 const kv = new Map();
 const PHOTOS = {
   async put(k, v, o) { kv.set(k, { v: new Uint8Array(v), m: o && o.metadata }); },
-  async getWithMetadata(k) { const e = kv.get(k); return e ? { value: new Blob([e.v]).stream(), metadata: e.m } : { value: null, metadata: null }; },
+  async delete(k) { kv.delete(k); },
+  async getWithMetadata(k, o) { if (o && o.type === 'arrayBuffer') { const e = kv.get(k); return e ? { value: e.v.buffer.slice(e.v.byteOffset, e.v.byteOffset + e.v.byteLength), metadata: e.m } : { value: null, metadata: null }; } const e = kv.get(k); return e ? { value: new Blob([e.v]).stream(), metadata: e.m } : { value: null, metadata: null }; },
 };
 const env = { PHOTOS, RESEND_API_KEY: 'RE_TEST', BASE44_TOKEN: 'TEST', BASE44_APP_ID: APP, ALLOWED_ORIGINS: 'https://kabarabusiness-creator.github.io', ADMIN_KEY: 'x'.repeat(20) };
 const pending = []; const ctx = { waitUntil: p => pending.push(p) };
@@ -240,6 +247,62 @@ await t('E-Mails: Abholbereit, Termin (Kunde + Werkstatt), Freigabe, Portal-Link
   assert.equal(r.data.ok, true); assert.equal(r.data.sent_to, 'k…@example.com'); assert.equal(mails.length, before + 1);
   assert.match(mails.at(-1).html, /kundenapp\.html\?token=tok-aaaaaa/); assert.equal(mails.at(-1).reply_to, 'a@b.de');
   assert.ok(db.Notification.some(n => n.status_text === 'Portal-Link' && n.delivery_state === 'gesendet'));
+});
+await t('Dashboard-Funktionen: Reifenscan per Handy (Token, Upload, Status, Auswertung)', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const U = { Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' };
+  const fn = (name, body, headers) => worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://autoleitwerk.base44.app', ...(headers || {}) }, body: JSON.stringify(body) }), { ...env, ALLOWED_ORIGINS: env.ALLOWED_ORIGINS + ',https://autoleitwerk.base44.app' }, ctx).then(async r => ({ status: r.status, data: await r.json(), cors: r.headers.get('Access-Control-Allow-Origin') }));
+  assert.equal((await fn('createTireScanToken', { order_id: 'o1' })).status, 401);
+  assert.equal((await fn('createTireScanToken', { order_id: 'o2' }, U)).status, 403);
+  const tk = await fn('createTireScanToken', { order_id: 'o1' }, U);
+  assert.equal(tk.status, 200, JSON.stringify(tk.data)); assert.match(tk.data.token, /^[a-f0-9]{48}$/); assert.match(tk.data.context_label, /Golf/); assert.equal(tk.cors, 'https://autoleitwerk.base44.app');
+  assert.equal((await fn('tireScanPublic', { token: 'x'.repeat(48), action: 'context' })).status, 401);
+  assert.match((await fn('tireScanPublic', { token: tk.data.token, action: 'context' })).data.label, /Reifenscan/);
+  const up = await fn('tireScanPublic', { token: tk.data.token, data_url: png, slot: 1 });
+  assert.equal(up.data.ok, true); assert.match(up.data.file_url, /\/photo\/AL-T1\/o1\/[a-f0-9]{32}\.png$/);
+  await fn('tireScanPublic', { token: tk.data.token, action: 'finish' });
+  const st = await fn('tireScanPublic', { token: tk.data.token, action: 'status' });
+  assert.equal(st.data.ready, true); assert.equal(st.data.photos.length, 1); assert.equal(st.data.photos[0].caption, 'Reifenflanke');
+  let aiInput;
+  env.AI = { async run(m, input) { aiInput = input; return { response: '{"brand":{"value":"Michelin","confidence":0.9},"season":{"value":"sommer","confidence":0.8}}' }; } };
+  const sc = await fn('scanTire', { image_urls: st.data.photos.map(p => p.url) }, U);
+  assert.equal(sc.status, 200, JSON.stringify(sc.data)); assert.equal(sc.data.result.brand.value, 'Michelin');
+  assert.match(aiInput.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
+  assert.equal((await fn('scanTire', { image_urls: ['https://evil.example/x.jpg'] }, U)).status, 400);
+  delete env.AI;
+});
+await t('Dashboard-Funktionen: Fahrzeugschein per Handy (privat, nach Auswertung gelöscht)', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const U = { Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' };
+  const fn = (name, body, headers) => worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(headers || {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => ({ status: r.status, data: await r.json() }));
+  const tk = await fn('createRegistrationScanToken', {}, U);
+  assert.equal(tk.status, 200);
+  assert.equal((await fn('registrationScanPublic', { token: tk.data.token, data_url: png })).data.ok, true);
+  assert.equal((await fn('registrationScanPublic', { token: tk.data.token, action: 'status' })).data.has_photo, true);
+  const tmpKeys = () => [...kv.keys()].filter(k => k.startsWith('regtmp/'));
+  assert.equal(tmpKeys().length, 1);
+  env.AI = { async run() { return { response: '{"kennzeichen":{"value":"ab-c 1","confidence":0.9},"fin":{"value":"WVWZZZ1KZ6W000001","confidence":0.9},"hsn":{"value":"0603","confidence":0.95},"tsn":{"value":"bjm","confidence":0.9},"erstzulassung":{"value":"01.03.2015","confidence":0.8},"leistung_kw":{"value":"110 kW","confidence":0.9}}' }; } };
+  const r = await fn('scanRegistration', { token: tk.data.token }, U);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.result.hsn.value, '0603'); assert.equal(r.data.result.tsn.value, 'BJM'); assert.equal(r.data.result.kennzeichen.value, 'AB-C 1');
+  assert.equal(r.data.result.erstzulassung.value, '2015-03-01'); assert.equal(r.data.result.leistung_kw.value, 110); assert.equal(r.data.result.marke.confidence, 0);
+  assert.equal(tmpKeys().length, 0, 'Fahrzeugschein-Foto nicht gelöscht');
+  delete env.AI;
+});
+await t('Dashboard-Funktionen: Fahrzeugfoto per Handy (Entwurf → an Auftrag binden)', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const U = { Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' };
+  const fn = (name, body, headers) => worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(headers || {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => ({ status: r.status, data: await r.json() }));
+  const tk = await fn('createPhotoUploadToken', { draft_key: 'neu-123' }, U);
+  assert.equal((await fn('uploadVehiclePhotoByToken', { token: tk.data.token, action: 'context' })).data.draft, true);
+  const up = await fn('uploadVehiclePhotoByToken', { token: tk.data.token, data_url: png });
+  assert.match(up.data.file_url, /\/photo\/AL-T1\/fahrzeugfoto\//);
+  assert.equal((await fn('uploadVehiclePhotoByToken', { token: tk.data.token, action: 'status' })).data.photo_url, up.data.file_url);
+  assert.equal((await fn('uploadVehiclePhotoByToken', { token: tk.data.token, action: 'bind', order_id: 'o2' })).status, 403);
+  assert.equal((await fn('uploadVehiclePhotoByToken', { token: tk.data.token, action: 'bind', order_id: 'o1' })).data.ok, true);
+  assert.equal(db.Order.find(o => o.id === 'o1').vehicle_photo, up.data.file_url);
+  assert.equal((await fn('uploadVehiclePhotoByToken', { token: tk.data.token, action: 'status' })).status, 401, 'Token nach Binden gelöscht');
+  const res = await worker.fetch(new Request(up.data.file_url.replace(/^https:\/\/api\.test/, 'https://api.test')), env); assert.equal(res.status, 200);
 });
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

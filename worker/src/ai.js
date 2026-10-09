@@ -304,18 +304,14 @@ export function normalizeTire(raw) {
   return out;
 }
 
-export async function tireScan(sess, body, env, checkImage) {
-  limitPerHour('scan:' + sess.employee_id, SCAN_PER_HOUR);
-  const images = (Array.isArray(body.images) ? body.images : []).slice(0, 3);
-  if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
-  images.forEach(checkImage);
-  const messages = [{ role: 'user', content: [{ type: 'text', text: TIRE_PROMPT }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] }];
+async function visionJson(env, prompt, images, maxTokens) {
+  const messages = [{ role: 'user', content: [{ type: 'text', text: prompt }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] }];
   let lastErr;
   for (const model of VISION_MODELS) {
     try {
-      const r = await runAi(env, model, { messages, max_tokens: 900, temperature: 0.1 });
+      const r = await runAi(env, model, { messages, max_tokens: maxTokens || 900, temperature: 0.1 });
       const parsed = parseJsonLoose(textOf(r));
-      if (parsed) return { ok: true, result: normalizeTire(parsed), image_urls: [], model: 'workers-ai' };
+      if (parsed) return parsed;
       lastErr = new AiError(502, 'ai_error', 'Die KI-Antwort war unlesbar. Bitte noch einmal versuchen.');
     } catch (e) {
       if (e.code === 'ai_quota' || e.code === 'not_available') throw e;
@@ -323,4 +319,56 @@ export async function tireScan(sess, body, env, checkImage) {
     }
   }
   throw lastErr;
+}
+
+export async function tireScan(sess, body, env, checkImage) {
+  limitPerHour('scan:' + sess.employee_id, SCAN_PER_HOUR);
+  const images = (Array.isArray(body.images) ? body.images : []).slice(0, 3);
+  if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
+  images.forEach(checkImage);
+  const parsed = await visionJson(env, TIRE_PROMPT, images, 900);
+  return { ok: true, result: normalizeTire(parsed), image_urls: [], model: 'workers-ai' };
+}
+
+/* ---------- Fahrzeugschein (Zulassungsbescheinigung Teil I) ---------- */
+const REG_FIELDS = ['kennzeichen', 'erstzulassung', 'halter_name', 'halter_adresse', 'marke', 'typ_variante', 'modell_handelsbezeichnung', 'fin', 'hsn', 'tsn', 'kraftstoff', 'leistung_kw', 'hubraum_ccm', 'farbe', 'naechste_hu'];
+const REG_PROMPT = `Du liest ein Foto der Vorderseite einer deutschen Zulassungsbescheinigung Teil I (Fahrzeugschein).
+Lies nur ab, was wirklich erkennbar ist. Erfinde nichts. Nicht lesbar = Wert "" und confidence 0.
+Felder: kennzeichen (A, z. B. "M-AB 1234"), erstzulassung (B, als YYYY-MM-DD), halter_name (C.1 Name/Firma), halter_adresse (C.1 Straße, PLZ Ort),
+marke (D.1), typ_variante (D.2), modell_handelsbezeichnung (D.3), fin (E, genau 17 Zeichen ohne I/O/Q), hsn (2.1, genau 4 Ziffern),
+tsn (2.2, die ersten 3 Zeichen), kraftstoff (P.3), leistung_kw (P.2, Zahl), hubraum_ccm (P.1, Zahl), farbe (R), naechste_hu (YYYY-MM-DD, nur falls sichtbar).
+Antworte NUR mit JSON: {"kennzeichen":{"value":"","confidence":0}, ...} – für jedes der genannten Felder ein Objekt mit value und confidence (0–1).`;
+
+export function normalizeRegistration(raw) {
+  const r = raw || {}; const out = {};
+  for (const k of REG_FIELDS) {
+    let f = r[k]; let v = f && typeof f === 'object' && 'value' in f ? f.value : f; let c = f && typeof f === 'object' ? Number(f.confidence) : 0.5;
+    if (!Number.isFinite(c)) c = 0.5; c = Math.max(0, Math.min(1, c));
+    if (v === null || v === undefined) v = '';
+    if (k === 'leistung_kw' || k === 'hubraum_ccm') { const n = Number(String(v).replace(/[^\d.,]/g, '').replace(',', '.')); v = Number.isFinite(n) && n > 0 && n < 20000 ? Math.round(n) : 0; if (!v) c = 0; }
+    else v = String(v).trim().slice(0, 120);
+    out[k] = { value: v, confidence: v === '' || v === 0 ? 0 : c };
+  }
+  const fix = (k, re, transform) => { const f = out[k]; if (!f.value) return; const v = transform ? transform(String(f.value)) : String(f.value); f.value = v; if (!re.test(v)) f.confidence = Math.min(f.confidence, 0.4); };
+  fix('fin', /^[A-HJ-NPR-Z0-9]{17}$/, v => v.toUpperCase().replace(/[\s-]/g, ''));
+  fix('hsn', /^\d{4}$/, v => v.replace(/\s/g, ''));
+  fix('tsn', /^[A-Z0-9]{3}$/, v => v.toUpperCase().replace(/\s/g, '').slice(0, 3));
+  const isoDate = v => { const m = v.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/); return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : v.slice(0, 10); };
+  fix('erstzulassung', /^\d{4}-\d{2}-\d{2}$/, isoDate);
+  fix('naechste_hu', /^\d{4}-\d{2}(-\d{2})?$/, isoDate);
+  out.kennzeichen.value = String(out.kennzeichen.value).toUpperCase();
+  return out;
+}
+
+export async function registrationScan(key, images, env) {
+  limitPerHour('reg:' + key, SCAN_PER_HOUR);
+  if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
+  const parsed = await visionJson(env, REG_PROMPT, images.slice(0, 2), 1000);
+  return normalizeRegistration(parsed);
+}
+
+export async function tireScanImages(key, images, env) {
+  limitPerHour('scan:' + key, SCAN_PER_HOUR);
+  if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
+  return normalizeTire(await visionJson(env, TIRE_PROMPT, images.slice(0, 3), 900));
 }

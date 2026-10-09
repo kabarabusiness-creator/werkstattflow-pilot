@@ -17,6 +17,7 @@
  */
 
 import { alexAsk, tireScan } from './ai.js';
+import { handleFunction } from './dash.js';
 
 const SESSION_HOURS = 12;
 const MAX_FAILED = 5;
@@ -86,6 +87,7 @@ class Base44 {
   get(entity, id) { return this.req('GET', `/${entity}/${encodeURIComponent(id)}`); }
   create(entity, data) { return this.req('POST', `/${entity}`, data); }
   update(entity, id, data) { return this.req('PUT', `/${entity}/${encodeURIComponent(id)}`, data); }
+  remove(entity, id) { return this.req('DELETE', `/${entity}/${encodeURIComponent(id)}`); }
 }
 
 /* Kurzzeit-Cache pro Worker-Instanz: schont das Base44-Ratenlimit (70 Abfragen/Min). */
@@ -612,6 +614,11 @@ export default {
       if (path === '/getTabletData') return json(await getTabletData(db, await requireSession(db, request)), 200, cors);
       if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body, env, url.origin, ctx), 200, cors);
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx), 200, cors);
+      if (path.startsWith('/fn/') && request.method === 'POST') {
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit } });
+        invalidate('Order');
+        return json(r, 200, cors);
+      }
       if (path === '/admin' && request.method === 'GET') {
         return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoLeitwerk – Daten-Backup</title>
 <style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:40px 16px;color:#1a1a2e}main{max-width:420px;margin:auto;background:#fff;padding:24px;border-radius:14px;box-shadow:0 2px 12px #0001}input,button{width:100%;box-sizing:border-box;font:inherit;padding:12px;border-radius:10px;margin-top:10px}input{border:1px solid #ccd}button{background:#7c3aed;color:#fff;border:0;font-weight:600;cursor:pointer}p{color:#556;font-size:14px}</style></head>
