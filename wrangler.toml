@@ -2,6 +2,7 @@ name = "werkstattflow-pilot"
 main = "worker/src/index.js"
 compatibility_date = "2026-10-01"
 workers_dev = true
+keep_vars = true  # im Dashboard gesetzte Variablen bei jedem Deploy behalten
 
 [vars]
 BASE44_APP_ID = "6a6bfc939e9105b8cb310113"
