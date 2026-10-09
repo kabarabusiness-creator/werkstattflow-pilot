@@ -114,17 +114,49 @@ async function requireSession(db, request) {
   return s;
 }
 
+/* ---------------- Profilauswahl (Netflix-Stil) ----------------
+ * Öffentlich mit Werkstatt-Code: nur Vorname + Initial, Rolle, Sperrstatus – keine PINs, keine IDs anderer Werkstätten.
+ * Einfache Bremse gegen Durchprobieren von Codes pro IP. */
+const probe = new Map();
+function rateLimit(ip, max, windowMs) {
+  const now = Date.now(); const e = probe.get(ip) || { n: 0, t: now };
+  if (now - e.t > windowMs) { e.n = 0; e.t = now; }
+  e.n++; probe.set(ip, e);
+  if (probe.size > 5000) probe.clear();
+  if (e.n > max) throw new HttpError(429, 'too_many_requests');
+}
+function displayName(name) {
+  const parts = String(name || '').trim().split(/\s+/);
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0] || '?';
+}
+async function workshopProfiles(db, body, ip) {
+  rateLimit(ip, 30, 60_000);
+  const code = String(body.workshop_code || '').trim().toUpperCase();
+  if (!/^[A-Z0-9-]{3,20}$/.test(code)) throw new HttpError(404, 'unknown_code');
+  const [workshops, emps] = await Promise.all([cachedList(db, 'Workshop'), cachedList(db, 'Employee')]);
+  const ws = workshops.find(w => w.code === code);
+  const active = emps.filter(e => e.workshop_code === code && e.is_active !== false);
+  if (!ws && !active.length) throw new HttpError(404, 'unknown_code');
+  const order = { admin: 0, serviceberater: 1, meister: 2, mechaniker: 3 };
+  return {
+    workshop_code: code, workshop_name: ws ? ws.name : '',
+    profiles: active.sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9) || String(a.name).localeCompare(String(b.name), 'de'))
+      .map(e => ({ id: e.id, name: displayName(e.name), role: e.role, locked: !!(e.locked_until && new Date(e.locked_until) > new Date()) })),
+  };
+}
+
 /* ---------------- Login ---------------- */
 async function workshopLogin(db, body) {
   const code = String(body.workshop_code || '').trim().toUpperCase();
   const name = norm(body.name);
+  const empId = String(body.employee_id || '').trim();
   const pin = String(body.pin || '').trim();
-  if (!code || !name || !/^\d{4,8}$/.test(pin)) throw new HttpError(400, 'invalid');
+  if (!code || (!name && !empId) || !/^\d{4,8}$/.test(pin)) throw new HttpError(400, 'invalid');
   const emps = await db.list('Employee', { workshop_code: code });
   const active = emps.filter(e => e.is_active !== false);
-  // exakter Name; sonst eindeutiger Vorname (z. B. „Mert“ statt „Mert Kabara“)
-  let emp = active.find(e => norm(e.name) === name);
-  if (!emp) {
+  // per Profil-ID (Profilauswahl), sonst exakter Name, sonst eindeutiger Vorname
+  let emp = empId ? active.find(e => e.id === empId) : active.find(e => norm(e.name) === name);
+  if (!emp && !empId) {
     const byFirst = active.filter(e => norm(e.name).split(' ')[0] === name.split(' ')[0]);
     emp = byFirst.length === 1 ? byFirst[0] : null;
   }
@@ -542,7 +574,8 @@ export default {
         if (len > 2_000_000) throw new HttpError(413, 'too_large');
         body = await request.json().catch(() => ({}));
       }
-      if (path === '/workshopLogin') return json(await workshopLogin(db, body), 200, cors);
+      if (path === '/workshopProfiles') return json(await workshopProfiles(db, body, request.headers.get('CF-Connecting-IP') || 'x'), 200, cors);
+      if (path === '/workshopLogin') { rateLimit('login:' + (request.headers.get('CF-Connecting-IP') || 'x'), 40, 60_000); return json(await workshopLogin(db, body), 200, cors); }
       if (path === '/getTabletData') return json(await getTabletData(db, await requireSession(db, request)), 200, cors);
       if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body, env, url.origin, ctx), 200, cors);
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx), 200, cors);

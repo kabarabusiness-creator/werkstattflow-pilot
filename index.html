@@ -832,6 +832,7 @@
   }
   .profile-card:hover .profile-avatar{border-color:var(--accent-2);transform:scale(1.04);}
   .profile-name{font-size:13.5px;font-weight:700;}
+  .profile-card.locked{opacity:.5;}
   .profile-role{font-size:11px;color:var(--text-faint);}
   .profile-switch-hint{font-size:12px;color:var(--text-faint);margin-top:44px;}
   .profile-switch-hint span{color:var(--accent-2);font-weight:600;cursor:pointer;}
@@ -1221,20 +1222,20 @@
     <div class="login-card">
       <div class="login-logo"><img id="logoImgLogin" alt="AutoLeitwerk"></div>
       <h2>Willkommen zurück</h2>
-      <p>Mit Werkstatt-Code und deinem Namen anmelden.</p>
+      <p>Gib den Code deiner Werkstatt ein.</p>
 
       <div class="login-field">
         <label>Werkstatt-Code</label>
         <input type="text" id="loginWorkshopCode" placeholder="z.B. AL-1001" autocapitalize="characters">
       </div>
-      <div class="login-field">
+      <div class="login-field" id="loginNameField" style="display:none;">
         <label>Dein Name</label>
         <input type="text" id="loginEmployeeName" placeholder="Vor- und Nachname" autocomplete="off" autocapitalize="words">
       </div>
       <div id="loginError" style="color:#f87171; font-size:13px; min-height:18px; margin-top:-4px;"></div>
 
-      <div class="btn primary login-submit" id="loginSubmitBtn"><span id="loginSubmitIcon"></span>Anmelden</div>
-      <div class="login-hint">Der Werkstatt-Code identifiziert deine Werkstatt. Deine PIN gibst du im nächsten Schritt ein.</div>
+      <div class="btn primary login-submit" id="loginSubmitBtn"><span id="loginSubmitIcon"></span><span id="loginSubmitLabel">Weiter</span></div>
+      <div class="login-hint">Danach wählst du dein Profil und gibst deine PIN ein. Das Tablet merkt sich den Werkstatt-Code.</div>
       <div class="login-hint" style="margin-top:14px;"><a href="impressum.html" target="_blank" rel="noopener" style="color:inherit;">Impressum</a> · <a href="datenschutz.html" target="_blank" rel="noopener" style="color:inherit;">Datenschutz</a></div>
     </div>
   </div>
@@ -1243,9 +1244,9 @@
   <div class="profile-screen" id="profileScreen" style="display:none;">
     <div class="profile-logo"><img id="logoImgProfile" alt="AutoLeitwerk"></div>
     <h2>Wer arbeitet gerade?</h2>
-    <p>Wähle dein Profil, um fortzufahren.</p>
+    <p id="profileSub">Wähle dein Profil, um fortzufahren.</p>
     <div class="profile-grid" id="profileGrid"></div>
-    <div class="profile-switch-hint">Falsches Konto? <span id="profileBackToLogin">Abmelden</span></div>
+    <div class="profile-switch-hint">Andere Werkstatt? <span id="profileBackToLogin">Werkstatt-Code ändern</span></div>
   </div>
 
   <!-- PIN SCREEN -->
@@ -1589,14 +1590,14 @@ function b44MapOrder(o, allTasks, demoImageByBrand){
     tasks,
   };
 }
-async function workshopLogin(code, name, pin){
+async function workshopLogin(code, name, pin, employeeId){
   const controller = new AbortController();
   const timeoutId = setTimeout(()=>controller.abort(), 8000);
   try{
     const res = await fetch(BASE44_LOGIN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workshop_code: code, name: name, pin: pin }),
+      body: JSON.stringify({ workshop_code: code, name: name || undefined, employee_id: employeeId || undefined, pin: pin }),
       signal: controller.signal,
     });
     const data = await res.json().catch(()=>({}));
@@ -2181,7 +2182,7 @@ function endSession(keepWorkshopCode){
   document.getElementById('helpBar').innerHTML='';
   if(keepWorkshopCode && code){
     const c = document.getElementById('loginWorkshopCode'); if(c) c.value = code;
-    const n = document.getElementById('loginEmployeeName'); if(n) setTimeout(()=>n.focus(), 50);
+    fetchProfiles(code).then(showProfileScreen).catch(()=>{});
   }
 }
 
@@ -4016,9 +4017,13 @@ document.addEventListener('click', (e)=>{
   }
   // Früher: Profil antippen = Wechsel ohne Anmeldung. Bewusst entfernt – Wechsel nur über Name + PIN.
   if(e.target.closest('#profileBackToLogin')){
+    try{ localStorage.removeItem(SAVED_CODE_KEY); }catch(_){}
     showLoginScreen();
+    const c = document.getElementById('loginWorkshopCode'); if(c){ c.value=''; setTimeout(()=>c.focus(),50); }
     return;
   }
+  const lp = e.target.closest('[data-loginprofile]');
+  if(lp){ chooseLoginProfile(lp.dataset.loginprofile); return; }
 
   /* --- pin-bildschirm --- */
   const pinKey = e.target.closest('[data-pinkey]');
@@ -5145,17 +5150,69 @@ const roleDefaults = { mechaniker:'auftraege', meister:'auftraege', serviceberat
 function initLoginIcon(){
   document.getElementById('loginSubmitIcon').innerHTML = iconLogout;
 }
-function performLogin(){
+const SAVED_CODE_KEY = 'autoleitwerk.workshopCode';
+const ROLE_AVATAR = { admin:'linear-gradient(135deg,#8b5cf6,#c026d3)', serviceberater:'linear-gradient(135deg,#0ea5e9,#6366f1)', meister:'linear-gradient(135deg,#f59e0b,#ef4444)', mechaniker:'linear-gradient(135deg,#10b981,#0ea5e9)' };
+async function fetchProfiles(code){
+  const controller = new AbortController();
+  const timeoutId = setTimeout(()=>controller.abort(), 10000);
+  try{
+    const res = await fetch(SERVER_BASE + '/workshopProfiles', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ workshop_code: code }), signal: controller.signal });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok){ const e = new Error(data.error || 'HTTP '+res.status); e.code = data.error || (res.status===404 ? 'unsupported' : 'error'); e.status = res.status; throw e; }
+    return data;
+  } finally { clearTimeout(timeoutId); }
+}
+async function performLogin(){
   const errorEl = document.getElementById('loginError');
-  const code = (document.getElementById('loginWorkshopCode').value || '').trim();
-  const name = (document.getElementById('loginEmployeeName').value || '').trim();
+  const code = (document.getElementById('loginWorkshopCode').value || '').trim().toUpperCase();
+  const nameField = document.getElementById('loginNameField');
+  const nameMode = nameField && nameField.style.display !== 'none';
   if(errorEl) errorEl.textContent = '';
-  if(!code || !name){
-    if(errorEl) errorEl.textContent = 'Bitte Werkstatt-Code und Namen eingeben.';
-    return;
+  if(!code){ if(errorEl) errorEl.textContent = 'Bitte Werkstatt-Code eingeben.'; return; }
+  if(nameMode){ // Rückfall ohne Profilauswahl (alter Server)
+    const name = (document.getElementById('loginEmployeeName').value || '').trim();
+    if(!name){ if(errorEl) errorEl.textContent = 'Bitte deinen Namen eingeben.'; return; }
+    state.pendingLogin = { code, name }; openPinScreen(); return;
   }
-  state.pendingLogin = { code, name };
+  const btnLabel = document.getElementById('loginSubmitLabel'); if(btnLabel) btnLabel.textContent = 'Lädt…';
+  try{
+    const data = await fetchProfiles(code);
+    try{ localStorage.setItem(SAVED_CODE_KEY, code); }catch(_){}
+    showProfileScreen(data);
+  }catch(e){
+    if(e.code==='unknown_code') errorEl.textContent = 'Diesen Werkstatt-Code gibt es nicht.';
+    else if(e.code==='too_many_requests') errorEl.textContent = 'Zu viele Versuche – bitte kurz warten.';
+    else if(e.code==='unsupported' || e.status===404){ if(nameField) nameField.style.display=''; errorEl.textContent = 'Bitte zusätzlich deinen Namen eingeben.'; }
+    else errorEl.textContent = 'Keine Verbindung. Bitte erneut versuchen.';
+  } finally { if(btnLabel) btnLabel.textContent = 'Weiter'; }
+}
+function showProfileScreen(data){
+  state.loginProfiles = data;
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('pinScreen').style.display = 'none';
+  const sub = document.getElementById('profileSub');
+  if(sub) sub.textContent = (data.workshop_name ? data.workshop_name + ' · ' : '') + 'Wähle dein Profil, um fortzufahren.';
+  const grid = document.getElementById('profileGrid');
+  grid.innerHTML = (data.profiles||[]).length ? data.profiles.map(p=>`
+    <div class="profile-card ${p.locked?'locked':''}" data-loginprofile="${escHtml(p.id)}">
+      <div class="profile-avatar" style="background:${ROLE_AVATAR[p.role]||ROLE_AVATAR.mechaniker}">${escHtml(initials(p.name))}</div>
+      <div class="profile-name">${escHtml(p.name)}</div>
+      <div class="profile-role">${p.locked ? '🔒 gesperrt' : escHtml(roleLabel[p.role]||p.role)}</div>
+    </div>`).join('') : `<p style="color:var(--text-faint)">Für diese Werkstatt sind noch keine Mitarbeiter angelegt.</p>`;
+  document.getElementById('profileScreen').style.display = 'flex';
+}
+function chooseLoginProfile(id){
+  const d = state.loginProfiles; if(!d) return;
+  const p = (d.profiles||[]).find(x=>x.id===id); if(!p) return;
+  state.pendingLogin = { code: d.workshop_code, name: p.name, employeeId: p.id, role: p.role };
+  document.getElementById('profileScreen').style.display = 'none';
   openPinScreen();
+}
+async function autoProfileScreen(){
+  let code = null; try{ code = localStorage.getItem(SAVED_CODE_KEY); }catch(_){}
+  if(!code || state.sessionToken) return;
+  const c = document.getElementById('loginWorkshopCode'); if(c) c.value = code;
+  try{ showProfileScreen(await fetchProfiles(code)); }catch(_){ /* Login-Maske bleibt */ }
 }
 
 /* ---------- PIN-Bildschirm ---------- */
@@ -5210,14 +5267,14 @@ async function checkPin(){
   state.pinBusy = true;
   let result;
   try{
-    result = await workshopLogin(p.code, p.name, state.pinEntry);
+    result = await workshopLogin(p.code, p.employeeId ? null : p.name, state.pinEntry, p.employeeId);
   }catch(e){
     if(e.code==='locked'){
       let until = '';
       if(e.retryAt){ const d = new Date(e.retryAt); if(!isNaN(d)) until = ' bis ' + String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
       pinShakeAndReset('Zu viele Versuche. Profil gesperrt' + until + '.');
     } else if(e.code==='invalid'){
-      pinShakeAndReset('Name, Werkstatt-Code oder PIN falsch.');
+      pinShakeAndReset(p.employeeId ? 'PIN falsch.' : 'Name, Werkstatt-Code oder PIN falsch.');
     } else {
       pinShakeAndReset('Anmeldung nicht möglich. Verbindung prüfen.');
     }
@@ -5244,6 +5301,7 @@ async function checkPin(){
 }
 function backToProfiles(){
   document.getElementById('pinScreen').style.display = 'none';
+  if(state.pendingLogin && state.pendingLogin.employeeId && state.loginProfiles){ state.pinEntry=''; state.pinBusy=false; state.pendingLogin=null; showProfileScreen(state.loginProfiles); return; }
   document.getElementById('loginScreen').style.display = 'flex';
   state.pinEntry = '';
   state.pinBusy = false;
@@ -5313,6 +5371,7 @@ document.getElementById('noteFabIcon').innerHTML = iconNote;
 updateNoteBadge();
 if(navigator.onLine===false) renderOfflineBanner(false);
 initLoginIcon();
+autoProfileScreen();
 renderChrome();
 setMainView('auftraege');
 </script>

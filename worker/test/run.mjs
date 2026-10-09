@@ -72,6 +72,15 @@ await t('Login richtiger PIN (Vorname reicht)', async () => {
   token = r.data.token;
   assert.equal(db.WorkshopSession.at(-1).token_hash, sha(token));
 });
+await t('Profilauswahl: nur aktive eigene Profile, gekürzte Namen, Login per Profil-ID', async () => {
+  const r = await call('/workshopProfiles', { workshop_code: 'al-t1' });
+  assert.equal(r.status, 200); assert.equal(r.data.workshop_name, 'Testwerkstatt');
+  assert.deepEqual(r.data.profiles.map(p => p.name), ['Erika M.']); assert.equal(r.data.profiles[0].pin, undefined);
+  assert.equal((await call('/workshopProfiles', { workshop_code: 'XX-999' })).data.error, 'unknown_code');
+  const l = await call('/workshopLogin', { workshop_code: 'AL-T1', employee_id: r.data.profiles[0].id, pin: '1234' });
+  assert.equal(l.status, 200); assert.equal(l.data.employee.name, 'Erika Muster');
+  assert.equal((await call('/workshopLogin', { workshop_code: 'AL-T1', employee_id: 'e2', pin: '1111' })).data.error, 'invalid');
+});
 await t('Login falscher PIN → invalid, nach 5 Versuchen gesperrt', async () => {
   for (let i = 0; i < 4; i++) assert.equal((await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'Erika Muster', pin: '0000' })).data.error, 'invalid');
   const r = await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'Erika Muster', pin: '0000' });
