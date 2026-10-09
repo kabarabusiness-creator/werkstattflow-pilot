@@ -442,7 +442,8 @@ async function portalApi(db, body, env, ctx) {
     });
     invalidate('Appointment');
     if (ctx) ctx.waitUntil(mailBooking(env, db, order, created).catch(e => console.log('mail', String(e))));
-    return { ok: true, appointment_id: created.id };
+    const { customer_token: _ct, owner_user_id: _ou, ...pubAppt } = created;
+    return { ok: true, appointment_id: created.id, appointment: pubAppt };
   }
   if (action === 'cancel') {
     const ap = await db.get('Appointment', body.appointment_id).catch(() => null);
@@ -614,6 +615,7 @@ export default {
       if (path === '/getTabletData') return json(await getTabletData(db, await requireSession(db, request)), 200, cors);
       if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body, env, url.origin, ctx), 200, cors);
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx), 200, cors);
+      if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
         const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit } });
         invalidate('Order');

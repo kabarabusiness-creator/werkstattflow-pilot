@@ -317,5 +317,11 @@ await t('ALEX empfiehlt (Dashboard): Regeln ohne KI, nur eigene Werkstatt', asyn
   assert.ok(!/Fremd|#X/.test(titles), 'fremde Werkstatt in Empfehlungen: ' + titles);
   assert.ok(d.recommendations.length <= 5 && d.recommendations[0].priority === 3);
 });
+await t('Kundenportal im Dashboard: /fn/portalApi (gleiches Format, Token Pflicht)', async () => {
+  const fn = body => worker.fetch(new Request('https://api.test/fn/portalApi', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://autoleitwerk.base44.app' }, body: JSON.stringify(body) }), env, ctx).then(async r => ({ s: r.status, d: await r.json() }));
+  const g = await fn({ action: 'get', token: 'tok-aaaaaa' });
+  assert.equal(g.s, 200); assert.equal(g.d.order.license_plate, 'AB-C-1'); assert.equal(g.d.order.customer_token, undefined);
+  assert.equal((await fn({ action: 'respond', approval_id: 'a1', decision: 'freigegeben' })).s, 404);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
