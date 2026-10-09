@@ -4160,9 +4160,17 @@ function recalcProgress(o){
 /* ---------- 6. ALEX (KI-Assistent) ---------- */
 /* ---------- Schnellnotiz ---------- */
 // Persönliche Schnellnotizen – werden nur auf diesem Tablet gespeichert (localStorage).
+// Pro Werkstatt + Mitarbeiter getrennt, damit Notizen beim Wechsel nicht beim Nächsten auftauchen.
 const QUICK_NOTES_KEY = 'autoleitwerk.quickNotes';
-const quickNotes = (()=>{ try{ return JSON.parse(localStorage.getItem(QUICK_NOTES_KEY)||'[]'); }catch(_){ return []; } })();
-function persistQuickNotes(){ try{ localStorage.setItem(QUICK_NOTES_KEY, JSON.stringify(quickNotes)); }catch(_){} }
+let quickNotesKey = null;
+const quickNotes = [];
+function loadQuickNotesFor(code, name){
+  quickNotes.splice(0);
+  quickNotesKey = code && name ? `${QUICK_NOTES_KEY}.${String(code).toUpperCase()}.${String(name).trim().toLowerCase()}` : null;
+  if(quickNotesKey){ try{ quickNotes.push(...JSON.parse(localStorage.getItem(quickNotesKey)||'[]')); }catch(_){} }
+  if(typeof updateNoteBadge==='function') try{ updateNoteBadge(); }catch(_){}
+}
+function persistQuickNotes(){ if(!quickNotesKey) return; try{ localStorage.setItem(quickNotesKey, JSON.stringify(quickNotes)); }catch(_){} }
 function renderNotePanel(){
   const panel = document.getElementById('notePanel');
   panel.innerHTML = `
@@ -5317,6 +5325,7 @@ function backToProfiles(){
 
 async function selectProfile(member){
   state.currentUser = { name: member.name, role: member.role };
+  loadQuickNotesFor(state.workshopToken, member.name);
   state.selectedRole = member.role;
   state.shiftStart = Date.now();
   document.getElementById('profileScreen').style.display = 'none';
@@ -5324,6 +5333,16 @@ async function selectProfile(member){
   state.mainView = 'auftraege';
   renderChrome();
   setMainView(roleDefaults[member.role] || 'auftraege');
+}
+// Alles, was zu einer Werkstatt/einem Mitarbeiter gehört, beim Abmelden/Werkstattwechsel verwerfen
+function resetUserScopedState(){
+  aiChat.splice(1); // nur die Begrüßung behalten
+  alexCtxOrderId = null; alexCtxCleared = false; alexBusy = false;
+  state.tireScan = null; state.tireSets = null;
+  orders = []; state.selectedOrderId = null; state.selectedTaskId = null; state.base44Data = null;
+  quickNotes.splice(0); // Schnellnotizen gehören zum Mitarbeiter, siehe loadQuickNotesFor
+  ['aiPanel','notePanel'].forEach(id=>{ const el = document.getElementById(id); if(el) el.style.display='none'; });
+  updateNoteBadge();
 }
 function showLoginScreen(){
   document.getElementById('loggedOutScreen').style.display = 'none';
@@ -5342,6 +5361,7 @@ function showLoginScreen(){
   state.pinEntry = '';
   state.pinBusy = false;
   state.b44Appointments = null;
+  resetUserScopedState();
   const codeInput = document.getElementById('loginWorkshopCode');
   if(codeInput) codeInput.value = '';
   const nameInput = document.getElementById('loginEmployeeName');
