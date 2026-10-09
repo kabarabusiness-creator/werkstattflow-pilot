@@ -1583,6 +1583,7 @@ function b44MapOrder(o, allTasks, demoImageByBrand){
     hsnTsn: (o.hsn || o.tsn) ? `${o.hsn||'–'} / ${o.tsn||'–'}` : '–',
     tuev: (o.next_hu || o.tuv_next_date) ? formatDateDE(o.next_hu || o.tuv_next_date) : '–',
     tel: o.phone || '',
+    email: o.email || '', hasPortal: !!o.has_portal,
     desc: o.description || '',
     qc: defaultQC(),
     tasks,
@@ -3180,6 +3181,7 @@ function renderDetail(){
       <div class="dh-right">
         ${PILOT_HIDE_DEMO ? '' : `<div class="btn">${iconMsg} Nachricht</div>`}
         <div class="btn" id="askAlexOrderBtn">${iconBot} ALEX fragen</div>
+        ${o.hasPortal && alexCanWrite() ? `<div class="btn" id="sendPortalBtn" title="${o.email ? 'Link an '+escHtml(o.email)+' senden' : 'Keine E-Mail-Adresse hinterlegt'}">${iconMail} Portal-Link senden</div>` : ''}
         <div class="btn" id="vehicleDetailsBtn">${iconCar} Fahrzeugdetails</div>
         <div class="btn primary" id="closeOrderBtn">${iconCheck} Auftrag abschließen ${iconChevDown}</div>
       </div>
@@ -3907,6 +3909,7 @@ document.addEventListener('click', (e)=>{
     aiAsk();
     return;
   }
+  if(e.target.closest('#sendPortalBtn')){ sendPortalLink(); return; }
   if(handleAlexClick(e)) return;
   if(handleTireScanClick(e)) return;
 
@@ -4886,6 +4889,17 @@ function handleAlexClick(e){
   const dis = e.target.closest('[data-alex-discard]');
   if(dis){ const m = aiChat[parseInt(dis.dataset.alexDiscard,10)]; if(m){ m.draftState='discarded'; renderAiPanel(); } return true; }
   return false;
+}
+
+/* ---------- Portal-Link per E-Mail ---------- */
+async function sendPortalLink(){
+  const o = getSelectedOrder(); if(!o) return;
+  if(!o.email){ showUpdateToast('Beim Kunden ist keine E-Mail-Adresse hinterlegt – Zugangscode bitte direkt weitergeben.'); return; }
+  const btn = document.getElementById('sendPortalBtn'); if(btn){ btn.style.pointerEvents='none'; btn.style.opacity='.6'; }
+  const r = await tabletRequest('send_portal_link', { order_id: o.id }, 20000);
+  if(btn){ btn.style.pointerEvents=''; btn.style.opacity=''; }
+  if(r.ok) showUpdateToast(`Portal-Link gesendet an ${r.data.sent_to || o.email}`);
+  else showUpdateToast({ no_email:'Keine E-Mail-Adresse beim Kunden hinterlegt.', no_portal:'Für diesen Auftrag gibt es noch keinen Portal-Zugang.', forbidden:'Nur Admin und Serviceberater können den Link senden.' }[r.data && r.data.error] || (r.missing ? 'E-Mail-Versand ist noch nicht eingerichtet.' : `Link nicht gesendet (${r.reason}).`));
 }
 
 /* ---------- Reifenscan (Base44 tabletAction tire_scan) ---------- */

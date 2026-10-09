@@ -209,7 +209,7 @@ async function employeeOf(db, sess) {
   cache.set(key, { ts: Date.now(), row });
   return row || { name: 'Tablet', role: sess.role };
 }
-async function tabletAction(db, sess, body, env, origin) {
+async function tabletAction(db, sess, body, env, origin, ctx) {
   const action = body.action;
   const code = sess.workshop_code;
   if (NOT_AVAILABLE.includes(action)) throw new HttpError(503, 'not_available', { message: 'Diese Funktion ist auf dem eigenen Server noch nicht eingerichtet.' });
@@ -281,7 +281,18 @@ async function tabletAction(db, sess, body, env, origin) {
     for (const t of tasks) await db.update('OrderTask', t.id, { status: 'erledigt', completed_by: emp.name, completed_date: nowIso() });
     await db.update('Order', order.id, { status: 'abholbereit' });
     invalidate('Order', 'OrderTask');
-    return { ok: true };
+    if (body.notify_customer !== false && ctx) ctx.waitUntil(mailReady(env, db, order).catch(e => console.log('mail', String(e))));
+    return { ok: true, email_queued: !!(env.RESEND_API_KEY && order.email) };
+  }
+  if (action === 'send_portal_link') {
+    if (!['admin', 'serviceberater'].includes(sess.role)) throw new HttpError(403, 'forbidden');
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    if (!order.customer_token) throw new HttpError(400, 'no_portal');
+    if (!order.email) throw new HttpError(400, 'no_email');
+    if (!env.RESEND_API_KEY) throw new HttpError(503, 'not_available', { message: 'E-Mail-Versand ist noch nicht eingerichtet.' });
+    const r = await mailPortalLink(env, db, order);
+    if (!r.sent) throw new HttpError(502, 'mail_failed');
+    return { ok: true, sent_to: order.email.replace(/^(.).*(@.*)$/, '$1…$2') };
   }
   if (action === 'tire_update') {
     const tire = await ownRecord(db, 'TireSet', body.id, code);
@@ -307,7 +318,7 @@ async function portalOrder(db, token) {
   if (!rows[0]) throw new HttpError(404, 'not_found');
   return rows[0];
 }
-async function portalApi(db, body) {
+async function portalApi(db, body, env, ctx) {
   const order = await portalOrder(db, body.token);
   const code = order.workshop_code;
   const action = body.action || 'get';
@@ -344,6 +355,7 @@ async function portalApi(db, body) {
     if (!ap || ap.order_id !== order.id) throw new HttpError(404, 'not_found');
     if (ap.status !== 'ausstehend' && ap.status !== 'rueckruf_angefordert') throw new HttpError(409, 'already_answered');
     await db.update('ApprovalRequest', ap.id, { status: decision, customer_response_date: nowIso() });
+    if (ctx) ctx.waitUntil(mailApprovalAnswer(env, db, order, ap, decision).catch(e => console.log('mail', String(e))));
     return { ok: true };
   }
   if (action === 'book') {
@@ -374,6 +386,7 @@ async function portalApi(db, body) {
       notification_channel: 'email', notification_sent: false, notes: 'Online gebucht (Kundenportal)',
     });
     invalidate('Appointment');
+    if (ctx) ctx.waitUntil(mailBooking(env, db, order, created).catch(e => console.log('mail', String(e))));
     return { ok: true, appointment_id: created.id };
   }
   if (action === 'cancel') {
@@ -385,6 +398,97 @@ async function portalApi(db, body) {
     return { ok: true };
   }
   throw new HttpError(400, 'unknown_action');
+}
+
+
+/* ---------------- E-Mails (Resend) ----------------
+ * Secret RESEND_API_KEY + Variable MAIL_FROM (z. B. "AutoLeitwerk <noreply@autoleitwerk.de>").
+ * Ohne Schlüssel wird nichts verschickt – die Aktionen funktionieren trotzdem. */
+const PORTAL_BASE = 'https://kabarabusiness-creator.github.io/werkstattflow-pilot/kundenapp.html';
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function mailHtml({ title, intro, rows = [], button, footer }) {
+  return `<!doctype html><html lang="de"><body style="margin:0;background:#f4f4f7;font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#1a1a2e">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px"><tr><td align="center">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#fff;border-radius:14px;overflow:hidden">
+<tr><td style="background:#1a1a2e;padding:18px 24px;color:#fff;font-weight:700;font-style:italic;letter-spacing:.5px"><span style="color:#a78bfa">AUTO</span>LEITWERK</td></tr>
+<tr><td style="padding:24px">
+<h1 style="font-size:20px;margin:0 0 10px">${esc(title)}</h1>
+<p style="font-size:15px;line-height:1.55;margin:0 0 16px">${intro}</p>
+${rows.length ? `<table width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6fb;border-radius:10px;padding:12px 14px;margin-bottom:18px">${rows.map(([k, v]) => `<tr><td style="font-size:13px;color:#6b6b88;padding:3px 0">${esc(k)}</td><td style="font-size:14px;font-weight:600;text-align:right;padding:3px 0">${esc(v)}</td></tr>`).join('')}</table>` : ''}
+${button ? `<a href="${esc(button.href)}" style="display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">${esc(button.label)}</a>` : ''}
+<p style="font-size:12.5px;color:#6b6b88;line-height:1.5;margin:22px 0 0">${footer || ''}</p>
+</td></tr></table>
+<p style="font-size:11px;color:#8a8aa8;margin-top:14px">Gesendet über AutoLeitwerk · <a href="https://kabarabusiness-creator.github.io/werkstattflow-pilot/datenschutz.html" style="color:#8a8aa8">Datenschutz</a></p>
+</td></tr></table></body></html>`;
+}
+async function workshopInfo(db, code) {
+  const [profiles, workshops] = await Promise.all([cachedList(db, 'WorkshopProfile'), cachedList(db, 'Workshop')]);
+  const p = profiles.find(x => x.workshop_code === code) || {};
+  const w = workshops.find(x => x.code === code) || {};
+  return { name: p.company_name || w.name || 'Ihre Werkstatt', phone: p.phone || '', email: p.email || '',
+    address: [p.address_street, [p.address_zip, p.address_city].filter(Boolean).join(' ')].filter(Boolean).join(', ') };
+}
+function contactFooter(ws) {
+  return `${esc(ws.name)}${ws.address ? ' · ' + esc(ws.address) : ''}${ws.phone ? '<br>Telefon: ' + esc(ws.phone) : ''}${ws.email ? ' · ' + esc(ws.email) : ''}`;
+}
+async function sendMail(env, db, { to, subject, html, replyTo, orderId, code, statusText }) {
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to || ''));
+  if (!env.RESEND_API_KEY || !valid) return { sent: false, reason: !env.RESEND_API_KEY ? 'not_configured' : 'no_email' };
+  let state = 'gesendet', reason = null;
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: env.MAIL_FROM || 'AutoLeitwerk <noreply@autoleitwerk.de>', to: [to], subject, html, reply_to: replyTo || undefined }),
+    });
+    if (!res.ok) { state = 'fehlgeschlagen'; reason = `${res.status} ${(await res.text()).slice(0, 200)}`; console.log('mail_error', reason); }
+  } catch (e) { state = 'fehlgeschlagen'; reason = String(e); }
+  if (orderId) {
+    await db.create('Notification', { order_id: orderId, channel: 'email', subject, body: subject, recipient: to, status_text: statusText || '', delivery_state: state, workshop_code: code }).catch(() => {});
+  }
+  return { sent: state === 'gesendet', reason };
+}
+const portalLink = o => `${PORTAL_BASE}?token=${encodeURIComponent(o.customer_token || '')}`;
+const fmtDate = d => { const [y, m, dd] = String(d).slice(0, 10).split('-'); return `${dd}.${m}.${y}`; };
+async function mailPortalLink(env, db, order) {
+  const ws = await workshopInfo(db, order.workshop_code);
+  return sendMail(env, db, {
+    to: order.email, replyTo: ws.email, orderId: order.id, code: order.workshop_code, statusText: 'Portal-Link',
+    subject: `Ihr Fahrzeug bei ${ws.name} – Status online verfolgen`,
+    html: mailHtml({ title: `Hallo ${order.customer_name || ''},`, intro: `Ihr Fahrzeug ist bei <b>${esc(ws.name)}</b> angenommen. Über Ihr persönliches Kundenportal sehen Sie jederzeit den aktuellen Stand, können Zusatzarbeiten freigeben und Termine buchen.`,
+      rows: [['Fahrzeug', [order.vehicle_brand, order.vehicle_model].filter(Boolean).join(' ')], ['Kennzeichen', order.license_plate || '–'], ['Auftrag', '#' + (order.order_number || '')]],
+      button: { label: 'Kundenportal öffnen', href: portalLink(order) }, footer: contactFooter(ws) + '<br>Den Link bitte nicht weitergeben – er gilt nur für Ihren Auftrag.' }),
+  });
+}
+async function mailReady(env, db, order) {
+  const ws = await workshopInfo(db, order.workshop_code);
+  return sendMail(env, db, {
+    to: order.email, replyTo: ws.email, orderId: order.id, code: order.workshop_code, statusText: 'Abholbereit',
+    subject: `Ihr ${[order.vehicle_brand, order.vehicle_model].filter(Boolean).join(' ') || 'Fahrzeug'} ist abholbereit`,
+    html: mailHtml({ title: 'Ihr Fahrzeug ist fertig! 🎉', intro: `Gute Nachricht: Die Arbeiten an Ihrem Fahrzeug sind abgeschlossen und geprüft. Sie können es bei <b>${esc(ws.name)}</b> abholen.`,
+      rows: [['Kennzeichen', order.license_plate || '–'], ['Auftrag', '#' + (order.order_number || '')]],
+      button: order.customer_token ? { label: 'Details im Kundenportal', href: portalLink(order) } : null, footer: contactFooter(ws) }),
+  });
+}
+async function mailBooking(env, db, order, appt) {
+  const ws = await workshopInfo(db, order.workshop_code);
+  const rows = [['Datum', fmtDate(appt.appointment_date)], ['Uhrzeit', appt.time_slot + ' Uhr'], ['Anliegen', appt.service_name || appt.appointment_type], ['Fahrzeug', order.license_plate || '–']];
+  const r = await sendMail(env, db, {
+    to: order.email, replyTo: ws.email, orderId: order.id, code: order.workshop_code, statusText: 'Termin angefragt',
+    subject: `Terminanfrage bei ${ws.name}: ${fmtDate(appt.appointment_date)}, ${appt.time_slot} Uhr`,
+    html: mailHtml({ title: 'Ihre Terminanfrage ist eingegangen', intro: `Vielen Dank! Ihr Wunschtermin ist bei <b>${esc(ws.name)}</b> eingegangen. Die Werkstatt bestätigt ihn in Kürze.`, rows,
+      button: { label: 'Termin im Kundenportal ansehen', href: portalLink(order) }, footer: contactFooter(ws) + '<br>Absagen können Sie den Termin jederzeit im Kundenportal.' }),
+  });
+  if (ws.email) await sendMail(env, db, { to: ws.email, subject: `Neue Online-Terminanfrage: ${order.customer_name} · ${fmtDate(appt.appointment_date)} ${appt.time_slot}`,
+    html: mailHtml({ title: 'Neue Terminanfrage', intro: `${esc(order.customer_name)} hat über das Kundenportal einen Termin angefragt.`, rows: [...rows, ['Kunde', order.customer_name], ['Telefon', order.phone || '–']], footer: 'Bitte im Dashboard bestätigen.' }) });
+  return r;
+}
+async function mailApprovalAnswer(env, db, order, ap, decision) {
+  const ws = await workshopInfo(db, order.workshop_code);
+  if (!ws.email) return { sent: false, reason: 'no_email' };
+  const label = { freigegeben: '✅ freigegeben', abgelehnt: '❌ abgelehnt', rueckruf_angefordert: '📞 Rückruf gewünscht' }[decision] || decision;
+  return sendMail(env, db, { to: ws.email, subject: `Freigabe ${label}: ${ap.title || 'Zusatzarbeit'} · ${order.license_plate || ''}`,
+    html: mailHtml({ title: `Kunde hat geantwortet: ${label}`, intro: `${esc(order.customer_name)} hat auf die Zusatzarbeit geantwortet.`,
+      rows: [['Arbeit', ap.title || '–'], ['Kosten', ap.additional_cost != null ? `${Number(ap.additional_cost).toLocaleString('de-DE')} €` : '–'], ['Kennzeichen', order.license_plate || '–'], ['Telefon', order.phone || '–']] }) });
 }
 
 /* ---------------- Daten-Backup ---------------- */
@@ -417,13 +521,13 @@ function json(data, status, cors) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const cors = corsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
-      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, email: !!env.RESEND_API_KEY, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
       if (path.startsWith('/photo/') && request.method === 'GET') {
         const key = decodeURIComponent(path.slice('/photo/'.length));
         if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp)$/i.test(key)) throw new HttpError(404, 'not_found');
@@ -440,8 +544,8 @@ export default {
       }
       if (path === '/workshopLogin') return json(await workshopLogin(db, body), 200, cors);
       if (path === '/getTabletData') return json(await getTabletData(db, await requireSession(db, request)), 200, cors);
-      if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body, env, url.origin), 200, cors);
-      if (path === '/portalApi') return json(await portalApi(db, body), 200, cors);
+      if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body, env, url.origin, ctx), 200, cors);
+      if (path === '/portalApi') return json(await portalApi(db, body, env, ctx), 200, cors);
       if (path === '/admin' && request.method === 'GET') {
         return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoLeitwerk – Daten-Backup</title>
 <style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:40px 16px;color:#1a1a2e}main{max-width:420px;margin:auto;background:#fff;padding:24px;border-radius:14px;box-shadow:0 2px 12px #0001}input,button{width:100%;box-sizing:border-box;font:inherit;padding:12px;border-radius:10px;margin-top:10px}input{border:1px solid #ccd}button{background:#7c3aed;color:#fff;border:0;font-weight:600;cursor:pointer}p{color:#556;font-size:14px}</style></head>

@@ -15,7 +15,7 @@ const db = {
     { id: 'e2', name: 'Otto Fremd', role: 'admin', is_active: true, workshop_code: 'AL-T2', pin_salt: 'x', pin: sha('x:1111') },
   ],
   Order: [
-    { id: 'o1', workshop_code: 'AL-T1', customer_name: 'Kunde A', license_plate: 'AB-C-1', vehicle_brand: 'VW', vehicle_model: 'Golf', status: 'reparatur_laeuft', customer_token: 'tok-aaaaaa', billing_street: 'geheim' },
+    { id: 'o1', order_number: '2001', email: 'kunde@example.com', phone: '0170', workshop_code: 'AL-T1', customer_name: 'Kunde A', license_plate: 'AB-C-1', vehicle_brand: 'VW', vehicle_model: 'Golf', status: 'reparatur_laeuft', customer_token: 'tok-aaaaaa', billing_street: 'geheim' },
     { id: 'o2', workshop_code: 'AL-T2', customer_name: 'Fremd', license_plate: 'X', status: 'fahrzeug_angenommen', customer_token: 'tok-bbbbbb' },
   ],
   OrderTask: [{ id: 't1', order_id: 'o1', workshop_code: 'AL-T1', title: 'Öl', status: 'offen' }, { id: 't2', order_id: 'o2', workshop_code: 'AL-T2', title: 'X', status: 'offen' }],
@@ -24,8 +24,10 @@ const db = {
   MediaItem: [], Service: [{ id: 's1', name: 'Inspektion', is_active: true, workshop_code: 'AL-T1', estimated_duration_minutes: 60 }], InventoryItem: [],
 };
 const calls = [];
+const mails = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url); const method = init.method || 'GET';
+  if (u.host === 'api.resend.com') { assert.equal(init.headers.Authorization, 'Bearer RE_TEST'); mails.push(JSON.parse(init.body)); return new Response('{"id":"m1"}', { status: 200 }); }
   assert.equal(init.headers.Authorization, 'Bearer TEST');
   const m = u.pathname.match(/^\/api\/apps\/app1\/entities\/(\w+)(?:\/(v2\/list|[^/]+))?$/);
   assert.ok(m, 'unexpected url ' + u.pathname);
@@ -49,12 +51,14 @@ const PHOTOS = {
   async put(k, v, o) { kv.set(k, { v: new Uint8Array(v), m: o && o.metadata }); },
   async getWithMetadata(k) { const e = kv.get(k); return e ? { value: new Blob([e.v]).stream(), metadata: e.m } : { value: null, metadata: null }; },
 };
-const env = { PHOTOS, BASE44_TOKEN: 'TEST', BASE44_APP_ID: APP, ALLOWED_ORIGINS: 'https://kabarabusiness-creator.github.io', ADMIN_KEY: 'x'.repeat(20) };
+const env = { PHOTOS, RESEND_API_KEY: 'RE_TEST', BASE44_TOKEN: 'TEST', BASE44_APP_ID: APP, ALLOWED_ORIGINS: 'https://kabarabusiness-creator.github.io', ADMIN_KEY: 'x'.repeat(20) };
+const pending = []; const ctx = { waitUntil: p => pending.push(p) };
 async function call(path, body, token, method = 'POST', headers = {}) {
   const res = await worker.fetch(new Request('https://api.test/functions' + path, {
     method, headers: { 'Content-Type': 'application/json', Origin: 'https://kabarabusiness-creator.github.io', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...headers },
     body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
-  }), env);
+  }), env, ctx);
+  await Promise.all(pending.splice(0));
   return { status: res.status, data: await res.json(), cors: res.headers.get('Access-Control-Allow-Origin') };
 }
 const results = [];
@@ -167,6 +171,16 @@ await t('Admin-Export nur mit Schlüssel', async () => {
 await t('Ohne Token-Konfiguration: Health ok, API meldet server_not_configured', async () => {
   const h = await worker.fetch(new Request('https://api.test/health'), {}); assert.equal((await h.json()).configured, false);
   const r = await worker.fetch(new Request('https://api.test/workshopLogin', { method: 'POST', body: '{}' }), {}); assert.equal((await r.json()).error, 'server_not_configured');
+});
+await t('E-Mails: Abholbereit, Termin (Kunde + Werkstatt), Freigabe, Portal-Link', async () => {
+  const subjects = mails.map(m => m.subject).join(' | ');
+  assert.match(subjects, /ist abholbereit/); assert.match(subjects, /Terminanfrage bei Testwerkstatt GmbH/); assert.match(subjects, /Neue Online-Terminanfrage/); assert.match(subjects, /Freigabe ✅ freigegeben/);
+  assert.ok(mails.every(m => !/<script/i.test(m.html)));
+  const before = mails.length;
+  const r = await call('/tabletAction', { action: 'send_portal_link', order_id: 'o1' }, token);
+  assert.equal(r.data.ok, true); assert.equal(r.data.sent_to, 'k…@example.com'); assert.equal(mails.length, before + 1);
+  assert.match(mails.at(-1).html, /kundenapp\.html\?token=tok-aaaaaa/); assert.equal(mails.at(-1).reply_to, 'a@b.de');
+  assert.ok(db.Notification.some(n => n.status_text === 'Portal-Link' && n.delivery_state === 'gesendet'));
 });
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
