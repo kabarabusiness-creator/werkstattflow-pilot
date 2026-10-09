@@ -46,16 +46,16 @@
   <h2>4. Dienstleister und Speicherorte</h2>
   <ul>
     <li><strong>GitHub Pages</strong> (GitHub, Inc., USA) – Auslieferung des Kundenportals und des Werkstatt-Tablets. Die Datenübermittlung in die USA erfolgt auf Grundlage des EU-US Data Privacy Framework bzw. von EU-Standardvertragsklauseln.</li>
-    <li><strong>Cloudflare Workers</strong> (Cloudflare, Inc., USA) – Server, über den Werkstatt-Tablet und Kundenportal Daten abrufen und speichern. Die Datenübermittlung in die USA erfolgt auf Grundlage des EU-US Data Privacy Framework bzw. von EU-Standardvertragsklauseln.</li>
+    <li><strong>Cloudflare Workers</strong> (Cloudflare, Inc., USA) – Server, über den Werkstatt-Tablet und Kundenportal Daten abrufen und speichern, Fotospeicher sowie KI-Funktionen (Workers AI, siehe Abschnitt 5). Die Datenübermittlung in die USA erfolgt auf Grundlage des EU-US Data Privacy Framework bzw. von EU-Standardvertragsklauseln.</li>
     <li><strong>Resend</strong> (Resend, Inc., USA) – Versand von E-Mails an Kunden (Portal-Link, Terminanfragen, Fertigmeldung). Übermittelt werden Name, E-Mail-Adresse und die Inhalte der jeweiligen Nachricht. Die Datenübermittlung in die USA erfolgt auf Grundlage von EU-Standardvertragsklauseln.</li>
     <li><strong>Base44</strong> (Teil der Wix.com-Gruppe) – Datenbank, Dateispeicher, Anmeldung und Versand von Benachrichtigungen. Die Verarbeitung kann auch auf Servern außerhalb der EU erfolgen. Grundlage sind Angemessenheitsbeschlüsse der EU-Kommission bzw. EU-Standardvertragsklauseln.</li>
   </ul>
 
-  <h2>5. Automatische Bilderkennung (KI)</h2>
-  <p>Die Werkstatt kann Fotos von Reifen und Felgen sowie vom Fahrzeugschein automatisch auswerten lassen, um Daten (z. B. Reifengröße, DOT, Profiltiefe, HSN/TSN) vorauszufüllen und Schäden zu erkennen. Dafür wird das Bild über Base44 an einen KI-Dienst übermittelt. Die Ergebnisse sind Vorschläge und werden von der Werkstatt geprüft. Es findet keine automatisierte Entscheidung im Sinne von Art. 22 DSGVO statt.</p>
+  <h2>5. KI-Assistent und automatische Bilderkennung</h2>
+  <p>Die Werkstatt kann den KI-Assistenten „ALEX“ nutzen und Fotos von Reifen und Felgen automatisch auswerten lassen, um Daten (z. B. Reifengröße, DOT, Profiltiefe) vorauszufüllen und Schäden zu erkennen. Die Verarbeitung erfolgt über <strong>Cloudflare Workers AI</strong> (Cloudflare, Inc.) auf demselben Server, über den Tablet und Kundenportal laufen. Übermittelt werden die Frage bzw. die Fotos sowie die dafür nötigen Auftrags- und Fahrzeugdaten der Werkstatt. Nach Angaben von Cloudflare werden diese Eingaben nicht zum Training von KI-Modellen verwendet. Die Ergebnisse sind Vorschläge und werden von der Werkstatt geprüft. Es findet keine automatisierte Entscheidung im Sinne von Art. 22 DSGVO statt.</p>
   <ul>
-    <li><strong>Fahrzeugschein:</strong> Das Foto wird nur zum Auslesen verwendet und nicht am Auftrag gespeichert.</li>
-    <li><strong>Reifen- und Fahrzeugfotos:</strong> werden am Auftrag gespeichert und sind über eine nicht öffentlich auffindbare, schwer zu erratende Adresse abrufbar.</li>
+    <li><strong>Reifen- und Fahrzeugfotos:</strong> werden nur gespeichert, wenn die Werkstatt sie am Auftrag ablegt, und sind dann über eine nicht öffentlich auffindbare, schwer zu erratende Adresse abrufbar.</li>
+    <li><strong>Fahrzeugschein (Erfassung in der Werkstatt-Verwaltung):</strong> Das Foto wird nur zum Auslesen verwendet und nicht am Auftrag gespeichert.</li>
   </ul>
 
   <h2>6. Cookies, Tracking und lokale Speicherung</h2>

@@ -8,12 +8,15 @@
  * Secrets (in Cloudflare unter Settings → Variables and Secrets):
  *   BASE44_TOKEN  – Base44 Personal Access Token (Lesen + Schreiben)
  *   ADMIN_KEY     – frei gewähltes langes Passwort für /admin/export (Daten-Backup)
+ * Bindings (wrangler.toml): PHOTOS (KV, Fotos), AI (Workers AI – ALEX + Reifenscan, kostenloses Tageskontingent)
  * Variablen (wrangler.toml):
  *   BASE44_APP_ID, ALLOWED_ORIGINS
  *
  * Gleiche Formate wie die Base44-Funktionen: Tablet-Token = 64 Hex-Zeichen,
  * gespeichert als SHA-256 in WorkshopSession; PIN = sha256(salt + ":" + pin).
  */
+
+import { alexAsk, tireScan } from './ai.js';
 
 const SESSION_HOURS = 12;
 const MAX_FAILED = 5;
@@ -215,7 +218,7 @@ async function getTabletData(db, sess) {
 }
 
 /* ---------------- Tablet-Aktionen ---------------- */
-const NOT_AVAILABLE = ['tire_scan', 'alex_ask', 'alex_execute'];
+const NOT_AVAILABLE = ['alex_execute'];
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 function decodeDataUrl(dataUrl) {
   const m = /^data:(image\/(jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/.exec(String(dataUrl || ''));
@@ -246,6 +249,15 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
   const code = sess.workshop_code;
   if (NOT_AVAILABLE.includes(action)) throw new HttpError(503, 'not_available', { message: 'Diese Funktion ist auf dem eigenen Server noch nicht eingerichtet.' });
   const emp = await employeeOf(db, sess);
+
+  if (action === 'alex_ask') {
+    const [tablet, inventory] = await Promise.all([getTabletData(db, sess), cachedList(db, 'InventoryItem')]);
+    return alexAsk(db, sess, body, env, { ...tablet, inventory: inventory.filter(i => i.workshop_code === code) });
+  }
+  if (action === 'tire_scan') {
+    if (body.order_id) await ownRecord(db, 'Order', body.order_id, code);
+    return tireScan(sess, body, env, decodeDataUrl);
+  }
 
   if (action === 'media_upload') {
     if (!env.PHOTOS) throw new HttpError(503, 'not_available', { message: 'Foto-Speicher ist noch nicht eingerichtet.' });
@@ -568,7 +580,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
-      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, email: !!env.RESEND_API_KEY, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
       if (path.startsWith('/photo/') && request.method === 'GET') {
         const key = decodeURIComponent(path.slice('/photo/'.length));
         if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp)$/i.test(key)) throw new HttpError(404, 'not_found');
@@ -580,7 +592,7 @@ export default {
       let body = {};
       if (request.method === 'POST' && !(request.headers.get('Content-Type') || '').includes('form')) {
         const len = Number(request.headers.get('Content-Length') || 0);
-        if (len > 2_000_000) throw new HttpError(413, 'too_large');
+        if (len > 9_000_000) throw new HttpError(413, 'too_large');
         body = await request.json().catch(() => ({}));
       }
       if (path === '/workshopProfiles') return json(await workshopProfiles(db, body, request.headers.get('CF-Connecting-IP') || 'x'), 200, cors);
@@ -608,7 +620,7 @@ export default {
       }
       throw new HttpError(404, 'not_found');
     } catch (e) {
-      if (e instanceof HttpError) return json({ error: e.code, ...e.extra }, e.status, cors);
+      if (e instanceof HttpError || (e && e.isHttp)) return json({ error: e.code, ...e.extra }, e.status, cors);
       console.log('unhandled', e && e.stack || String(e));
       return json({ error: 'server_error' }, 500, cors);
     }

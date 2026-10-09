@@ -4656,7 +4656,7 @@ const AI_KB = [
       <li>Zusätzlich prüfen: Wastegate-Rasseln im Leerlauf (separates, bekanntes N54-Thema, meist unkritisch aber hörbar störend)</li>
     </ul>` },
 ];
-/* ---------- ALEX mit KI-Backend (Base44 alexChat über tabletAction alex_ask) ---------- */
+/* ---------- ALEX mit KI-Backend (eigener Server, Cloudflare Workers AI, über tabletAction alex_ask) ---------- */
 // Eigene Anfrage-Funktion: ALEX/Reifenscan dürfen NICHT state.writeSupported umschalten,
 // wenn eine neue Aktion (z. B. alex_execute) auf dem Server noch fehlt.
 async function tabletRequest(action, payload, timeoutMs){
@@ -4677,6 +4677,7 @@ async function tabletRequest(action, payload, timeoutMs){
     const missing = data.error==='unknown_action' || data.error==='not_available' || (res.status===404 && /not found or not deployed/i.test(String(data.message||'')));
     if(missing) return { ok:false, status:res.status, missing:true, reason:'noch nicht freigeschaltet' };
     if(isCreditsLimit(data)) return { ok:false, status:res.status, credits:true, reason: CREDITS_MSG };
+    if(data.error==='ai_quota') return { ok:false, status:res.status, quota:true, reason: data.message || 'KI-Tageskontingent aufgebraucht' };
     if(!res.ok || data.ok===false) return { ok:false, status:res.status, data, reason: data.message || data.error || ('HTTP '+res.status) };
     return { ok:true, status:res.status, data };
   }catch(e){
@@ -4863,7 +4864,7 @@ async function aiAsk(prefill){
   } else if(r.status===429 || /rate|limit|zu viele/i.test(String(r.reason||''))){
     aiChat.push({ from:'bot', text:'Du hast in dieser Stunde schon viele Fragen gestellt. Bitte versuch es gleich noch einmal.' });
   } else {
-    const why = r.missing ? 'ALEX ist auf dem Server noch nicht freigeschaltet' : r.credits ? 'Das KI-Kontingent dieses Monats ist aufgebraucht' : `Keine Verbindung zu ALEX (${escHtml(r.reason||'Fehler')})`;
+    const why = r.quota ? 'Das kostenlose KI-Kontingent für heute ist aufgebraucht (ab 2 Uhr nachts wieder da)' : r.missing ? 'ALEX ist auf dem Server noch nicht freigeschaltet' : r.credits ? 'Das KI-Kontingent dieses Monats ist aufgebraucht' : `Keine Verbindung zu ALEX (${escHtml(r.reason||'Fehler')})`;
     aiChat.push({ from:'bot', text: `<div class="alex-general">${why} – Antwort aus dem lokalen Wissen:</div>` + (local || 'Dazu habe ich lokal nichts hinterlegt. Versuch es mit einem Fehlercode oder Stichwort wie „Bremse“ oder „Öl“.') });
   }
   alexBusy = false;
@@ -4913,7 +4914,7 @@ async function sendPortalLink(){
   else showUpdateToast({ no_email:'Keine E-Mail-Adresse beim Kunden hinterlegt.', no_portal:'Für diesen Auftrag gibt es noch keinen Portal-Zugang.', forbidden:'Nur Admin und Serviceberater können den Link senden.' }[r.data && r.data.error] || (r.missing ? 'E-Mail-Versand ist noch nicht eingerichtet.' : `Link nicht gesendet (${r.reason}).`));
 }
 
-/* ---------- Reifenscan (Base44 tabletAction tire_scan) ---------- */
+/* ---------- Reifenscan (eigener Server, Cloudflare Workers AI, tabletAction tire_scan) ---------- */
 const TIRE_SLOTS = [
   { key:'flanke', label:'Flanke', hint:'Reifenbeschriftung mit Größe & DOT' },
   { key:'laufflaeche', label:'Lauffläche', hint:'Profil von vorne, gut ausgeleuchtet' },
@@ -5008,7 +5009,7 @@ async function runTireScan(){
   const r = await tabletRequest('tire_scan', { order_id:o.id, images }, 90000);
   ts.busy = false;
   if(r.ok && r.data && r.data.result){ ts.result = r.data.result; ts.imageUrls = r.data.image_urls || []; }
-  else ts.error = r.missing ? 'Reifenscan ist auf dem Server noch nicht freigeschaltet.' : r.credits ? 'Reifenscan gerade nicht möglich: ' + CREDITS_MSG + '.' : `Auswertung fehlgeschlagen (${r.reason}). Bitte erneut versuchen.`;
+  else ts.error = r.quota ? 'Das kostenlose KI-Kontingent für heute ist aufgebraucht – Reifen bitte manuell erfassen (ab 2 Uhr nachts wieder verfügbar).' : r.status===429 ? 'Zu viele Scans in dieser Stunde – bitte später erneut versuchen.' : r.missing ? 'Reifenscan ist auf dem Server noch nicht freigeschaltet.' : r.credits ? 'Reifenscan gerade nicht möglich: ' + CREDITS_MSG + '.' : `Auswertung fehlgeschlagen (${r.reason}). Bitte erneut versuchen.`;
   if(state.tireScan === ts) rerenderTirePanel();
 }
 async function saveTireScan(){

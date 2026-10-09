@@ -19,3 +19,8 @@ enabled = true
 # Foto-Speicher (Cloudflare KV, kostenlos bis 1 GB) – wird beim Deploy automatisch angelegt
 [[kv_namespaces]]
 binding = "PHOTOS"
+
+# KI (ALEX + Reifenscan) über Cloudflare Workers AI – kein API-Key, kostenloses Tageskontingent.
+# Auf dem Free-Plan wird nie etwas berechnet: ist das Kontingent leer, antwortet die KI bis 2 Uhr nachts nicht.
+[ai]
+binding = "AI"

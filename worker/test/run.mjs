@@ -141,9 +141,50 @@ await t('Reifensatz aktualisieren + Validierung', async () => {
   assert.equal(db.TireSet[0].tread_depth, 3.5);
   assert.equal((await call('/tabletAction', { action: 'tire_update', id: 'r1', season: 'herbst' }, token)).status, 400);
 });
-await t('KI → not_available (kein Absturz)', async () => {
-  const r = await call('/tabletAction', { action: 'tire_scan', order_id: 'o1' }, token);
+await t('KI ohne AI-Binding → not_available (kein Absturz)', async () => {
+  db.InventoryItem.push({ id: 'i1', workshop_code: 'AL-T1', name: 'Bremsbeläge vorne', part_number: 'BB-1', stock_quantity: 2, min_stock: 4, location: 'C-04' });
+  db.InventoryItem.push({ id: 'i2', workshop_code: 'AL-T2', name: 'Bremsbeläge fremd', stock_quantity: 9, min_stock: 1 });
+  const r = await call('/tabletAction', { action: 'alex_ask', messages: [{ role: 'user', content: 'Hallo' }] }, token);
   assert.equal(r.status, 503); assert.equal(r.data.error, 'not_available');
+});
+await t('ALEX: Wissen + Werkstattdaten im Prompt, Karten für Kunde/Auslastung/Lager', async () => {
+  db.AlexKnowledge = [{ id: 'k1', title: 'AGR-Ventil P0401', keywords: 'p0401, agr', content: 'P0401: AGR-Durchfluss zu gering. Ventil reinigen.', active: true }];
+  let seen;
+  env.AI = { async run(model, input) { seen = { model, input }; return { response: 'Prüfe zuerst das **AGR-Ventil** [Eintrag 1].' }; } };
+  const r = await call('/tabletAction', { action: 'alex_ask', order_id: 'o1', messages: [{ role: 'user', content: 'Fehlercode P0401, Kunde A, Bremsbeläge auf Lager? Wie voll sind wir Freitag?' }] }, token);
+  assert.equal(r.status, 200, JSON.stringify(r.data)); assert.match(r.data.answer, /AGR/);
+  assert.match(r.data.sources[0].title, /P0401/);
+  const sys = seen.input.messages[0].content;
+  assert.match(sys, /\[Eintrag 1\] .*P0401/); assert.match(sys, /VW Golf AB-C-1/); assert.match(sys, /Bremsbeläge vorne/);
+  assert.ok(!/fremd/i.test(sys), 'fremde Werkstattdaten im Prompt');
+  const types = r.data.cards.map(c => c.type);
+  assert.ok(types.includes('kunde') && types.includes('kapazitaet') && types.includes('teil'), types.join());
+  assert.equal(r.data.cards.find(c => c.type === 'kunde').customer.tires.length, 1);
+  assert.equal(r.data.cards.find(c => c.type === 'teil').level, 'gelb');
+});
+await t('ALEX: Tageskontingent leer → ai_quota', async () => {
+  env.AI = { async run() { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); } };
+  const r = await call('/tabletAction', { action: 'alex_ask', messages: [{ role: 'user', content: 'Was steht heute an?' }] }, token);
+  assert.equal(r.status, 503); assert.equal(r.data.error, 'ai_quota');
+});
+await t('Reifenscan: Bilder an Vision-Modell, Ergebnis normalisiert, Fallback-Modell', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const models = [];
+  env.AI = { async run(model, input) {
+    models.push(model);
+    if (models.length === 1) throw new Error('model error');
+    assert.equal(input.messages[0].content.filter(c => c.type === 'image_url').length, 2);
+    return { response: '```json\n{"brand":{"value":"Continental","confidence":0.9},"size":{"value":"205/55 R16","confidence":0.8},"season":{"value":"Winter (Alpine)","confidence":0.9},"dot_code":{"value":"DOT XY 2319","confidence":0.6},"tread_depth_mm":{"value":"3,5","confidence":0.5},"tire_damages":[],"rim_damages":[{"type":"Bordsteinschaden","description":"Kratzer","severity":"niedrig"}]}\n```' };
+  } };
+  const r = await call('/tabletAction', { action: 'tire_scan', order_id: 'o1', images: [png, png] }, token);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const x = r.data.result;
+  assert.equal(x.brand.value, 'Continental'); assert.equal(x.season.value, 'winter'); assert.equal(x.dot_code.value, '2319');
+  assert.equal(x.production_year.value, 2019); assert.ok(x.tire_age_years.value > 6); assert.equal(x.tread_depth_mm.value, 3.5);
+  assert.equal(x.rim_damages.length, 1); assert.equal(models.length, 2);
+  assert.equal((await call('/tabletAction', { action: 'tire_scan', order_id: 'o2', images: [png] }, token)).status, 404);
+  assert.equal((await call('/tabletAction', { action: 'tire_scan', order_id: 'o1', images: ['data:text/html;base64,AAAA'] }, token)).status, 400);
+  delete env.AI;
 });
 await t('Foto hochladen, als Fahrzeugfoto setzen und ausliefern', async () => {
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';

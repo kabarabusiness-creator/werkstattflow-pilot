@@ -22,12 +22,23 @@ Danach deployt Cloudflare jeden Push auf `main` automatisch.
 |---|---|
 | `POST /workshopLogin` | Werkstattcode + Name + PIN → Tablet-Token (12 h) |
 | `GET /getTabletData` | Daten der eigenen Werkstatt (Bearer-Token) |
-| `POST /tabletAction` | `task_update`, `worktime_start/stop`, `note_add`, `order_complete`, `tire_update` |
+| `POST /tabletAction` | `task_update`, `worktime_start/stop`, `note_add`, `order_complete`, `tire_update`, `media_upload`, `send_portal_link`, `alex_ask`, `tire_scan` |
 | `POST /portalApi` | Kundenportal: `get`, `book`, `cancel`, `respond` |
 | `GET /admin/export` | Komplettes Daten-Backup als JSON (Header `X-Admin-Key`) |
 | `GET /health` | Status |
 
-Fotos, KI (ALEX, Reifenscan, Fahrzeugschein) und E-Mails antworten vorerst mit `not_available`.
+## KI (ALEX, Reifenscan)
+
+Läuft über **Cloudflare Workers AI** (Binding `AI` in `wrangler.toml`) – kein API-Key, keine Kosten pro Anfrage.
+Kostenloses Kontingent: 10.000 Neuronen pro Tag (Reset 00:00 UTC = 2 Uhr deutscher Sommerzeit).
+Grob: eine ALEX-Frage ≈ 100–150 Neuronen, ein Reifenscan mit 3 Fotos ≈ 300–500 Neuronen.
+Ist das Kontingent leer, antwortet der Server mit `ai_quota` und das Tablet nutzt das lokale Wissen.
+Achtung: Auf dem Workers-**Paid**-Plan würde Nutzung über dem Kontingent berechnet.
+
+- Modell: `@cf/mistralai/mistral-small-3.1-24b-instruct` (Text + Bild), Ersatz für Bilder: `@cf/google/gemma-3-12b-it`
+- Wissen: Base44-Entität `AlexKnowledge` (Fallback `docs/alex_kb.json`) + Werkstattdaten (Aufträge, Termine, Reifen, Lager)
+- Limits: 40 Fragen und 15 Scans pro Mitarbeiter und Stunde
+- `alex_execute` (Aufträge/Termine anlegen per ALEX) ist noch nicht umgezogen → `not_available`
 
 ## Umschalten / Zurückspringen
 
