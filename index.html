@@ -1537,13 +1537,19 @@ const B44_STATUS_LABELS = {
   reparatur_laeuft:'Reparatur', qualitaetspruefung:'Qualitätsprüfung', abholbereit:'Abholbereit', abgeschlossen:'Abgeschlossen',
 };
 function b44SimplifiedStatus(s){
-  if(s==='abgeschlossen') return 'erledigt';
-  if(['freigabe_erforderlich','kostenvoranschlag','ersatzteile_bestellt','warte_auf_ersatzteile'].includes(s)) return 'pruefung';
+  if(s==='abgeschlossen' || s==='abholbereit') return 'erledigt'; // abholbereit = Arbeit fertig, wartet nur auf den Kunden
+  if(['qualitaetspruefung','freigabe_erforderlich','kostenvoranschlag','ersatzteile_bestellt','warte_auf_ersatzteile'].includes(s)) return 'pruefung';
   return 'arbeit';
 }
 function b44ProgressForStatus(s){
   const idx = B44_STATUS_SEQUENCE.indexOf(s);
   return idx>=0 ? Math.round(((idx+1)/B44_STATUS_SEQUENCE.length)*100) : 0;
+}
+// Fortschritt: fertig gemeldete Aufträge = 100 %, sonst nach erledigten Aufgaben, ohne Aufgaben nach Status
+function b44OrderProgress(status, tasks){
+  if(status==='abholbereit' || status==='abgeschlossen') return 100;
+  if(tasks && tasks.length) return Math.round(tasks.filter(t=>t.status==='done').length / tasks.length * 100);
+  return b44ProgressForStatus(status);
 }
 function b44MapTaskStatus(s){
   if(s==='erledigt') return 'done';
@@ -1572,7 +1578,7 @@ function b44MapOrder(o, allTasks, demoImageByBrand){
     status: b44SimplifiedStatus(o.status),
     _b44Status: o.status,
     _b44StatusLabel: B44_STATUS_LABELS[o.status] || o.status,
-    progress: b44ProgressForStatus(o.status),
+    progress: b44OrderProgress(o.status, tasks),
     dauer: o.estimated_completion_text || '–',
     rest: '–', eta: o.estimated_completion_text || '–',
     created: o.created_date ? formatDateTimeDE(o.created_date) : '–',
