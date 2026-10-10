@@ -78,7 +78,7 @@ export async function handleFunction(name, body, c) {
     if (!res.ok) throw new HttpError(401, 'unauthorized');
     const u = await res.json().catch(() => null);
     if (!u || !u.id) throw new HttpError(401, 'unauthorized');
-    const user = { id: u.id, role: u.role, workshop_code: u.workshop_code || '' };
+    const user = { id: u.id, role: u.role, workshop_code: u.workshop_code || '', email: u.email || '', name: u.full_name || '' };
     userCache.set(key, { ts: Date.now(), user });
     if (userCache.size > 2000) userCache.clear();
     return user;
@@ -121,6 +121,29 @@ export async function handleFunction(name, body, c) {
   const readJson = (s, d) => { try { return s ? (typeof s === 'string' ? JSON.parse(s) : s) : d; } catch { return d; } };
 
   /* ---- Mit Login ---- */
+  if (name === 'sendSupportTicket') {
+    const user = await authUser();
+    rateLimit('support:' + user.id, 5, 3600_000);
+    const subject = String(body.subject || '').trim().slice(0, 200);
+    const message = String(body.message || '').trim().slice(0, 5000);
+    if (!subject || !message) throw new HttpError(400, 'params');
+    if (!env.RESEND_API_KEY) throw new HttpError(503, 'not_available', { message: 'E-Mail-Versand ist noch nicht eingerichtet.' });
+    const e = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;font-size:15px;color:#1a1a2e">
+<h2 style="margin:0 0 12px">Support-Anfrage aus dem Dashboard</h2>
+<p style="margin:0 0 4px"><b>Von:</b> ${e(user.name || '–')} &lt;${e(user.email || '–')}&gt;</p>
+<p style="margin:0 0 4px"><b>Werkstatt-Code:</b> ${e(user.workshop_code || '–')}</p>
+<p style="margin:0 0 14px"><b>Betreff:</b> ${e(subject)}</p>
+<div style="white-space:pre-wrap;background:#f7f6fb;border-radius:10px;padding:12px 14px">${e(message)}</div></div>`;
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: env.MAIL_FROM || 'AutoLeitwerk <noreply@autoleitwerk.de>', to: [env.SUPPORT_EMAIL || 'info@autoleitwerk.de'],
+        subject: `[Support ${user.workshop_code || '–'}] ${subject}`, html, reply_to: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email) ? user.email : undefined }),
+    });
+    if (!res.ok) { console.log('support_mail', res.status, (await res.text()).slice(0, 200)); throw new HttpError(502, 'mail_failed', { message: 'Anfrage konnte nicht gesendet werden. Bitte per E-Mail an info@autoleitwerk.de.' }); }
+    return { ok: true };
+  }
+
   if (name === 'alexRecommendations') {
     const user = await authUser();
     let code = user.workshop_code;

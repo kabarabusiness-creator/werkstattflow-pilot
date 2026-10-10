@@ -30,7 +30,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.host === 'api.resend.com') { assert.equal(init.headers.Authorization, 'Bearer RE_TEST'); mails.push(JSON.parse(init.body)); return new Response('{"id":"m1"}', { status: 200 }); }
   if (u.pathname.endsWith('/entities/User/me')) {
     const a = (init.headers && (init.headers.Authorization || init.headers.authorization)) || '';
-    if (a === 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') return new Response(JSON.stringify({ id: 'u1', role: 'user', workshop_code: 'AL-T1' }), { status: 200 });
+    if (a === 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') return new Response(JSON.stringify({ id: 'u1', role: 'user', workshop_code: 'AL-T1', email: 'chef@werkstatt.test', full_name: 'Chef T1' }), { status: 200 });
     return new Response('{"detail":"unauthorized"}', { status: 401 });
   }
   assert.equal(init.headers.Authorization, 'Bearer TEST');
@@ -322,6 +322,15 @@ await t('Kundenportal im Dashboard: /fn/portalApi (gleiches Format, Token Pflich
   const g = await fn({ action: 'get', token: 'tok-aaaaaa' });
   assert.equal(g.s, 200); assert.equal(g.d.order.license_plate, 'AB-C-1'); assert.equal(g.d.order.customer_token, undefined);
   assert.equal((await fn({ action: 'respond', approval_id: 'a1', decision: 'freigegeben' })).s, 404);
+});
+await t('Support-Anfrage aus dem Dashboard: Mail an info@, Antwort an Nutzer, Login Pflicht', async () => {
+  const send = (headers, body) => worker.fetch(new Request('https://api.test/fn/sendSupportTicket', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }), env, ctx);
+  assert.equal((await send({}, { subject: 'x', message: 'y' })).status, 401);
+  const before = mails.length;
+  const r = await send({ Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' }, { subject: 'Frage <b>', message: 'Hallo\nTest' });
+  assert.equal(r.status, 200, await r.clone().text());
+  const m = mails[before]; assert.deepEqual(m.to, ['info@autoleitwerk.de']); assert.equal(m.reply_to, 'chef@werkstatt.test');
+  assert.match(m.subject, /\[Support AL-T1\] Frage <b>/); assert.ok(m.html.includes('Frage &lt;b&gt;') && !m.html.includes('<b>Frage'));
 });
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
