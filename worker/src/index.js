@@ -18,6 +18,7 @@
 
 import { alexAsk, tireScan } from './ai.js';
 import { handleFunction } from './dash.js';
+import { handleCeo, readSettings, parseModules, logError, storeTicket } from './ceo.js';
 
 const SESSION_HOURS = 12;
 const MAX_FAILED = 5;
@@ -130,6 +131,16 @@ function rateLimit(ip, max, windowMs) {
   if (probe.size > 5000) probe.clear();
   if (e.n > max) throw new HttpError(429, 'too_many_requests');
 }
+/* Freischaltung durch die CEO-Konsole: Wartungsmodus, gesperrte Werkstatt, abgeschaltete Funktion */
+const MODULE_NAMES = { tablet: 'Die Tablet-App', alex: 'ALEX', reifenscan: 'Der Reifenscan', kundenportal: 'Das Kundenportal' };
+async function workshopGate(db, env, code, module) {
+  const st = await readSettings(env);
+  if (st.maintenance) throw new HttpError(503, 'maintenance', { message: st.maintenance_message });
+  const ws = (await cachedList(db, 'Workshop')).find(w => w.code === code);
+  if (!ws) return;
+  if (ws.is_active === false) throw new HttpError(403, 'workshop_disabled', { message: 'Diese Werkstatt ist derzeit gesperrt. Bitte wenden Sie sich an AutoLeitwerk (info@autoleitwerk.de).' });
+  if (module && parseModules(ws)[module] === false) throw new HttpError(403, module === 'tablet' ? 'workshop_disabled' : 'module_disabled', { message: `${MODULE_NAMES[module] || 'Diese Funktion'} ist für diese Werkstatt nicht freigeschaltet.` });
+}
 function displayName(name) {
   const parts = String(name || '').trim().split(/\s+/);
   return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0] || '?';
@@ -151,12 +162,13 @@ async function workshopProfiles(db, body, ip) {
 }
 
 /* ---------------- Login ---------------- */
-async function workshopLogin(db, body) {
+async function workshopLogin(db, body, env) {
   const code = String(body.workshop_code || '').trim().toUpperCase();
   const name = norm(body.name);
   const empId = String(body.employee_id || '').trim();
   const pin = String(body.pin || '').trim();
   if (!code || (!name && !empId) || !/^\d{4,8}$/.test(pin)) throw new HttpError(400, 'invalid');
+  await workshopGate(db, env, code, 'tablet');
   const emps = await db.list('Employee', { workshop_code: code });
   const active = emps.filter(e => e.is_active !== false);
   // per Profil-ID (Profilauswahl), sonst exakter Name, sonst eindeutiger Vorname
@@ -524,6 +536,7 @@ async function portalOrder(db, token) {
 async function portalApi(db, body, env, ctx, origin) {
   const order = await portalOrder(db, body.token);
   const code = order.workshop_code;
+  await workshopGate(db, env, code, 'kundenportal');
   const action = body.action || 'get';
 
   if (action === 'get') {
@@ -919,6 +932,12 @@ export default {
         if (!res.ok || !d.embed_url) { console.log('demo_embed', res.status, JSON.stringify(d).slice(0, 200)); throw new HttpError(502, 'demo_unavailable'); }
         return new Response(null, { status: 302, headers: { Location: d.embed_url, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
       }
+      if (path === '/ceo' || path === '/ceo/api') {
+        return await handleCeo(request, env, ctx, {
+          HttpError, sha256Hex, randomHex, safeEqual, nowIso, rateLimit, sendMail, mailHtml, esc, Base44, statusReport, readMonitor, listBackups,
+          runChecks, runBackup, exportAll, invalidate, clearCache: () => cache.clear(), berlinToday, BACKUP_PREFIX, SUPPORT_TO, mailSupportChat,
+        });
+      }
       if (path.startsWith('/photo/') && request.method === 'GET') {
         const key = decodeURIComponent(path.slice('/photo/'.length));
         if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp|pdf)$/i.test(key)) throw new HttpError(404, 'not_found');
@@ -938,13 +957,22 @@ export default {
         body = await request.json().catch(() => ({}));
       }
       if (path === '/workshopProfiles') return json(await workshopProfiles(db, body, request.headers.get('CF-Connecting-IP') || 'x'), 200, cors);
-      if (path === '/workshopLogin') { rateLimit('login:' + (request.headers.get('CF-Connecting-IP') || 'x'), 40, 60_000); return json(await workshopLogin(db, body), 200, cors); }
-      if (path === '/getTabletData') return json(await getTabletData(db, await requireSession(db, request)), 200, cors);
-      if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body, env, url.origin, ctx), 200, cors);
+      if (path === '/workshopLogin') { rateLimit('login:' + (request.headers.get('CF-Connecting-IP') || 'x'), 40, 60_000); return json(await workshopLogin(db, body, env), 200, cors); }
+      if (path === '/getTabletData') {
+        const sess = await requireSession(db, request);
+        await workshopGate(db, env, sess.workshop_code, 'tablet');
+        return json({ ...(await getTabletData(db, sess)), announcement: (await readSettings(env)).announcement || '' }, 200, cors);
+      }
+      if (path === '/tabletAction') {
+        const sess = await requireSession(db, request);
+        await workshopGate(db, env, sess.workshop_code, body.action === 'alex_ask' ? 'alex' : body.action === 'tire_scan' ? 'reifenscan' : 'tablet');
+        if (body.action === 'alex_ask' || body.action === 'tire_scan') await workshopGate(db, env, sess.workshop_code, 'tablet');
+        return json(await tabletAction(db, sess, body, env, url.origin, ctx), 200, cors);
+      }
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK }, ctx });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket }, ctx });
         invalidate('Order');
         return json(r, 200, cors);
       }
@@ -991,6 +1019,7 @@ export default {
     } catch (e) {
       if (e instanceof HttpError || (e && e.isHttp)) return json({ error: e.code, ...e.extra }, e.status, cors);
       console.log('unhandled', e && e.stack || String(e));
+      logError(new URL(request.url).pathname, e);
       return json({ error: 'server_error' }, 500, cors);
     }
   },

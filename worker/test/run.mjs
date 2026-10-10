@@ -469,5 +469,81 @@ await t('Cron: tägliches Backup (14 Tage), Überwachung mailt nur bei Statuswec
   const dl = await worker.fetch(new Request('https://api.test/admin/backup', { method: 'POST', body: f2 }), env, ctx);
   assert.equal(dl.status, 200); assert.ok(JSON.parse(await dl.text()).entities.Order);
 });
+await t('CEO-Konsole: Login nur mit Code an CEO-Adresse, Funktionen sperren, Support bearbeiten', async () => {
+  const ceo = async (body, tok, origin) => {
+    const res = await worker.fetch(new Request('https://api.test/ceo/api', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}), ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx);
+    await Promise.all(pending.splice(0));
+    return { status: res.status, data: await res.json().catch(() => ({})) };
+  };
+  const page = await worker.fetch(new Request('https://api.test/ceo'), env, ctx);
+  assert.equal(page.status, 200); assert.match(page.headers.get('Content-Security-Policy'), /frame-ancestors 'none'/);
+  // ohne Sitzung kein Zugriff, fremde Seiten blockiert
+  assert.equal((await ceo({ action: 'overview' })).status, 401);
+  assert.equal((await ceo({ action: 'overview' }, 'a'.repeat(64))).status, 401);
+  assert.equal((await ceo({ action: 'request_code', email: 'info@autoleitwerk.de' }, null, 'https://evil.test')).status, 403);
+  // falsche Adresse: gleiche Antwort, aber keine Mail
+  const before = mails.length;
+  assert.equal((await ceo({ action: 'request_code', email: 'chef@werkstatt.test' })).data.ok, true);
+  assert.equal(mails.length, before);
+  assert.equal((await ceo({ action: 'request_code', email: 'Info@AutoLeitwerk.de' })).data.ok, true);
+  const mail = mails.at(-1); assert.deepEqual(mail.to, ['info@autoleitwerk.de']);
+  const code = /Anmeldecode (\d{6})/.exec(mail.subject)[1];
+  // falscher Code zählt mit, richtiger Code danach noch gültig
+  assert.equal((await ceo({ action: 'login', email: 'info@autoleitwerk.de', code: code === '000000' ? '111111' : '000000' })).status, 401);
+  assert.equal((await ceo({ action: 'login', email: 'chef@werkstatt.test', code })).status, 401);
+  const lg = await ceo({ action: 'login', email: 'info@autoleitwerk.de', code });
+  assert.equal(lg.status, 200); assert.match(lg.data.token, /^[a-f0-9]{64}$/);
+  assert.equal((await ceo({ action: 'login', email: 'info@autoleitwerk.de', code })).status, 401); // Code nur einmal nutzbar
+  const tok = lg.data.token;
+  const ov = await ceo({ action: 'overview' }, tok);
+  assert.equal(ov.status, 200); const w = ov.data.workshops.find(x => x.code === 'AL-T1'); assert.ok(w); assert.ok(ov.data.status);
+  // Werkstatt-Nutzer (Base44-Token) kommt nicht rein
+  assert.equal((await ceo({ action: 'overview' }, 'USER-AL-T1-xxxxxxxxxxxxxxxx')).status, 401);
+  // ALEX abschalten → Tablet bekommt module_disabled
+  assert.equal((await ceo({ action: 'workshop_update', id: w.id, modules: { alex: false, unbekannt: false } }, tok)).data.ok, true);
+  assert.equal(JSON.parse(db.Workshop.find(x => x.id === w.id).enabled_modules).unbekannt, undefined);
+  let r = await call('/tabletAction', { action: 'alex_ask', messages: [{ role: 'user', content: 'Hallo' }] }, token);
+  assert.equal(r.status, 403); assert.equal(r.data.error, 'module_disabled');
+  await ceo({ action: 'workshop_update', id: w.id, modules: { alex: true } }, tok);
+  // Werkstatt sperren → Login und Tablet-Daten gesperrt
+  await ceo({ action: 'workshop_update', id: w.id, is_active: false }, tok);
+  r = await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'erika', pin: '1234' });
+  assert.equal(r.status, 403); assert.equal(r.data.error, 'workshop_disabled');
+  assert.equal((await call('/getTabletData', null, token, 'GET')).status, 403);
+  await ceo({ action: 'workshop_update', id: w.id, is_active: true }, tok);
+  assert.equal((await call('/getTabletData', null, token, 'GET')).status, 200);
+  // Wartungsmodus + Ankündigung
+  assert.equal((await ceo({ action: 'settings_save', maintenance: true, maintenance_message: 'Kurz Pause', announcement: 'Neu: Reifenscan' }, tok)).data.settings.maintenance, true);
+  r = await call('/getTabletData', null, token, 'GET'); assert.equal(r.status, 503); assert.equal(r.data.message, 'Kurz Pause');
+  await ceo({ action: 'settings_save', maintenance: false }, tok);
+  r = await call('/getTabletData', null, token, 'GET'); assert.equal(r.status, 200); assert.equal(r.data.announcement, 'Neu: Reifenscan');
+  await ceo({ action: 'settings_save', announcement: '' }, tok);
+  // Support-Formular landet als Anfrage, Antwort per Mail
+  const sent = await worker.fetch(new Request('https://api.test/fn/sendSupportTicket', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' }, body: JSON.stringify({ subject: 'Drucker', message: 'Rechnung druckt nicht' }) }), env, ctx);
+  assert.equal(sent.status, 200);
+  let sup = (await ceo({ action: 'support_list' }, tok)).data;
+  const tk = sup.tickets.find(x => x.subject === 'Drucker'); assert.ok(tk); assert.equal(tk.status, 'offen'); assert.equal(tk.email, 'chef@werkstatt.test');
+  assert.equal((await ceo({ action: 'ticket_reply', id: tk.id, message: 'Bitte Treiber neu installieren' }, tok)).data.ticket.status, 'in_bearbeitung');
+  assert.deepEqual(mails.at(-1).to, ['chef@werkstatt.test']); assert.match(mails.at(-1).html, /Treiber/);
+  assert.equal((await ceo({ action: 'ticket_status', id: tk.id, status: 'erledigt' }, tok)).data.ok, true);
+  assert.equal((await ceo({ action: 'ticket_status', id: '../x', status: 'erledigt' }, tok)).status, 400);
+  // Live-Chat beantworten
+  db.ChatSession = db.ChatSession || [];
+  db.ChatSession.push({ id: 'cs9', subject: 'Frage', status: 'offen', user_id: 'u1', user_name: 'Chef T1', user_email: 'chef@werkstatt.test', unread_admin: true, last_message_at: new Date().toISOString() });
+  db.ChatMessage = db.ChatMessage || []; db.ChatMessage.push({ id: 'cm9', session_id: 'cs9', user_id: 'u1', sender: 'user', content: 'Wie geht X?', created_date: new Date().toISOString() });
+  sup = (await ceo({ action: 'support_list' }, tok)).data; assert.ok(sup.chats.find(c => c.id === 'cs9' && c.unread));
+  const cg = (await ceo({ action: 'chat_get', id: 'cs9' }, tok)).data; assert.equal(cg.messages.length, 1);
+  assert.equal(db.ChatSession.find(c => c.id === 'cs9').unread_admin, false);
+  assert.equal((await ceo({ action: 'chat_reply', id: 'cs9', content: 'So geht X.' }, tok)).data.ok, true);
+  const cs = db.ChatSession.find(c => c.id === 'cs9');
+  assert.equal(cs.status, 'in_bearbeitung'); assert.equal(cs.unread_user, true); assert.equal(cs.last_sender, 'admin');
+  assert.ok(db.ChatMessage.some(m => m.session_id === 'cs9' && m.sender === 'admin' && m.content === 'So geht X.'));
+  // Entwickler-Tools
+  const dev = (await ceo({ action: 'dev' }, tok)).data; assert.equal(dev.config.ceo_email, 'info@autoleitwerk.de'); assert.ok(Array.isArray(dev.backups));
+  assert.equal((await ceo({ action: 'dev_test_mail' }, tok)).data.ok, true);
+  // Abmelden beendet die Sitzung
+  await ceo({ action: 'logout' }, tok);
+  assert.equal((await ceo({ action: 'overview' }, tok)).status, 401);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

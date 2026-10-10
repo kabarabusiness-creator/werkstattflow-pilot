@@ -128,6 +128,8 @@ export async function handleFunction(name, body, c) {
     const subject = String(body.subject || '').trim().slice(0, 200);
     const message = String(body.message || '').trim().slice(0, 5000);
     if (!subject || !message) throw new HttpError(400, 'params');
+    // auch in der CEO-Konsole ablegen (dort beantworten und Status pflegen)
+    await h.storeTicket(env, { source: 'Support-Formular (Dashboard)', subject, message, name: user.name, email: user.email, workshop_code: user.workshop_code }).catch(err => console.log('ticket_store', String(err)));
     if (!env.RESEND_API_KEY) throw new HttpError(503, 'not_available', { message: 'E-Mail-Versand ist noch nicht eingerichtet.' });
     const e = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
     const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;font-size:15px;color:#1a1a2e">

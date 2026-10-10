@@ -1648,7 +1648,7 @@ async function workshopLogin(code, name, pin, employeeId){
     const data = await res.json().catch(()=>({}));
     if(!res.ok){
       const err = new Error(data.error || `Anmeldung fehlgeschlagen (${res.status})`);
-      err.code = data.error; err.retryAt = data.retry_at;
+      err.code = data.error; err.retryAt = data.retry_at; err.serverMessage = data.message || '';
       throw err;
     }
     return data; // { token, expires_at, employee:{id,name,role} }
@@ -1666,6 +1666,16 @@ async function fetchBase44Data(){
       signal: controller.signal,
     });
     if(res.status===401){ const e = new Error('unauthorized'); e.code = 'unauthorized'; throw e; }
+    if(res.status===403 || res.status===503){
+      // Werkstatt gesperrt oder Wartungsmodus (CEO-Konsole) → abmelden und Grund zeigen
+      const d = await res.json().catch(()=>({}));
+      if(d.error==='workshop_disabled' || d.error==='maintenance'){
+        if(b44PollInterval){ clearInterval(b44PollInterval); b44PollInterval = null; }
+        state.sessionToken = null; showLoginScreen();
+        const el = document.getElementById('loginError'); if(el) el.textContent = d.message || 'Anmeldung derzeit nicht möglich.';
+        const e = new Error(d.error); e.code = d.error; throw e;
+      }
+    }
     if(!res.ok) throw new Error(`Base44-Fehler ${res.status}`);
     return await res.json();
   } finally {
@@ -1727,6 +1737,7 @@ async function loadFromBase44(){
   });
   const data = await fetchBase44Data();
   state.base44Data = data;
+  try{ renderTrialBanner(); }catch(_){} // Ankündigung aus der CEO-Konsole aktuell halten
   const prevOrders = orders;
   orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
   attachSavedTaskData(orders, data);
@@ -2260,6 +2271,9 @@ function renderTrialBanner(){
   const el = document.getElementById('trialBanner'); if(!el) return;
   if(!state.currentUser){ el.style.display='none'; return; }
   const ws = (state.base44Data && state.base44Data.workshop) || {};
+  // Ankündigung aus der CEO-Konsole hat Vorrang
+  const ann = state.base44Data && state.base44Data.announcement;
+  if(ann){ el.innerHTML = `<div><b>📣 ${escHtml(ann)}</b></div>`; el.style.display='flex'; return; }
   let headline = `Demo-Version: ${TRIAL_DAYS} Tage kostenlos testen.`;
   if(ws.trial_ends_at){
     const end = new Date(ws.trial_ends_at);
@@ -5621,6 +5635,8 @@ async function checkPin(){
       pinShakeAndReset('Zu viele Versuche. Profil gesperrt' + until + '.');
     } else if(e.code==='invalid'){
       pinShakeAndReset(p.employeeId ? 'PIN falsch.' : 'Name, Werkstatt-Code oder PIN falsch.');
+    } else if(e.code==='workshop_disabled' || e.code==='maintenance'){
+      pinShakeAndReset(e.serverMessage || (e.code==='maintenance' ? 'Wartungsarbeiten – bitte später erneut versuchen.' : 'Diese Werkstatt ist derzeit gesperrt.'));
     } else {
       pinShakeAndReset('Anmeldung nicht möglich. Verbindung prüfen.');
     }

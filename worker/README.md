@@ -26,6 +26,7 @@ Danach deployt Cloudflare jeden Push auf `main` automatisch.
 | `POST /portalApi` | Kundenportal: `get`, `book`, `cancel`, `respond` |
 | `POST /fn/<name>` | Ersatz für Base44-Dashboard-Funktionen: `scanTire`, `scanRegistration`, `createTireScanToken`, `tireScanPublic`, `createRegistrationScanToken`, `registrationScanPublic`, `createPhotoUploadToken`, `uploadVehiclePhotoByToken` (Login per Base44-Zugangstoken des Nutzers; Handy-Seiten per Einmal-Token). Das Dashboard leitet diese Aufrufe in `src/lib/serverFunctions.js` hierher um. |
 | `GET /demo` | Demo-Dashboard (Einmal-Login als demo@autoleitwerk.de, sieht nur AL-DEMO) |
+| `GET /ceo` | CEO-Konsole (nur Inhaber): Login per Einmal-Code an `CEO_EMAIL` (Standard info@autoleitwerk.de); Übersicht, Werkstätten & Funktionen, Support, Entwickler-Tools, Einstellungen |
 | `GET /admin/export` | Komplettes Daten-Backup als JSON (Header `X-Admin-Key`) |
 | `GET /health` | Server lebt (immer 200) |
 | `GET /status` | Tiefer Check für externe Überwachung (200 ok / 503 Problem) |
@@ -62,3 +63,11 @@ Achtung: Auf dem Workers-**Paid**-Plan würde Nutzung über dem Kontingent berec
   - `GET /health` → immer 200, solange der Server antwortet (Server lebt).
   - `GET /status` → **200 = alles ok, 503 = etwas stimmt nicht**: gespeicherte Störung (Datenbank, Tablet, Portal, Dashboard, E-Mail-Schlüssel), Prüfung läuft nicht mehr (letzte Prüfung älter als 45 Min.) oder Backup älter als 36 Std. Die Antwort nennt die Probleme im Klartext (`problems`).
   - Empfohlen: zwei Monitore, je HTTP(s), Intervall 5 Minuten, Alarm per E-Mail an info@autoleitwerk.de.
+
+## CEO-Konsole (`/ceo`)
+
+- Zugang nur für die CEO-Adresse (`CEO_EMAIL`, Standard info@autoleitwerk.de): 6-stelliger Code per Mail (10 Min., 5 Versuche), Sitzung 12 Std. Werkstatt-Logins und Base44-Admins kommen nicht hinein.
+- **Werkstätten & Funktionen:** Werkstatt sperren, Abo/Testphase, Module ein/aus. Vom Server durchgesetzt: `tablet`, `alex`, `reifenscan`, `kundenportal` (Feld `Workshop.enabled_modules`, gleiches Format wie die Base44-Seite „Werkstatt-Verwaltung“).
+- **Support:** Live-Chats (Base44 `ChatSession`/`ChatMessage`) beantworten + Status; Anfragen aus dem Support-Formular (KV `_tickets/`) per Mail beantworten + Status.
+- **Entwickler-Tools:** Status, Prüfung/Backup sofort, Backups laden, Komplett-Export, Test-Mail, Cache leeren, andere CEO-Sitzungen beenden, letzte Server-Fehler.
+- **Einstellungen:** Wartungsmodus (sperrt Tablet + Kundenportal für alle) und Ankündigung im Tablet (KV `_ceo/settings`).
