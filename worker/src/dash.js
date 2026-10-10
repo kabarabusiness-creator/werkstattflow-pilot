@@ -64,6 +64,7 @@ function b64(bytes) {
 export async function handleFunction(name, body, c) {
   const { db, env, request, origin, h } = c;
   const { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit } = h;
+  const bg = p => { const q = Promise.resolve(p).catch(e => console.log('bg', String(e))); if (c.ctx && c.ctx.waitUntil) c.ctx.waitUntil(q); return q; };
   const ip = request.headers.get('CF-Connecting-IP') || 'x';
 
   /* ---- Hilfen ---- */
@@ -142,6 +143,43 @@ export async function handleFunction(name, body, c) {
     });
     if (!res.ok) { console.log('support_mail', res.status, (await res.text()).slice(0, 200)); throw new HttpError(502, 'mail_failed', { message: 'Anfrage konnte nicht gesendet werden. Bitte per E-Mail an info@autoleitwerk.de.' }); }
     return { ok: true };
+  }
+
+  // Live-Chat (Support): nach jeder Nachricht aufgerufen – Mail an info@ bzw. an den Nutzer
+  if (name === 'chatNotify') {
+    const user = await authUser();
+    rateLimit('chatnotify:' + user.id, 60, 3600_000);
+    const session = await getRec('ChatSession', String(body.session_id || ''));
+    if (!session) throw new HttpError(404, 'not_found');
+    const isAdmin = user.role === 'admin';
+    if (!isAdmin && session.user_id !== user.id) throw new HttpError(403, 'forbidden');
+    const msgs = await db.list('ChatMessage', { session_id: session.id }, { limit: 200 });
+    const own = isAdmin ? 'admin' : 'user';
+    const last = msgs.filter(m => m.sender === own).sort((a, b) => String(b.created_date).localeCompare(String(a.created_date)))[0];
+    if (!last) return { ok: true, sent: false };
+    await bg(h.mailSupportChat(env, { toAdmin: !isAdmin, session, content: last.content, user }));
+    return { ok: true };
+  }
+
+  // Kundennachricht aus dem Dashboard (Werkstatt → Kunde), Kunde bekommt Mail mit Portal-Link
+  if (name === 'orderMessageSend') {
+    const user = await authUser();
+    rateLimit('ordermsg:' + user.id, 120, 3600_000);
+    const content = String(body.content || '').trim().slice(0, 2000);
+    if (!content) throw new HttpError(400, 'params');
+    const order = await getRec('Order', String(body.order_id || ''));
+    if (!order) throw new HttpError(404, 'not_found');
+    if (user.role !== 'admin') {
+      if (!user.workshop_code || order.workshop_code !== user.workshop_code) throw new HttpError(403, 'forbidden');
+    }
+    if (!order.customer_token) throw new HttpError(400, 'no_portal', { message: 'Für diesen Auftrag gibt es noch keinen Kundenportal-Zugang.' });
+    const created = await db.create('OrderMessage', {
+      order_id: order.id, workshop_code: order.workshop_code, sender: 'werkstatt',
+      sender_name: String(body.sender_name || '').trim().slice(0, 80) || 'Werkstatt',
+      content, read_by_customer: false, read_by_workshop: true,
+    });
+    bg(h.mailWorkshopMessage(env, db, order, content));
+    return { ok: true, message: created, email: !!(env.RESEND_API_KEY && order.email) };
   }
 
   if (name === 'alexRecommendations') {

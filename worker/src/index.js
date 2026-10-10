@@ -379,7 +379,7 @@ async function portalApi(db, body, env, ctx) {
   const action = body.action || 'get';
 
   if (action === 'get') {
-    const [approvals, media, apptsByOrder, apptsByToken, services, logs, profiles] = await Promise.all([
+    const [approvals, media, apptsByOrder, apptsByToken, services, logs, profiles, messages] = await Promise.all([
       db.list('ApprovalRequest', { order_id: order.id }),
       db.list('MediaItem', { order_id: order.id }),
       db.list('Appointment', { order_id: order.id }),
@@ -387,7 +387,11 @@ async function portalApi(db, body, env, ctx) {
       cachedList(db, 'Service'),
       db.list('WorkshopLog', { related_order_id: order.id }),
       cachedList(db, 'WorkshopProfile'),
+      db.list('OrderMessage', { order_id: order.id }).catch(() => []),
     ]);
+    // Nachrichten der Werkstatt als vom Kunden gelesen markieren (im Hintergrund)
+    const unreadForCustomer = messages.filter(m => m.sender === 'werkstatt' && !m.read_by_customer).slice(0, 20);
+    if (unreadForCustomer.length && ctx) ctx.waitUntil(Promise.all(unreadForCustomer.map(m => db.update('OrderMessage', m.id, { read_by_customer: true }).catch(() => {}))));
     const appts = [...new Map([...apptsByOrder, ...apptsByToken].map(a => [a.id, a])).values()]
       .sort((a, b) => String(a.appointment_date + a.time_slot).localeCompare(String(b.appointment_date + b.time_slot)));
     const prof = profiles.find(p => p.workshop_code === code) || {};
@@ -401,6 +405,8 @@ async function portalApi(db, body, env, ctx) {
         .map(s => ({ id: s.id, name: s.name, category: s.category, description: s.description, estimated_duration_minutes: s.estimated_duration_minutes, base_price: s.base_price, price_range_min: s.price_range_min, price_range_max: s.price_range_max, is_active: s.is_active, workshop_code: s.workshop_code })),
       workshop_logs: logs.map(l => ({ id: l.id, title: l.title, log_type: l.log_type, description: l.description, log_date: l.log_date, employee_name: l.employee_name })),
       workshop: { name: prof.company_name || '', phone: prof.phone || '', email: prof.email || '', address: [prof.address_street, [prof.address_zip, prof.address_city].filter(Boolean).join(' ')].filter(Boolean).join(', ') },
+      messages: messages.map(m => ({ id: m.id, sender: m.sender, sender_name: m.sender === 'kunde' ? '' : (m.sender_name || prof.company_name || 'Werkstatt'), content: m.content, created_date: m.created_date }))
+        .sort((a, b) => String(a.created_date).localeCompare(String(b.created_date))),
     };
   }
   if (action === 'respond') {
@@ -444,6 +450,17 @@ async function portalApi(db, body, env, ctx) {
     if (ctx) ctx.waitUntil(mailBooking(env, db, order, created).catch(e => console.log('mail', String(e))));
     const { customer_token: _ct, owner_user_id: _ou, ...pubAppt } = created;
     return { ok: true, appointment_id: created.id, appointment: pubAppt };
+  }
+  if (action === 'message_send') {
+    const content = String(body.content || '').trim().slice(0, 2000);
+    if (!content) throw new HttpError(400, 'params');
+    rateLimit('portalmsg:' + order.id, 30, 3600_000);
+    const created = await db.create('OrderMessage', {
+      order_id: order.id, workshop_code: code, sender: 'kunde', sender_name: order.customer_name || 'Kunde',
+      content, read_by_customer: true, read_by_workshop: false,
+    });
+    if (ctx) ctx.waitUntil(mailCustomerMessage(env, db, order, content).catch(e => console.log('mail', String(e))));
+    return { ok: true, message: { id: created.id, sender: 'kunde', content, created_date: created.created_date || nowIso() } };
   }
   if (action === 'cancel') {
     const ap = await db.get('Appointment', body.appointment_id).catch(() => null);
@@ -498,7 +515,7 @@ async function sendMail(env, db, { to, subject, html, replyTo, orderId, code, st
     });
     if (!res.ok) { state = 'fehlgeschlagen'; reason = `${res.status} ${(await res.text()).slice(0, 200)}`; console.log('mail_error', reason); }
   } catch (e) { state = 'fehlgeschlagen'; reason = String(e); }
-  if (orderId) {
+  if (orderId && db) {
     await db.create('Notification', { order_id: orderId, channel: 'email', subject, body: subject, recipient: to, status_text: statusText || '', delivery_state: state, workshop_code: code }).catch(() => {});
   }
   return { sent: state === 'gesendet', reason };
@@ -545,6 +562,52 @@ async function mailApprovalAnswer(env, db, order, ap, decision) {
   return sendMail(env, db, { to: ws.email, subject: `Freigabe ${label}: ${ap.title || 'Zusatzarbeit'} · ${order.license_plate || ''}`,
     html: mailHtml({ title: `Kunde hat geantwortet: ${label}`, intro: `${esc(order.customer_name)} hat auf die Zusatzarbeit geantwortet.`,
       rows: [['Arbeit', ap.title || '–'], ['Kosten', ap.additional_cost != null ? `${Number(ap.additional_cost).toLocaleString('de-DE')} €` : '–'], ['Kennzeichen', order.license_plate || '–'], ['Telefon', order.phone || '–']] }) });
+}
+
+/* ---------------- Nachrichten & Live-Chat ---------------- */
+const DASHBOARD_URL = 'https://autoleitwerk.base44.app';
+const SUPPORT_TO = env => env.SUPPORT_EMAIL || 'info@autoleitwerk.de';
+const notifyThrottle = new Map();
+// höchstens eine Benachrichtigung pro Gesprächsrichtung in `ms` (verhindert Mail-Flut bei vielen kurzen Nachrichten)
+function throttled(key, ms) {
+  const now = Date.now(); const last = notifyThrottle.get(key) || 0;
+  if (now - last < ms) return true;
+  notifyThrottle.set(key, now);
+  if (notifyThrottle.size > 5000) notifyThrottle.clear();
+  return false;
+}
+const quote = t => `<div style="white-space:pre-wrap;background:#f7f6fb;border-left:3px solid #7c3aed;border-radius:8px;padding:10px 12px;margin:0 0 16px;font-size:14.5px;line-height:1.5">${esc(String(t || '').slice(0, 1500))}</div>`;
+async function mailCustomerMessage(env, db, order, content) {
+  const ws = await workshopInfo(db, order.workshop_code);
+  if (!ws.email || throttled('kunde>ws:' + order.id, 10 * 60_000)) return { sent: false };
+  return sendMail(env, db, { to: ws.email, replyTo: order.email || undefined, orderId: order.id, code: order.workshop_code, statusText: 'Kundennachricht',
+    subject: `Neue Kundennachricht: ${order.customer_name || 'Kunde'} · ${order.license_plate || ''}`,
+    html: mailHtml({ title: 'Neue Nachricht im Kundenportal', intro: `<b>${esc(order.customer_name || 'Ein Kunde')}</b> hat Ihnen geschrieben:</p>${quote(content)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">`,
+      rows: [['Fahrzeug', [order.vehicle_brand, order.vehicle_model].filter(Boolean).join(' ') || '–'], ['Kennzeichen', order.license_plate || '–'], ['Auftrag', '#' + (order.order_number || '')]],
+      button: { label: 'Im Dashboard antworten', href: `${DASHBOARD_URL}/live-chat?tab=kunden&order=${encodeURIComponent(order.id)}` } }) });
+}
+async function mailWorkshopMessage(env, db, order, content) {
+  if (!order.email || throttled('ws>kunde:' + order.id, 10 * 60_000)) return { sent: false };
+  const ws = await workshopInfo(db, order.workshop_code);
+  return sendMail(env, db, { to: order.email, replyTo: ws.email, orderId: order.id, code: order.workshop_code, statusText: 'Nachricht an Kunden',
+    subject: `Neue Nachricht von ${ws.name}`,
+    html: mailHtml({ title: `Hallo ${order.customer_name || ''},`, intro: `<b>${esc(ws.name)}</b> hat Ihnen zu Ihrem Fahrzeug ${esc(order.license_plate || '')} geschrieben:</p>${quote(content)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">Antworten Sie bitte direkt im Kundenportal – dort sehen Sie auch den aktuellen Stand.`,
+      button: { label: 'Nachricht beantworten', href: portalLink(order) + '#nachrichten' }, footer: contactFooter(ws) }) });
+}
+async function mailSupportChat(env, { toAdmin, session, content, user }) {
+  if (throttled((toAdmin ? 'sup>admin:' : 'sup>user:') + session.id, 3 * 60_000)) return { sent: false };
+  const link = `${DASHBOARD_URL}/live-chat?chat=${encodeURIComponent(session.id)}`;
+  if (toAdmin) {
+    return sendMail(env, null, { to: SUPPORT_TO(env), replyTo: session.user_email || undefined,
+      subject: `[Live-Chat ${user.workshop_code || '–'}] ${session.subject || 'Neue Anfrage'}`,
+      html: mailHtml({ title: 'Neue Live-Chat-Nachricht', intro: `<b>${esc(session.user_name || session.user_email || 'Ein Nutzer')}</b> (Werkstatt-Code ${esc(user.workshop_code || '–')}) schreibt im Live-Chat:</p>${quote(content)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">Betreff: ${esc(session.subject || '–')}`,
+        button: { label: 'Im Live-Chat antworten', href: link }, footer: 'Die Antwort erscheint beim Nutzer sofort im Dashboard; er bekommt zusätzlich eine E-Mail.' }) });
+  }
+  if (!session.user_email) return { sent: false };
+  return sendMail(env, null, { to: session.user_email, replyTo: SUPPORT_TO(env),
+    subject: `Antwort vom AutoLeitwerk-Support: ${session.subject || 'Ihre Anfrage'}`,
+    html: mailHtml({ title: 'Neue Antwort im Live-Chat', intro: 'Das AutoLeitwerk-Team hat auf Ihre Anfrage geantwortet:</p>' + quote(content) + '<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">',
+      button: { label: 'Im Live-Chat öffnen', href: link }, footer: 'AutoLeitwerk · info@autoleitwerk.de' }) });
 }
 
 /* ---------------- Daten-Backup ---------------- */
@@ -617,7 +680,7 @@ export default {
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx), 200, cors);
       if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit } });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat }, ctx });
         invalidate('Order');
         return json(r, 200, cors);
       }

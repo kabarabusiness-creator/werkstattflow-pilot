@@ -269,10 +269,13 @@ async function doLogin(){
     data.appointments = data.appointments || [];
     state.token = token;
     state.data = data;
+    const wantChat = window.location.hash === '#nachrichten';
     try{ if(window.location.search.indexOf('token=')>=0) history.replaceState(null,'',window.location.pathname); }catch(_){}
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appScreen').style.display = 'block';
     render();
+    if(wantChat) goToChat();
+    startChatRefresh();
   }catch(e){
     errEl.textContent = (e.message === 'not_found' || e.message === 'unauthorized') ? 'Kein Auftrag zu diesem Code gefunden.' : 'Verbindung fehlgeschlagen. Bitte erneut versuchen.';
   }finally{
@@ -309,6 +312,44 @@ function render(){
 }
 
 function goToService(){ state.view = 'service'; render(); window.scrollTo(0,0); }
+function goToChat(){
+  state.view = 'service'; render();
+  const c = document.getElementById('chatCard'); if(c) c.scrollIntoView({behavior:'smooth', block:'start'});
+  const l = document.getElementById('chatList'); if(l) l.scrollTop = l.scrollHeight;
+}
+function escK(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtMsgTime(iso){
+  const d = iso ? new Date(iso) : null; if(!d || isNaN(d)) return '';
+  const today = new Date(); const same = d.toDateString() === today.toDateString();
+  const hm = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  return same ? `heute ${hm}` : `${fmtDDMM(d)} ${hm}`;
+}
+// Neue Antworten der Werkstatt automatisch nachladen (alle 30 Sek., nur wenn die Seite sichtbar ist und niemand tippt)
+let chatTimer = null;
+function startChatRefresh(){
+  if(chatTimer) return;
+  chatTimer = setInterval(async ()=>{
+    if(!state.token || state.chatSending || document.visibilityState!=='visible') return;
+    const ae = document.activeElement; if(ae && (ae.id==='chatInput' || ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT')) return;
+    try{
+      const before = (state.data.messages||[]).length;
+      const data = await callPortal('get', {token: state.token});
+      data.appointments = data.appointments || [];
+      const y = window.scrollY; state.data = data;
+      if((data.messages||[]).length !== before){ render(); window.scrollTo(0,y); const l = document.getElementById('chatList'); if(l) l.scrollTop = l.scrollHeight; }
+    }catch(_){}
+  }, 30000);
+}
+function renderMessagesTeaser(){
+  if(!Array.isArray(state.data.messages)) return '';
+  const msgs = state.data.messages;
+  const last = msgs[msgs.length-1];
+  return `<div class="card" style="cursor:pointer;" onclick="goToChat()">
+      <div class="card-title">💬 Nachrichten an die Werkstatt</div>
+      <div class="card-hint">${last ? `${last.sender==='kunde'?'Sie':escK(last.sender_name||'Werkstatt')}: ${escK(String(last.content||'').slice(0,90))}${String(last.content||'').length>90?'…':''}` : 'Fragen zu Ihrem Auftrag? Schreiben Sie der Werkstatt direkt.'}</div>
+      <button class="btn" style="width:100%;margin-top:4px;" onclick="event.stopPropagation();goToChat()">${msgs.length ? 'Nachrichten öffnen' : 'Nachricht schreiben'} →</button>
+    </div>`;
+}
 function goToDashboard(){ state.view = 'dashboard'; render(); window.scrollTo(0,0); }
 
 function renderDashboardView(){
@@ -351,6 +392,7 @@ function renderDashboardView(){
       </div>
       <button class="btn primary" style="width:100%;margin-top:6px;" onclick="goToService()">Details &amp; Kundenportal öffnen →</button>
     </div>
+    ${renderMessagesTeaser()}
     ${renderWorkshopContact()}
   `;
 }
@@ -437,22 +479,19 @@ function renderChat(){
   if(!Array.isArray(state.data.messages)) return '';
   const msgs = (state.data.messages || []).slice().sort((a,b)=> (a.created_date||'').localeCompare(b.created_date||''));
   return `
-    <div class="card">
+    <div class="card" id="chatCard">
       <div class="card-title">💬 Nachrichten</div>
       <div class="card-hint">Schreiben Sie der Werkstatt direkt – Antworten erscheinen hier.</div>
       <div class="chat-list" id="chatList">
         ${msgs.length ? msgs.map(m=>`
-          <div class="chat-bubble ${m.sender==='kunde'?'kunde':'werkstatt'}">
-            ${m.content||''}
-            <div class="chat-meta">${m.sender==='kunde' ? 'Sie' : (m.sender_name||'Werkstatt')}${m.created_date ? ' · '+fmtDDMM(fmtDate(m.created_date.slice(0,10))) : ''}</div>
-          </div>
+          <div class="chat-bubble ${m.sender==='kunde'?'kunde':'werkstatt'}" style="white-space:pre-wrap;overflow-wrap:anywhere;">${escK(m.content||'')}<div class="chat-meta">${m.sender==='kunde' ? 'Sie' : escK(m.sender_name||'Werkstatt')}${m.created_date ? ' · '+fmtMsgTime(m.created_date) : ''}</div></div>
         `).join('') : `<div class="empty">Noch keine Nachrichten. Schreiben Sie uns, wenn Sie Fragen zu Ihrem Auftrag haben.</div>`}
       </div>
       <div class="chat-input-row">
         <input type="text" id="chatInput" placeholder="Nachricht an die Werkstatt…" value="${(state.chatDraft||'').replace(/"/g,'&quot;')}" oninput="state.chatDraft=this.value" onkeydown="if(event.key==='Enter') sendMessage();" ${state.chatSending?'disabled':''}>
         <button class="btn primary" style="flex:0 0 auto;padding:11px 16px;" onclick="sendMessage()" ${state.chatSending?'disabled':''}>Senden</button>
       </div>
-      ${state.chatError ? `<div class="chat-note" style="color:var(--red);">${state.chatError}</div>` : `<div class="chat-note">Antworten der Werkstatt erscheinen hier.</div>`}
+      ${state.chatError ? `<div class="chat-note" style="color:var(--red);">${state.chatError}</div>` : `<div class="chat-note">Antworten der Werkstatt erscheinen hier – zusätzlich bekommen Sie eine E-Mail.</div>`}
     </div>
   `;
 }
@@ -463,17 +502,11 @@ async function sendMessage(){
   const o = state.data.order;
   state.chatSending = true; state.chatError = null; render();
   try{
-    await callPortal('message_send', {
-      order_id: o.id,
-      customer_token: state.token,
-      sender: 'kunde',
-      sender_name: o.customer_name,
-      content: text,
-    });
+    await callPortal('message_send', { content: text });
     state.chatDraft = '';
     await reload();
   }catch(e){
-    state.chatError = 'Nachricht konnte gerade nicht gesendet werden – die Chat-Funktion wird noch eingerichtet.';
+    state.chatError = 'Nachricht konnte gerade nicht gesendet werden. Bitte gleich noch einmal versuchen.';
   }finally{
     state.chatSending = false;
     render();

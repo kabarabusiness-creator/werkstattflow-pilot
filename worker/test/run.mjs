@@ -332,5 +332,36 @@ await t('Support-Anfrage aus dem Dashboard: Mail an info@, Antwort an Nutzer, Lo
   const m = mails[before]; assert.deepEqual(m.to, ['info@autoleitwerk.de']); assert.equal(m.reply_to, 'chef@werkstatt.test');
   assert.match(m.subject, /\[Support AL-T1\] Frage <b>/); assert.ok(m.html.includes('Frage &lt;b&gt;') && !m.html.includes('<b>Frage'));
 });
+await t('Kundennachrichten: Portal ↔ Werkstatt, Mail an beide Seiten, fremde Werkstatt gesperrt', async () => {
+  const portal = body => worker.fetch(new Request('https://api.test/portalApi', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://kabarabusiness-creator.github.io' }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  const fnU = (n, body) => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  const m0 = mails.length;
+  const sent = await portal({ action: 'message_send', token: 'tok-aaaaaa', content: 'Wann ist <b>mein</b> Auto fertig?' });
+  assert.equal(sent.s, 200, JSON.stringify(sent.d));
+  const stored = db.OrderMessage.find(m => m.order_id === 'o1' && m.sender === 'kunde');
+  assert.equal(stored.workshop_code, 'AL-T1'); assert.equal(stored.read_by_workshop, false);
+  const toWs = mails.slice(m0).find(m => m.to[0] === 'a@b.de');
+  assert.ok(toWs, 'Werkstatt-Mail fehlt'); assert.match(toWs.html, /live-chat\?tab=kunden&amp;order=o1|live-chat\?tab=kunden&order=o1/); assert.ok(toWs.html.includes('&lt;b&gt;mein'));
+  const r = await fnU('orderMessageSend', { order_id: 'o1', content: 'Heute 16 Uhr', sender_name: 'Testwerkstatt' });
+  assert.equal(r.s, 200, JSON.stringify(r.d));
+  assert.ok(mails.slice(m0).some(m => m.to[0] === 'kunde@example.com' && m.html.includes('kundenapp.html?token=tok-aaaaaa')));
+  assert.equal((await fnU('orderMessageSend', { order_id: 'o2', content: 'x' })).s, 403);
+  const g = await portal({ action: 'get', token: 'tok-aaaaaa' });
+  assert.deepEqual(g.d.messages.map(m => m.sender), ['kunde', 'werkstatt']);
+  assert.equal(g.d.messages[1].sender_name, 'Testwerkstatt'); assert.equal(g.d.messages[0].customer_token, undefined);
+  assert.equal(db.OrderMessage.find(m => m.sender === 'werkstatt').read_by_customer, true);
+  assert.equal((await portal({ action: 'message_send', token: 'tok-aaaaaa', content: '   ' })).s, 400);
+});
+await t('Live-Chat Support: Nutzer-Nachricht → Mail an info@ mit Antwort-Link, fremde Sitzung gesperrt', async () => {
+  db.ChatSession = [{ id: 'cs1', user_id: 'u1', user_email: 'chef@werkstatt.test', user_name: 'Chef T1', subject: 'Frage zum Tablet', status: 'offen' }, { id: 'cs2', user_id: 'uX', subject: 'Fremd' }];
+  db.ChatMessage = [{ id: 'cm1', session_id: 'cs1', user_id: 'u1', sender: 'user', content: 'Wie ändere ich die PIN?', created_date: new Date().toISOString() }];
+  const fnU = (n, body) => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  const m0 = mails.length;
+  assert.equal((await fnU('chatNotify', { session_id: 'cs1' })).s, 200);
+  const m = mails[m0]; assert.ok(m, 'Mail fehlt'); assert.deepEqual(m.to, ['info@autoleitwerk.de']); assert.equal(m.reply_to, 'chef@werkstatt.test');
+  assert.match(m.subject, /Live-Chat AL-T1/); assert.ok(m.html.includes('/live-chat?chat=cs1') && m.html.includes('Wie ändere ich die PIN?'));
+  assert.equal((await fnU('chatNotify', { session_id: 'cs2' })).s, 403);
+  await fnU('chatNotify', { session_id: 'cs1' }); assert.equal(mails.length, m0 + 1, 'Drosselung greift nicht');
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
