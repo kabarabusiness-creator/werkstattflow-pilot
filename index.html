@@ -1076,6 +1076,13 @@
   .ts-f input::placeholder{color:var(--text-faint);font-weight:500;}
   .ts-f select option{background:var(--panel,#191932);color:var(--text,#fff);}
   .ts-f.ts-man{border-color:rgba(139,92,246,.55);}
+  .ts-notes{margin-top:10px;padding:10px;border-radius:10px;background:var(--panel,#191932);border:1px solid var(--border,#26264a);}
+  .ts-notes b{display:block;font-size:12.5px;margin-bottom:6px;}
+  .ts-notes textarea{width:100%;min-height:76px;resize:vertical;padding:8px 10px;border-radius:8px;border:1px solid var(--border,#26264a);background:transparent;color:var(--text,#fff);font:14px/1.4 inherit;font-family:inherit;outline:none;box-sizing:border-box;}
+  .ts-notes textarea:focus{border-color:#8b5cf6;}
+  .ts-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+  .ts-chip{padding:6px 10px;border-radius:999px;border:1px solid var(--border,#26264a);background:transparent;color:var(--text,#fff);font:600 12px/1 inherit;font-family:inherit;cursor:pointer;}
+  .ts-chip:active,.ts-chip:hover{border-color:#8b5cf6;background:rgba(139,92,246,.12);}
   .ts-edit-hint{font-size:11.5px;color:var(--text-faint);margin:2px 0 8px;}
   .ts-alt{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;}
   .ts-f.ts-chk{border-color:#f59e0b;background:rgba(245,158,11,.08);} .ts-f em{display:block;font-style:normal;font-size:10px;color:#f59e0b;} .ts-f.ts-empty b{color:var(--text-faint);}
@@ -4948,6 +4955,12 @@ const TIRE_INPUT = {
   tire_age_years:{ph:'–', mode:'decimal'}, tread_depth_mm:{ph:'z. B. 5,5', mode:'decimal'},
   overall_condition:{options:[['','–'],['gut','gut'],['mittel','mittel'],['abgefahren','abgefahren'],['beschädigt','beschädigt']]},
 };
+const TIRE_NOTE_CHIPS = ['Beule/Blase an der Flanke','Riss in der Flanke','Schnitt in der Lauffläche','Nagel/Fremdkörper','Ungleichmäßiger Abrieb','Bordsteinschaden Felge','Felge verbogen','Ventil defekt','Reparatur empfohlen','Austausch empfohlen'];
+function renderTireNotes(r){
+  return `<div class="ts-notes"><b>Schäden &amp; Bemerkungen (Mechaniker)</b>
+    <div class="ts-chips">${TIRE_NOTE_CHIPS.map(c=>`<button type="button" class="ts-chip" data-tirechip="${escHtml(c)}">+ ${escHtml(c)}</button>`).join('')}</div>
+    <textarea data-tirenote placeholder="z. B. Beule an der Außenflanke hinten links, Felge Bordsteinschaden bei 3 Uhr …">${escHtml(r.mech_notes||'')}</textarea></div>`;
+}
 function emptyTireResult(){ const r = {}; TIRE_FIELDS.forEach(([k])=>{ r[k] = { value:null, confidence:1, manual:true }; }); r.tire_damages = []; r.rim_damages = []; r.manual = true; return r; }
 function tireNum(v){ const n = Number(String(v??'').replace(',','.').trim()); return Number.isFinite(n) ? n : null; }
 // Manuelle Eingabe übernehmen; DOT → Woche/Jahr/Alter automatisch nachrechnen.
@@ -5034,8 +5047,9 @@ function renderTireScanPanel(o){
       <div id="tireWarns">${warns.map(w=>`<div class="alex-warn">${iconWarn} ${escHtml(w)}</div>`).join('')}</div>
       ${r.manual ? '' : renderDamageList('Reifen', r.tire_damages)}
       ${r.manual ? '' : renderDamageList('Felge', r.rim_damages)}
+      ${renderTireNotes(r)}
       ${r.manual ? '' : '<div class="alex-hint">KI-Einschätzung – ersetzt keine Sichtprüfung durch den Mechaniker.</div>'}
-      ${ts.saved ? `<div class="alex-done">${iconCheck} Fotos und Befund am Auftrag gespeichert</div>`
+      ${ts.saved ? `<div class="alex-done">${iconCheck} ${Object.keys(ts.photos).length ? 'Fotos und Befund' : 'Befund'} am Auftrag gespeichert – Änderungen danach erneut speichern</div>`
         : `<div class="alex-draft-actions"><button class="btn primary" id="tireSaveBtn">${iconCheck} ${r.manual?'Am Auftrag speichern':'Übernehmen &amp; am Auftrag speichern'}</button><button class="btn" id="tireResetBtn">${r.manual?'Verwerfen':'Neu scannen'}</button></div>`}
     </div>`;
   }
@@ -5058,6 +5072,8 @@ document.addEventListener('change', async (e)=>{
   rerenderTirePanel();
 });
 document.addEventListener('input', (e)=>{
+  const nt = e.target.closest && e.target.closest('[data-tirenote]');
+  if(nt){ const o = getSelectedOrder(); if(!o) return; const ts = tireState(o); if(!ts.result) return; ts.result.mech_notes = nt.value; ts.saved = false; const sb = document.getElementById('tireSaveBtn'); if(!sb) rerenderTirePanelKeepNote(); return; }
   const el = e.target.closest && e.target.closest('[data-tirefield]'); if(!el) return;
   const o = getSelectedOrder(); if(!o) return; const ts = tireState(o); if(!ts.result) return;
   setTireField(ts.result, el.dataset.tirefield, el.value); ts.saved = false;
@@ -5075,6 +5091,10 @@ document.addEventListener('change', (e)=>{
   const w = document.getElementById('tireWarns'); if(w) w.innerHTML = tireWarnings(ts.result).map(x=>`<div class="alex-warn">${iconWarn} ${escHtml(x)}</div>`).join('');
   const sb = document.getElementById('tireSaveBtn'); if(!sb){ rerenderTirePanel(); }
 });
+function rerenderTirePanelKeepNote(){
+  rerenderTirePanel();
+  const t = document.querySelector('[data-tirenote]'); if(t){ t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+}
 async function runTireScan(){
   const o = getSelectedOrder(); if(!o) return;
   const ts = tireState(o);
@@ -5093,7 +5113,7 @@ async function saveTireScan(){
   if(!ts.result || ts.saved) return;
   const btn = document.getElementById('tireSaveBtn'); if(btn){ btn.textContent = 'Speichert…'; btn.style.pointerEvents='none'; }
   const r = ts.result;
-  if(r.manual && !TIRE_FIELDS.some(([k])=>{ const v = tireVal(r[k]); return v!==null && v!=='' && v!==undefined; })){
+  if(r.manual && !(r.mech_notes||'').trim() && !TIRE_FIELDS.some(([k])=>{ const v = tireVal(r[k]); return v!==null && v!=='' && v!==undefined; })){
     showUpdateToast('Bitte mindestens ein Feld ausfüllen.'); if(btn){ btn.innerHTML = `${iconCheck} Am Auftrag speichern`; btn.style.pointerEvents=''; } return;
   }
   for(const s of TIRE_SLOTS){
@@ -5104,9 +5124,12 @@ async function saveTireScan(){
   const dmg = (list)=> Array.isArray(list)&&list.length ? list.map(d=>typeof d==='string'?d:[d.type||d.damage||d.title, d.description, d.location, d.severity&&`(${d.severity})`].filter(Boolean).join(' ')).join('; ') : 'keine erkannt';
   const lines = [
     `${r.manual ? 'Reifendaten (manuell erfasst)' : r.edited ? 'Reifenscan (KI, vom Mechaniker korrigiert)' : 'Reifenscan (KI)'} – ${state.currentUser ? state.currentUser.name : 'Tablet'}`,
-    `Reifen: ${fmt('brand')} ${fmt('model')}, ${fmt('size')} ${fmt('load_index')}${fmt('speed_index')}, Saison ${fmt('season')}`,
-    `DOT ${fmt('dot_code')} (ca. ${fmt('tire_age_years')} Jahre), Profil ${fmt('tread_depth_mm')} mm, Zustand ${fmt('overall_condition')}`,
+    ...(()=>{ const has = k => fmt(k)!=='–'; const j = (...x) => x.filter(Boolean).join(', ');
+      const l1 = j([has('brand')&&fmt('brand'), has('model')&&fmt('model')].filter(Boolean).join(' '), [has('size')&&fmt('size'), (has('load_index')||has('speed_index')) && `${has('load_index')?fmt('load_index'):''}${has('speed_index')?fmt('speed_index'):''}`].filter(Boolean).join(' '), has('season')&&`Saison ${fmt('season')}`);
+      const l2 = j(has('dot_code')&&`DOT ${fmt('dot_code')}${has('tire_age_years')?` (ca. ${fmt('tire_age_years')} Jahre)`:''}`, !has('dot_code')&&has('tire_age_years')&&`ca. ${fmt('tire_age_years')} Jahre alt`, has('tread_depth_mm')&&`Profil ${String(fmt('tread_depth_mm')).replace('.',',')} mm`, has('overall_condition')&&`Zustand ${fmt('overall_condition')}`);
+      return [l1 && `Reifen: ${l1}`, l2].filter(Boolean); })(),
     ...(r.manual ? [] : [`Schäden Reifen: ${dmg(r.tire_damages)}`, `Schäden Felge: ${dmg(r.rim_damages)}`]),
+    ...((r.mech_notes||'').trim() ? ['Schäden/Bemerkungen Mechaniker: ' + r.mech_notes.trim().split(/\n+/).join('; ')] : []),
     ...tireWarnings(r).map(w=>'Hinweis: '+w),
     ...(r.manual ? [] : ['KI-Einschätzung – Sichtprüfung durch Mechaniker erforderlich.']),
   ];
@@ -5118,6 +5141,12 @@ async function saveTireScan(){
 function handleTireScanClick(e){
   if(e.target.closest('#tireScanBtn')){ runTireScan(); return true; }
   if(e.target.closest('#tireSaveBtn')){ saveTireScan(); return true; }
+  const chip = e.target.closest('[data-tirechip]');
+  if(chip){ const o = getSelectedOrder(); if(o){ const ts = tireState(o); if(ts.result){
+    const cur = (ts.result.mech_notes||'').trim(); ts.result.mech_notes = cur ? `${cur}\n${chip.dataset.tirechip}` : chip.dataset.tirechip; ts.saved = false;
+    const t = document.querySelector('[data-tirenote]');
+    if(t && document.getElementById('tireSaveBtn')){ t.value = ts.result.mech_notes; t.focus(); t.setSelectionRange(t.value.length, t.value.length); } else rerenderTirePanelKeepNote();
+  } } return true; }
   if(e.target.closest('#tireManualBtn')){ const o = getSelectedOrder(); if(o){ const ts = tireState(o); ts.result = emptyTireResult(); ts.saved = false; ts.error = null; rerenderTirePanel(); const f = document.querySelector('[data-tirefield="brand"]'); if(f) f.focus(); } return true; }
   if(e.target.closest('#tireResetBtn')){ const o = getSelectedOrder(); if(o){ state.tireScan = null; tireState(o); rerenderTirePanel(); } return true; }
   return false;
