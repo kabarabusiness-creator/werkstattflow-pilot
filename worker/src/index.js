@@ -662,6 +662,83 @@ async function exportAll(db) {
   return out;
 }
 
+/* ---------------- Automatisches Backup & Überwachung (Cron) ----------------
+ * Täglich 03:30 Uhr (Berlin): alle Daten als JSON in den Speicher, 14 Tage aufbewahrt.
+ * Alle 15 Minuten: Datenbank, Tablet, Kundenportal, Dashboard und Backup-Alter prüfen.
+ * Mail an info@autoleitwerk.de nur bei Statuswechsel (Störung / wieder OK). */
+const BACKUP_PREFIX = '_backup/';
+const BACKUP_KEEP_DAYS = 14;
+const MONITOR_KEY = '_monitor/state';
+const FAIL_THRESHOLD = 2; // erst nach 2 Fehlprüfungen in Folge (30 Min.) alarmieren
+const SITE_CHECKS = [
+  ['Tablet-App', 'https://kabarabusiness-creator.github.io/werkstattflow-pilot/index.html'],
+  ['Kundenportal', 'https://kabarabusiness-creator.github.io/werkstattflow-pilot/kundenapp.html'],
+  ['Dashboard', 'https://autoleitwerk.base44.app/'],
+];
+async function readMonitor(env) {
+  try { return (await env.PHOTOS.get(MONITOR_KEY, { type: 'json' })) || {}; } catch { return {}; }
+}
+async function writeMonitor(env, st) { try { await env.PHOTOS.put(MONITOR_KEY, JSON.stringify(st)); } catch (e) { console.log('monitor_write', String(e)); } }
+
+async function runBackup(env) {
+  if (!env.PHOTOS) throw new Error('kein Speicher');
+  const db = new Base44(env);
+  const data = await exportAll(db);
+  const counts = {}; const failed = [];
+  for (const [k, v] of Object.entries(data.entities)) { if (Array.isArray(v)) counts[k] = v.length; else failed.push(k); }
+  // ohne Komprimierung: spart Rechenzeit (Free-Plan), Speicher reicht für 14 Tage locker
+  const raw = JSON.stringify(data);
+  const day = berlinToday();
+  await env.PHOTOS.put(`${BACKUP_PREFIX}${day}.json`, raw, { metadata: { created_at: nowIso(), bytes: raw.length, records: Object.values(counts).reduce((a, b) => a + b, 0), failed } });
+  // alte Backups löschen
+  const cutoff = new Date(Date.now() - BACKUP_KEEP_DAYS * 86400_000).toISOString().slice(0, 10);
+  const listed = await env.PHOTOS.list({ prefix: BACKUP_PREFIX });
+  for (const k of listed.keys) { const d = k.name.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10); if (d < cutoff) await env.PHOTOS.delete(k.name); }
+  const st = await readMonitor(env);
+  st.last_backup = { day, at: nowIso(), bytes: raw.length, failed };
+  await writeMonitor(env, st);
+  return st.last_backup;
+}
+
+async function listBackups(env) {
+  const listed = await env.PHOTOS.list({ prefix: BACKUP_PREFIX });
+  return listed.keys.map(k => ({ name: k.name.slice(BACKUP_PREFIX.length), ...(k.metadata || {}) })).sort((a, b) => b.name.localeCompare(a.name));
+}
+
+async function runChecks(env) {
+  const problems = [];
+  const t = async (name, fn) => { try { const r = await fn(); if (r !== true) problems.push(`${name}: ${r}`); } catch (e) { problems.push(`${name}: ${e && e.message || e}`); } };
+  await t('Datenbank (Base44)', async () => {
+    const res = await fetch(`${env.BASE44_API_BASE || 'https://app.base44.com'}/api/apps/${env.BASE44_APP_ID}/entities/Workshop/v2/list?limit=1`, { headers: { Authorization: `Bearer ${env.BASE44_TOKEN}` } });
+    return res.ok ? true : `HTTP ${res.status}`;
+  });
+  for (const [name, url] of SITE_CHECKS) {
+    await t(name, async () => { const r = await fetch(url, { method: 'GET', redirect: 'follow', cf: { cacheTtl: 0 } }); return r.status < 500 && r.status !== 404 ? true : `HTTP ${r.status}`; });
+  }
+  let st = await readMonitor(env);
+  // erstes Backup sofort anlegen (z. B. direkt nach dem Einrichten)
+  if (!st.last_backup) { await t('Backup', async () => { await runBackup(env); return true; }); st = await readMonitor(env); }
+  const lb = st.last_backup && st.last_backup.at;
+  if (!lb || Date.now() - new Date(lb).getTime() > 36 * 3600_000) problems.push(`Backup: letztes Backup ${lb ? 'vom ' + st.last_backup.day : 'fehlt'} (älter als 36 Std.)`);
+  else if (st.last_backup.failed && st.last_backup.failed.length) problems.push(`Backup unvollständig: ${st.last_backup.failed.join(', ')}`);
+  if (!env.RESEND_API_KEY) problems.push('E-Mail-Versand: Schlüssel fehlt');
+
+  const prevDown = !!st.down;
+  const fails = problems.length ? (st.fail_count || 0) + 1 : 0;
+  const down = problems.length > 0 && fails >= FAIL_THRESHOLD;
+  const changed = down !== prevDown || (down && JSON.stringify(problems) !== JSON.stringify(st.problems || []));
+  if (changed || fails !== (st.fail_count || 0)) {
+    await writeMonitor(env, { ...st, fail_count: fails, down, problems: down ? problems : [], since: down ? (prevDown ? st.since : nowIso()) : null, checked_at: nowIso() });
+  }
+  if (changed) {
+    const list = problems.map(p => `<li>${esc(p)}</li>`).join('');
+    await sendMail(env, null, down
+      ? { to: SUPPORT_TO(env), subject: '⚠️ AutoLeitwerk: Störung erkannt', html: mailHtml({ title: 'Störung erkannt', intro: `Die automatische Prüfung hat seit über 15 Minuten Probleme festgestellt:</p><ul style="font-size:14.5px;line-height:1.6">${list}</ul><p style="font-size:13px;color:#6b6b88;margin:0 0 16px">Du bekommst eine weitere Mail, sobald alles wieder läuft.`, button: { label: 'Status ansehen', href: 'https://werkstattflow-pilot.werkstattflow.workers.dev/health' } }) }
+      : { to: SUPPORT_TO(env), subject: '✅ AutoLeitwerk: alles wieder in Ordnung', html: mailHtml({ title: 'Wieder in Ordnung', intro: `Alle Prüfungen sind wieder grün${st.since ? ` (Störung seit ${new Date(st.since).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })})` : ''}.` }) });
+  }
+  return { ok: problems.length === 0, problems, down };
+}
+
 /* ---------------- Router ---------------- */
 function corsHeaders(request, env) {
   const origin = request.headers.get('Origin') || '';
@@ -680,13 +757,23 @@ function json(data, status, cors) {
 }
 
 export default {
+  async scheduled(event, env, ctx) {
+    if (event.cron === '30 1 * * *') {
+      ctx.waitUntil(runBackup(env).catch(async e => {
+        console.log('backup_failed', String(e));
+        await sendMail(env, null, { to: SUPPORT_TO(env), subject: '⚠️ AutoLeitwerk: tägliches Backup fehlgeschlagen', html: mailHtml({ title: 'Backup fehlgeschlagen', intro: esc(String(e && e.message || e)) }) }).catch(() => {});
+      }));
+    } else {
+      ctx.waitUntil(runChecks(env).catch(e => console.log('monitor_failed', String(e))));
+    }
+  },
   async fetch(request, env, ctx) {
     const cors = corsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
-      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, ...(await (async () => { if (!env.PHOTOS) return {}; const st = await readMonitor(env); return { last_backup: st.last_backup ? st.last_backup.day : null, monitor: st.down ? 'störung' : 'ok', checked_at: st.checked_at || null }; })()), secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
       if (path === '/demo' && request.method === 'GET') {
         // Demo-Dashboard: frischer Einmal-Login (60 s gültig) für den Demo-Nutzer, sieht per RLS nur AL-DEMO
         rateLimit('demo:' + (request.headers.get('CF-Connecting-IP') || 'x'), 20, 60_000);
@@ -732,7 +819,28 @@ export default {
         return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoLeitwerk – Daten-Backup</title>
 <style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:40px 16px;color:#1a1a2e}main{max-width:420px;margin:auto;background:#fff;padding:24px;border-radius:14px;box-shadow:0 2px 12px #0001}input,button{width:100%;box-sizing:border-box;font:inherit;padding:12px;border-radius:10px;margin-top:10px}input{border:1px solid #ccd}button{background:#7c3aed;color:#fff;border:0;font-weight:600;cursor:pointer}p{color:#556;font-size:14px}</style></head>
 <body><main><h2>Daten-Backup</h2><p>Lädt alle AutoLeitwerk-Daten als JSON-Datei herunter. Datei sicher aufbewahren – sie enthält Kundendaten.</p>
-<form method="POST" action="/admin/export"><input type="password" name="key" placeholder="ADMIN_KEY" autocomplete="current-password" required><button type="submit">Backup herunterladen</button></form></main></body></html>`,
+<form method="POST" action="/admin/export"><input type="password" name="key" placeholder="ADMIN_KEY" autocomplete="current-password" required><button type="submit">Backup herunterladen</button></form>
+<h2 style="margin-top:28px">Automatische Backups</h2><p>Jede Nacht um 03:30 Uhr, die letzten 14 Tage.</p>
+<form method="POST" action="/admin/backups"><input type="password" name="key" placeholder="ADMIN_KEY" autocomplete="current-password" required><button type="submit">Liste anzeigen</button></form></main></body></html>`,
+          { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY' } });
+      }
+      if (path === '/admin/backups' || path === '/admin/backup') {
+        if (request.method !== 'POST') throw new HttpError(405, 'method');
+        const form = await request.formData();
+        const adminKey = String(env.ADMIN_KEY || '').trim();
+        if (adminKey.length < 16 || !safeEqual(String(form.get('key') || '').trim(), adminKey)) throw new HttpError(401, 'unauthorized');
+        if (!env.PHOTOS) throw new HttpError(503, 'not_available');
+        if (path === '/admin/backup') {
+          const name = String(form.get('name') || '');
+          if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(name)) throw new HttpError(400, 'params');
+          const obj = await env.PHOTOS.get(BACKUP_PREFIX + name, { type: 'arrayBuffer' });
+          if (!obj) throw new HttpError(404, 'not_found');
+          return new Response(obj, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="autoleitwerk-backup-${name}"`, 'Cache-Control': 'no-store' } });
+        }
+        const rows = await listBackups(env);
+        const keyEsc = esc(String(form.get('key')));
+        const list = rows.length ? rows.map(b => `<form method="POST" action="/admin/backup" style="display:flex;gap:10px;align-items:center;margin-top:8px"><input type="hidden" name="key" value="${keyEsc}"><input type="hidden" name="name" value="${esc(b.name)}"><span style="flex:1">${esc(b.name.slice(0, 10))} · ${Math.round((b.bytes || 0) / 1024)} KB${b.records != null ? ` · ${b.records} Datensätze` : ''}${b.failed && b.failed.length ? ' · ⚠️ unvollständig' : ''}</span><button type="submit" style="width:auto;margin:0;padding:8px 14px">Laden</button></form>`).join('') : '<p>Noch keine automatischen Backups vorhanden.</p>';
+        return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoLeitwerk – Backups</title><style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:40px 16px;color:#1a1a2e}main{max-width:520px;margin:auto;background:#fff;padding:24px;border-radius:14px;box-shadow:0 2px 12px #0001}button{font:inherit;border-radius:10px;background:#7c3aed;color:#fff;border:0;font-weight:600;cursor:pointer}</style></head><body><main><h2>Automatische Backups</h2><p style="color:#556;font-size:14px">Dateien enthalten Kundendaten – sicher aufbewahren.</p>${list}</main></body></html>`,
           { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY' } });
       }
       if (path === '/admin/export') {

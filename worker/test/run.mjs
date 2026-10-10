@@ -27,6 +27,7 @@ const calls = [];
 const mails = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url); const method = init.method || 'GET';
+  if (u.host.endsWith('github.io') || u.host === 'autoleitwerk.base44.app') return new Response('<html></html>', { status: globalThis.SITE_STATUS || 200 });
   if (u.host === 'api.resend.com') { assert.equal(init.headers.Authorization, 'Bearer RE_TEST'); mails.push(JSON.parse(init.body)); return new Response('{"id":"m1"}', { status: 200 }); }
   if (u.pathname.endsWith('/entities/User/me')) {
     const a = (init.headers && (init.headers.Authorization || init.headers.authorization)) || '';
@@ -54,8 +55,10 @@ globalThis.fetch = async (url, init = {}) => {
 
 const kv = new Map();
 const PHOTOS = {
-  async put(k, v, o) { kv.set(k, { v: new Uint8Array(v), m: o && o.metadata }); },
+  async put(k, v, o) { kv.set(k, { v: typeof v === 'string' ? new TextEncoder().encode(v) : new Uint8Array(v), m: o && o.metadata }); },
   async delete(k) { kv.delete(k); },
+  async get(k, o) { const e = kv.get(k); if (!e) return null; if (o && o.type === 'json') return JSON.parse(new TextDecoder().decode(e.v)); if (o && o.type === 'arrayBuffer') return e.v.buffer.slice(e.v.byteOffset, e.v.byteOffset + e.v.byteLength); return new TextDecoder().decode(e.v); },
+  async list(o) { const pre = (o && o.prefix) || ''; return { keys: [...kv.entries()].filter(([k]) => k.startsWith(pre)).map(([name, e]) => ({ name, metadata: e.m })), list_complete: true }; },
   async getWithMetadata(k, o) { if (o && o.type === 'arrayBuffer') { const e = kv.get(k); return e ? { value: e.v.buffer.slice(e.v.byteOffset, e.v.byteOffset + e.v.byteLength), metadata: e.m } : { value: null, metadata: null }; } const e = kv.get(k); return e ? { value: new Blob([e.v]).stream(), metadata: e.m } : { value: null, metadata: null }; },
 };
 const env = { PHOTOS, RESEND_API_KEY: 'RE_TEST', BASE44_TOKEN: 'TEST', BASE44_APP_ID: APP, ALLOWED_ORIGINS: 'https://kabarabusiness-creator.github.io', ADMIN_KEY: 'x'.repeat(20) };
@@ -385,6 +388,32 @@ await t('Chat-Anhänge: Foto/PDF hochladen, nur eigene Anhänge in Nachrichten, 
   const m0 = mails.length;
   const ws = await fnU('orderMessageSend', { order_id: 'o1', content: 'Siehe Foto', attachments: [img.d.attachment, foreign] });
   assert.equal(ws.s, 200); assert.equal(ws.d.message.attachments.length, 1);
+});
+await t('Cron: tägliches Backup (14 Tage), Überwachung mailt nur bei Statuswechsel, Admin-Liste', async () => {
+  const run = async (cron) => { const p = []; await worker.scheduled({ cron }, env, { waitUntil: x => p.push(x) }); await Promise.all(p); };
+  kv.set('_backup/2020-01-01.json', { v: new Uint8Array([1]), m: {} });
+  await run('30 1 * * *');
+  const keys = [...kv.keys()].filter(k => k.startsWith('_backup/'));
+  assert.equal(keys.length, 1, keys.join()); assert.match(keys[0], /^_backup\/\d{4}-\d{2}-\d{2}\.json$/);
+  const plain = JSON.parse(new TextDecoder().decode(kv.get(keys[0]).v));
+  assert.ok(Array.isArray(plain.entities.Order) && plain.entities.Order.length >= 2);
+  const m0 = mails.length;
+  await run('*/15 * * * *'); assert.equal(mails.length, m0, 'Mail obwohl alles ok');
+  globalThis.SITE_STATUS = 503;
+  await run('*/15 * * * *'); assert.equal(mails.length, m0, 'Alarm schon nach 1 Fehlprüfung');
+  await run('*/15 * * * *'); assert.equal(mails.length, m0 + 1); assert.match(mails[m0].subject, /Störung/); assert.match(mails[m0].html, /Tablet-App: HTTP 503/);
+  await run('*/15 * * * *'); assert.equal(mails.length, m0 + 1, 'Alarm doppelt');
+  globalThis.SITE_STATUS = 200;
+  await run('*/15 * * * *'); assert.equal(mails.length, m0 + 2); assert.match(mails[m0 + 1].subject, /wieder in Ordnung/);
+  const h = await (await worker.fetch(new Request('https://api.test/health'), env, ctx)).json();
+  assert.equal(h.monitor, 'ok'); assert.match(h.last_backup, /^\d{4}-/);
+  const form = k => { const f = new FormData(); f.set('key', k); return f; };
+  assert.equal((await worker.fetch(new Request('https://api.test/admin/backups', { method: 'POST', body: form('falsch') }), env, ctx)).status, 401);
+  const page = await (await worker.fetch(new Request('https://api.test/admin/backups', { method: 'POST', body: form('x'.repeat(20)) }), env, ctx)).text();
+  assert.match(page, /Datensätze/);
+  const f2 = form('x'.repeat(20)); f2.set('name', keys[0].slice(8));
+  const dl = await worker.fetch(new Request('https://api.test/admin/backup', { method: 'POST', body: f2 }), env, ctx);
+  assert.equal(dl.status, 200); assert.ok(JSON.parse(await dl.text()).entities.Order);
 });
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

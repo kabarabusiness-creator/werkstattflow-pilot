@@ -11,6 +11,10 @@ ALLOWED_ORIGINS = "https://kabarabusiness-creator.github.io,https://autoleitwerk
 [observability]
 enabled = true
 
+# Automatisches Backup (täglich 01:30 UTC = 03:30 Uhr Sommerzeit) und Überwachung alle 15 Minuten
+[triggers]
+crons = ["30 1 * * *", "*/15 * * * *"]
+
 # Secrets NICHT hier eintragen, sondern in Cloudflare:
 # Workers & Pages → autoleitwerk-api → Settings → Variables and Secrets
 #   BASE44_TOKEN  (Typ: Secret)

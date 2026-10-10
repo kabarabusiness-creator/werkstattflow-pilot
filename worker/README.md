@@ -51,3 +51,10 @@ Achtung: Auf dem Workers-**Paid**-Plan würde Nutzung über dem Kontingent berec
 ## Test
 
 `node worker/test/run.mjs` – prüft alle Endpunkte gegen eine nachgebaute Base44-API (keine echten Daten).
+
+## Automatisches Backup & Überwachung
+
+- **Backup:** jede Nacht 01:30 UTC (03:30 Uhr Sommerzeit) alle Daten als JSON in den Speicher (KV, Präfix `_backup/`), 14 Tage aufbewahrt. Herunterladen: `/admin` → „Automatische Backups“ → ADMIN_KEY.
+- **Überwachung:** alle 15 Minuten Datenbank (Base44), Tablet-App, Kundenportal, Dashboard, Backup-Alter (max. 36 Std.) und E-Mail-Schlüssel. Nach 2 Fehlprüfungen in Folge Mail „Störung erkannt“ an info@autoleitwerk.de, bei Erholung „wieder in Ordnung“ – nur bei Statuswechsel.
+- `/health` zeigt `last_backup`, `monitor` und `checked_at`.
+- Fällt der Server selbst aus, kann er sich nicht melden → zusätzlich externen Dienst (z. B. UptimeRobot) auf `/health` richten.
