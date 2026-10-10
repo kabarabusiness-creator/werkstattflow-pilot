@@ -2173,17 +2173,20 @@ function renderTrialBanner(){
   const el = document.getElementById('trialBanner'); if(!el) return;
   if(!state.currentUser){ el.style.display='none'; return; }
   const ws = (state.base44Data && state.base44Data.workshop) || {};
-  let detail = '';
+  let headline = `Demo-Version: ${TRIAL_DAYS} Tage kostenlos testen.`;
   if(ws.trial_ends_at){
     const end = new Date(ws.trial_ends_at);
     if(!isNaN(end)){
       const left = Math.ceil((end - new Date())/86400000);
       if(ws.subscription_status==='active'){ el.style.display='none'; return; }
-      detail = left > 0 ? ` – noch ${left} ${left===1?'Tag':'Tage'} (bis ${formatDateDE(ws.trial_ends_at)})` : ' – Testphase abgelaufen';
+      const until = formatDateDE(ws.trial_ends_at);
+      headline = left <= 0 ? 'Testphase abgelaufen.'
+        : left > TRIAL_DAYS ? `Pilotphase: kostenlos bis ${until}.`
+        : `Testphase: noch ${left} ${left===1?'Tag':'Tage'} kostenlos (bis ${until}).`;
     }
   }
   const isAdmin = state.currentUser.role==='admin';
-  el.innerHTML = `<div><b>Demo-Version: ${TRIAL_DAYS} Tage kostenlos testen${detail}.</b> <span>Alle Funktionen frei, ohne Verpflichtung.</span></div>
+  el.innerHTML = `<div><b>${headline}</b> <span>Alle Funktionen frei, ohne Verpflichtung.</span></div>
     ${isAdmin && SUPPORT_EMAIL ? `<a href="mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('AutoLeitwerk Pilot buchen – '+(state.workshopToken||''))}">Pilot buchen</a>` : ''}`;
   el.style.display='flex';
 }
