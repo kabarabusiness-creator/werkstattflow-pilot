@@ -469,6 +469,36 @@ await t('Cron: tägliches Backup (14 Tage), Überwachung mailt nur bei Statuswec
   const dl = await worker.fetch(new Request('https://api.test/admin/backup', { method: 'POST', body: f2 }), env, ctx);
   assert.equal(dl.status, 200); assert.ok(JSON.parse(await dl.text()).entities.Order);
 });
+await t('Tablet-Support: Ticket direkt an info@, Live-Chat starten/antworten, fremde Chats gesperrt', async () => {
+  const n = mails.length;
+  let r = await call('/tabletAction', { action: 'support_ticket', subject: 'Foto-Upload', message: 'Fotos laden nicht', device: 'iPad' }, token);
+  assert.equal(r.status, 200); assert.equal(r.data.ok, true);
+  const m = mails.slice(n).find(x => /\[Support AL-T1\] Foto-Upload/.test(x.subject)); assert.ok(m); assert.deepEqual(m.to, ['info@autoleitwerk.de']); assert.match(m.html, /Fotos laden nicht/);
+  assert.ok([...kv.keys()].some(k => k.startsWith('_tickets/')));
+  assert.equal((await call('/tabletAction', { action: 'support_ticket', subject: 'x', message: '  ' }, token)).status, 400);
+  // Chat starten
+  r = await call('/tabletAction', { action: 'chat_send', subject: 'Frage Kalender', content: 'Wie verschiebe ich Termine?' }, token);
+  assert.equal(r.data.ok, true); const sid = r.data.id;
+  const sess0 = db.ChatSession.find(x => x.id === sid); assert.match(sess0.user_id, /^tablet:AL-T1:/); assert.equal(sess0.unread_admin, true);
+  assert.ok(mails.some(x => /Live-Chat AL-T1/.test(x.subject)));
+  // Support antwortet (wie aus Base44/CEO) → Tablet sieht ungelesen + Nachricht
+  db.ChatMessage.push({ id: 'cmA', session_id: sid, user_id: sess0.user_id, sender: 'admin', author_name: 'Support', content: 'Per Drag & Drop.', created_date: new Date(Date.now() + 1000).toISOString() });
+  sess0.unread_user = true; sess0.last_sender = 'admin';
+  let list = (await call('/tabletAction', { action: 'chat_list' }, token)).data.sessions;
+  assert.ok(list.find(x => x.id === sid && x.unread));
+  const g = (await call('/tabletAction', { action: 'chat_get', id: sid }, token)).data;
+  assert.equal(g.messages.length, 2); assert.equal(g.messages[1].sender, 'admin'); assert.equal(sess0.unread_user, false);
+  // antworten, abgeschlossene Chats öffnen sich wieder
+  sess0.status = 'abgeschlossen';
+  assert.equal((await call('/tabletAction', { action: 'chat_send', id: sid, content: 'Danke!' }, token)).data.ok, true);
+  assert.equal(sess0.status, 'offen'); assert.equal(sess0.last_message, 'Danke!');
+  // fremder Chat (anderer Nutzer) nicht lesbar
+  db.ChatSession.push({ id: 'csX', subject: 'fremd', status: 'offen', user_id: 'u-anders' });
+  assert.equal((await call('/tabletAction', { action: 'chat_get', id: 'csX' }, token)).status, 404);
+  assert.equal((await call('/tabletAction', { action: 'chat_send', id: 'csX', content: 'x' }, token)).status, 404);
+  assert.equal((await call('/tabletAction', { action: 'chat_get' }, token)).status, 404);
+  assert.ok(!(await call('/tabletAction', { action: 'chat_list' }, token)).data.sessions.some(x => x.id === 'csX'));
+});
 await t('CEO-Konsole: Login nur mit Code an CEO-Adresse, Funktionen sperren, Support bearbeiten', async () => {
   const ceo = async (body, tok, origin) => {
     const res = await worker.fetch(new Request('https://api.test/ceo/api', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}), ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx);

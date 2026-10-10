@@ -400,6 +400,59 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     return { ok: true, stored: true };
   }
 
+  /* ---- Support aus dem Tablet: Ticket direkt an info@ (ohne Mailprogramm) + Live-Chat wie im Dashboard ---- */
+  if (action === 'support_ticket') {
+    rateLimit('ticket:' + sess.employee_id, 10, 3600_000);
+    const subject = String(body.subject || '').trim().slice(0, 200) || 'Support-Anfrage';
+    const message = String(body.message || '').trim().slice(0, 5000);
+    if (!message) throw new HttpError(400, 'params', { message: 'Bitte eine Nachricht eingeben.' });
+    const ws = await workshopInfo(db, code);
+    const device = String(body.device || '').slice(0, 300);
+    await storeTicket(env, { source: 'Tablet', subject, message: message + (device ? `\n\nGerät: ${device}` : ''), name: emp.name, email: ws.email, workshop_code: code }).catch(e => console.log('ticket_store', String(e)));
+    const r = await sendMail(env, null, {
+      to: SUPPORT_TO(env), replyTo: ws.email || undefined, subject: `[Support ${code}] ${subject}`,
+      html: mailHtml({ title: 'Support-Anfrage aus dem Tablet', intro: `<b>${esc(emp.name)}</b> (${esc(ws.name)}, Werkstatt-Code ${esc(code)}) schreibt:</p><div style="white-space:pre-wrap;background:#f7f6fb;border-radius:10px;padding:12px 14px;margin:0 0 14px">${esc(message)}</div><p style="font-size:13px;color:#6b6b88;margin:0 0 16px">Betreff: ${esc(subject)}${ws.email ? ` · Antwort geht an ${esc(ws.email)}` : ''}${device ? `<br>Gerät: ${esc(device)}` : ''}`,
+        button: { label: 'In der CEO-Konsole öffnen', href: `${origin}/ceo` }, footer: 'Auch in der CEO-Konsole unter „Support“ gespeichert.' }),
+    });
+    return { ok: true, mailed: r.sent };
+  }
+  if (action === 'chat_list' || action === 'chat_get' || action === 'chat_send') {
+    const prefix = `tablet:${code}:`;
+    const own = s0 => s0 && String(s0.user_id || '').startsWith(prefix);
+    if (action === 'chat_list') {
+      const list = (await db.list('ChatSession', null).catch(() => [])).filter(own)
+        .sort((a, b) => String(b.last_message_at || b.updated_date || '').localeCompare(String(a.last_message_at || a.updated_date || '')));
+      return { ok: true, sessions: list.map(x => ({ id: x.id, subject: x.subject, status: x.status, user_name: x.user_name, last_message: String(x.last_message || '').slice(0, 200), last_message_at: x.last_message_at || x.updated_date, last_sender: x.last_sender, unread: !!x.unread_user })) };
+    }
+    let session = body.id ? await db.get('ChatSession', String(body.id)).catch(() => null) : null;
+    if (body.id && !own(session)) throw new HttpError(404, 'not_found');
+    if (action === 'chat_get') {
+      if (!session) throw new HttpError(404, 'not_found');
+      const msgs = (await db.list('ChatMessage', { session_id: session.id }, { limit: 500 })).sort((a, b) => String(a.created_date).localeCompare(String(b.created_date)));
+      if (session.unread_user) await db.update('ChatSession', session.id, { unread_user: false }).catch(() => {});
+      return { ok: true, session: { id: session.id, subject: session.subject, status: session.status }, messages: msgs.map(m => ({ id: m.id, sender: m.sender, author_name: m.author_name, content: m.content, attachments: m.attachments || [], created_date: m.created_date })) };
+    }
+    rateLimit('chat:' + sess.employee_id, 60, 3600_000);
+    const content = String(body.content || '').trim().slice(0, 5000);
+    if (!content) throw new HttpError(400, 'params', { message: 'Bitte eine Nachricht eingeben.' });
+    if (!session) {
+      const subject = String(body.subject || '').trim().slice(0, 200);
+      if (!subject) throw new HttpError(400, 'params', { message: 'Bitte einen Betreff eingeben.' });
+      const ws = await workshopInfo(db, code);
+      session = await db.create('ChatSession', {
+        subject, status: 'offen', priority: 'normal', user_id: `${prefix}${sess.employee_id}`,
+        user_name: `${emp.name} · ${ws.name} (${code}, Tablet)`, user_email: ws.email || '',
+        last_message: content.slice(0, 300), last_message_at: nowIso(), last_sender: 'user', unread_admin: true, unread_user: false,
+      });
+    } else {
+      await db.update('ChatSession', session.id, { last_message: content.slice(0, 300), last_message_at: nowIso(), last_sender: 'user', unread_admin: true, ...(session.status === 'abgeschlossen' ? { status: 'offen' } : {}) });
+    }
+    await db.create('ChatMessage', { session_id: session.id, user_id: session.user_id, sender: 'user', author_name: emp.name, content });
+    const q = mailSupportChat(env, { toAdmin: true, session, content, user: { workshop_code: code }, attachments: [] }).catch(e => console.log('chat_mail', String(e)));
+    if (ctx && ctx.waitUntil) ctx.waitUntil(q);
+    return { ok: true, id: session.id };
+  }
+
   if (action === 'media_upload') {
     if (!env.PHOTOS) throw new HttpError(503, 'not_available', { message: 'Foto-Speicher ist noch nicht eingerichtet.' });
     const order = await ownRecord(db, 'Order', body.order_id, code);
