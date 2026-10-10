@@ -342,13 +342,13 @@ await t('Kundennachrichten: Portal ↔ Werkstatt, Mail an beide Seiten, fremde W
   assert.equal(stored.workshop_code, 'AL-T1'); assert.equal(stored.read_by_workshop, false);
   const toWs = mails.slice(m0).find(m => m.to[0] === 'a@b.de');
   assert.ok(toWs, 'Werkstatt-Mail fehlt'); assert.match(toWs.html, /live-chat\?tab=kunden&amp;order=o1|live-chat\?tab=kunden&order=o1/); assert.ok(toWs.html.includes('&lt;b&gt;mein'));
-  const r = await fnU('orderMessageSend', { order_id: 'o1', content: 'Heute 16 Uhr', sender_name: 'Testwerkstatt' });
+  const r = await fnU('orderMessageSend', { order_id: 'o1', content: 'Heute 16 Uhr' });
   assert.equal(r.s, 200, JSON.stringify(r.d));
   assert.ok(mails.slice(m0).some(m => m.to[0] === 'kunde@example.com' && m.html.includes('kundenapp.html?token=tok-aaaaaa')));
   assert.equal((await fnU('orderMessageSend', { order_id: 'o2', content: 'x' })).s, 403);
   const g = await portal({ action: 'get', token: 'tok-aaaaaa' });
   assert.deepEqual(g.d.messages.map(m => m.sender), ['kunde', 'werkstatt']);
-  assert.equal(g.d.messages[1].sender_name, 'Testwerkstatt'); assert.equal(g.d.messages[0].customer_token, undefined);
+  assert.equal(g.d.messages[1].sender_name, 'Testwerkstatt GmbH'); assert.equal(g.d.messages[0].customer_token, undefined);
   assert.equal(db.OrderMessage.find(m => m.sender === 'werkstatt').read_by_customer, true);
   assert.equal((await portal({ action: 'message_send', token: 'tok-aaaaaa', content: '   ' })).s, 400);
 });

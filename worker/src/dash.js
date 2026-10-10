@@ -175,7 +175,7 @@ export async function handleFunction(name, body, c) {
     if (!order.customer_token) throw new HttpError(400, 'no_portal', { message: 'Für diesen Auftrag gibt es noch keinen Kundenportal-Zugang.' });
     const created = await db.create('OrderMessage', {
       order_id: order.id, workshop_code: order.workshop_code, sender: 'werkstatt',
-      sender_name: String(body.sender_name || '').trim().slice(0, 80) || 'Werkstatt',
+      sender_name: String(body.sender_name || '').trim().slice(0, 80),
       content, read_by_customer: false, read_by_workshop: true,
     });
     bg(h.mailWorkshopMessage(env, db, order, content));
