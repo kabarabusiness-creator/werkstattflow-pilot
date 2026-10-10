@@ -10,7 +10,9 @@
  */
 export const USAGE_PREFIX = '_usage/';
 const FLUSH_MS = 5 * 60_000;
-const INSTANCE = (() => { const a = new Uint8Array(6); crypto.getRandomValues(a); return [...a].map(b => b.toString(16).padStart(2, '0')).join(''); })();
+// Zufalls-ID erst bei der ersten Anfrage erzeugen – Cloudflare verbietet Zufallswerte beim Start (globaler Bereich)
+let instanceId = null;
+const instance = () => instanceId || (instanceId = (() => { const a = new Uint8Array(6); crypto.getRandomValues(a); return [...a].map(b => b.toString(16).padStart(2, '0')).join(''); })());
 
 // Kostenlose Kontingente (Stand Cloudflare Workers Free / Resend Free)
 export const LIMITS = {
@@ -28,7 +30,7 @@ const FALLBACK_NEURONS = { text: 150, vision: 450 };
 
 const berlinDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
 const acc = new Map(); // Tag → Zähler
-let lastFlush = Date.now();
+let lastFlush = 0; // wird bei der ersten Zählung gesetzt
 let dirty = false;
 
 function bucket(day) {
@@ -37,6 +39,7 @@ function bucket(day) {
 }
 export function count(key, n = 1, code) {
   const b = bucket(berlinDay());
+  if (!lastFlush) lastFlush = Date.now();
   b[key] = (b[key] || 0) + n;
   if (code) { const w = b.workshops[code] || (b.workshops[code] = {}); w[key] = (w[key] || 0) + n; }
   dirty = true;
@@ -61,7 +64,7 @@ export function maybeFlush(env, ctx, force) {
   const writes = [];
   for (const [day, b] of acc) {
     b.kv_writes++; // dieser Schreibvorgang zählt mit
-    writes.push(env.PHOTOS.put(`${USAGE_PREFIX}${day}/${INSTANCE}`, JSON.stringify(b), { expirationTtl: 40 * 86400 }).catch(e => console.log('usage_flush', String(e))));
+    writes.push(env.PHOTOS.put(`${USAGE_PREFIX}${day}/${instance()}`, JSON.stringify(b), { expirationTtl: 40 * 86400 }).catch(e => console.log('usage_flush', String(e))));
     if (day !== today) acc.delete(day);
   }
   const p = Promise.all(writes);
@@ -92,7 +95,7 @@ export async function readUsage(env, days = 31) {
     const t = emptyDay(day);
     if (env.PHOTOS) {
       const keys = (await env.PHOTOS.list({ prefix: `${USAGE_PREFIX}${day}/` })).keys;
-      const rows = await Promise.all(keys.filter(k => !(acc.has(day) && k.name.endsWith('/' + INSTANCE))).map(k => env.PHOTOS.get(k.name, { type: 'json' }).catch(() => null)));
+      const rows = await Promise.all(keys.filter(k => !(acc.has(day) && k.name.endsWith('/' + instance()))).map(k => env.PHOTOS.get(k.name, { type: 'json' }).catch(() => null)));
       rows.filter(Boolean).forEach(b => addInto(t, b));
     }
     if (acc.has(day)) addInto(t, acc.get(day)); // eigene Instanz immer frisch aus dem Speicher
@@ -100,5 +103,5 @@ export async function readUsage(env, days = 31) {
     result.push(t);
   }
   const month = berlinDay().slice(0, 7);
-  return { days: result, month_emails: result.filter(d => d.day.startsWith(month)).reduce((s, d) => s + d.emails, 0), limits: LIMITS, instance: INSTANCE };
+  return { days: result, month_emails: result.filter(d => d.day.startsWith(month)).reduce((s, d) => s + d.emails, 0), limits: LIMITS, instance: instance() };
 }
