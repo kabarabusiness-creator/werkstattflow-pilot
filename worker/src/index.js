@@ -431,6 +431,7 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     const wt = await db.create('WorkTime', {
       employee_name: emp.name, order_id: body.order_id || null, description: String(body.description || '').slice(0, 300),
       start_timestamp: nowIso(), workshop_code: code,
+      ...(body.task_id ? { task_id: String(body.task_id).slice(0, 64) } : {}),
     });
     invalidate('WorkTime');
     return { ok: true, worktime_id: wt.id };

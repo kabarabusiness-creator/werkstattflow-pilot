@@ -1516,7 +1516,8 @@ async function tabletAction(action, payload){
 
 /* Der 30-Sekunden-Abgleich baut alle Aufträge neu auf. Ohne diese Übernahme wären laufende
    Timer, abgehakte Checklisten, Fotos und Sprachberichte nach spätestens 30 s weg. */
-const LOCAL_TASK_FIELDS = ['timeStatus','startedAt','elapsedSec','istMin','_worktimeId','photos','voiceNote','voiceError','voiceShowManual','zusatzarbeit','aiAnalysis','_voiceParts'];
+const TIMER_FIELDS = ['timeStatus','startedAt','elapsedSec','istMin','_worktimeId'];
+const LOCAL_TASK_FIELDS = ['timeStatus','startedAt','elapsedSec','istMin','_worktimeId','_timerChangedAt','photos','voiceNote','voiceError','voiceShowManual','zusatzarbeit','aiAnalysis','_voiceParts'];
 function carryOverLocalState(prevOrders, nextOrders){
   const prevById = new Map((prevOrders||[]).map(o=>[o.id,o]));
   const now = Date.now(), MAX_AGE = 15*60*1000;
@@ -1529,8 +1530,10 @@ function carryOverLocalState(prevOrders, nextOrders){
       no.tasks.forEach(nt=>{
         const pt = (po.tasks||[]).find(t=>t.id===nt.id);
         if(!pt) return;
+        const timerFresh = pt._timerChangedAt && Date.now() - pt._timerChangedAt < 45000;
         LOCAL_TASK_FIELDS.forEach(f=>{
           if(pt[f]===undefined) return;
+          if(TIMER_FIELDS.includes(f) && nt._serverTimer && !timerFresh) return; // Zeit vom Server (Leitstelle/anderes Tablet) gewinnt
           if(f==='photos' && (!pt.photos||!pt.photos.length)) return;
           if(f==='voiceNote' && !pt.voiceNote && nt.voiceNote) return; // gespeicherter Bericht vom Server nicht mit „leer“ überschreiben
           nt[f] = pt[f];
@@ -1675,6 +1678,30 @@ function handleSessionExpired(){
   if(el) el.textContent = 'Sitzung abgelaufen. Bitte neu anmelden.';
 }
 let b44PollInterval = null;
+// Zeiterfassung vom Server übernehmen: laufende Zeit + bereits gebuchte Minuten je Aufgabe.
+// So sieht das Tablet Starts/Stopps aus der Leitstelle oder von einem anderen Tablet.
+function attachServerTimers(list, data){
+  const wts = Array.isArray(data.worktimes) ? data.worktimes : [];
+  if(!wts.length) return;
+  const ms = x => { const v = String(x||''); return Date.parse(/Z|[+-]\d\d:?\d\d$/.test(v) ? v : v + 'Z') || 0; };
+  list.forEach(o=>{
+    const ow = wts.filter(w=>w.order_id===o.id);
+    if(!ow.length) return;
+    o.tasks.forEach(t=>{
+      const tw = ow.filter(w=> w.task_id ? w.task_id===t.id : (t.title && w.description===t.title));
+      if(!tw.length) return;
+      let closed = 0, running = null;
+      tw.forEach(w=>{
+        if(!w.end_timestamp){ if(!running || ms(w.start_timestamp) > ms(running.start_timestamp)) running = w; return; }
+        closed += Math.max(0, (ms(w.end_timestamp) - ms(w.start_timestamp)) / 1000);
+      });
+      t._serverTimer = true;
+      t.elapsedSec = Math.round(closed);
+      if(running){ t.timeStatus = 'running'; t.startedAt = ms(running.start_timestamp); t._worktimeId = running.id; t._timerBy = running.employee_name || ''; }
+      else { t.startedAt = null; t._worktimeId = null; t.timeStatus = t.status==='done' ? 'done' : (closed > 0 ? 'paused' : 'idle'); if(t.status==='done') t.istMin = Math.max(1, Math.round(closed/60)); }
+    });
+  });
+}
 // Bereits gespeicherte Aufgaben-Fotos und Sprachberichte vom Server an die Aufgaben hängen (sonst nach Neuladen „weg“)
 function attachSavedTaskData(list, data){
   const media = Array.isArray(data.task_media) ? data.task_media : [];
@@ -1703,6 +1730,7 @@ async function loadFromBase44(){
   const prevOrders = orders;
   orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
   attachSavedTaskData(orders, data);
+  attachServerTimers(orders, data);
   carryOverLocalState(prevOrders, orders);
   // fehlgeschlagene Checklisten-Speicherungen beim nächsten Abgleich erneut senden
   Object.keys(state.pendingQC||{}).forEach(id=>{ const o = orders.find(x=>x.id===id); if(o && Date.now()-state.pendingQC[id].ts > 5000) saveQC(o); else if(!o) delete state.pendingQC[id]; });
@@ -3588,7 +3616,7 @@ function renderTimerBlock(t){
   if(t.timeStatus==='running'){
     return `
       <div class="td-timer running">
-        <div class="td-timer-row"><span class="td-timer-label">Läuft seit ${formatClock(t.startedAt)}</span><span class="td-timer-big" id="liveTimerText">${formatSecs(currentElapsed(t))}</span></div>
+        <div class="td-timer-row"><span class="td-timer-label">Läuft seit ${formatClock(t.startedAt)}${t._timerBy && state.currentUser && t._timerBy!==state.currentUser.name ? ` · ${escHtml(t._timerBy)}` : ''}</span><span class="td-timer-big" id="liveTimerText">${formatSecs(currentElapsed(t))}</span></div>
         <div class="td-timer-sub">Soll: ${sollMin} Min</div>
         <div class="td-timer-actions">
           <button class="td-timer-btn" data-timeraction="pause">${iconPause} Pause</button>
@@ -3618,7 +3646,7 @@ function renderTimerBlock(t){
 }
 function startTimer(t){
   if(t.timeStatus==='running') return;
-  t.timeStatus='running'; t.startedAt=Date.now();
+  t.timeStatus='running'; t.startedAt=Date.now(); t._timerChangedAt=Date.now();
   if(t.status==='open'){ t.status='progress'; t.statusLabel='In Arbeit'; }
   renderTabPanel();
   startWorktime(t);
@@ -3627,7 +3655,12 @@ function startTimer(t){
 function startWorktime(t){
   const o = getSelectedOrder();
   tabletAction('worktime_start', { order_id: o ? o.id : null, task_id:t.id, description:t.title })
-    .then(data=>{ if(data && data.worktime_id) t._worktimeId = data.worktime_id; });
+    .then(data=>{
+      if(!data || !data.worktime_id) return;
+      // Schon wieder pausiert/fertig, bevor der Server geantwortet hat → sofort beenden, sonst läuft die Zeit dort weiter
+      if(t.timeStatus!=='running'){ tabletAction('worktime_stop', { worktime_id:data.worktime_id }); return; }
+      t._worktimeId = data.worktime_id;
+    });
 }
 function stopWorktime(t){
   if(!t._worktimeId) return;
@@ -3637,18 +3670,18 @@ function stopWorktime(t){
 function pauseTimer(t){
   if(t.timeStatus!=='running') return;
   t.elapsedSec = currentElapsed(t);
-  t.timeStatus='paused'; t.startedAt=null;
+  t.timeStatus='paused'; t.startedAt=null; t._timerChangedAt=Date.now();
   renderTabPanel();
   stopWorktime(t);
 }
 function resumeTimer(t){
-  t.timeStatus='running'; t.startedAt=Date.now();
+  t.timeStatus='running'; t.startedAt=Date.now(); t._timerChangedAt=Date.now();
   renderTabPanel();
   startWorktime(t);
 }
 function finishTimer(o,t){
   t.elapsedSec = currentElapsed(t);
-  t.timeStatus='done'; t.startedAt=null;
+  t.timeStatus='done'; t.startedAt=null; t._timerChangedAt=Date.now();
   t.istMin = Math.max(1, Math.round(t.elapsedSec/60));
   stopWorktime(t);
   completeTask(o,t);
