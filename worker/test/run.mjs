@@ -227,6 +227,19 @@ await t('Reifenscan: gespeicherten Befund wieder laden (Notiz-Fallback + struktu
   s = (await call('/tabletAction', { action: 'tire_scan_get', order_id: 'o1' }, token)).data.saved;
   assert.equal(s.result.brand.value, 'Michelin'); assert.equal(s.photos.flanke, up.file_url); assert.equal(s.photos.felge, undefined);
 });
+await t('Qualitätskontrolle: Haken sofort am Auftrag gespeichert, wer/wann bleibt stabil', async () => {
+  let r = await call('/tabletAction', { action: 'qc_save', order_id: 'o1', qc: [{ label: 'Ölstand geprüft', checked: true }, { label: 'Probefahrt durchgeführt', checked: false }] }, token);
+  assert.equal(r.data.ok, true);
+  const first = db.Order.find(o => o.id === 'o1').qc_checklist;
+  assert.equal(first[0].checked, true); assert.ok(first[0].by); assert.ok(first[0].at); assert.equal(first[1].by, '');
+  r = await call('/tabletAction', { action: 'qc_save', order_id: 'o1', qc: [{ label: 'Ölstand geprüft', checked: true }, { label: 'Probefahrt durchgeführt', checked: true }] }, token);
+  const second = db.Order.find(o => o.id === 'o1').qc_checklist;
+  assert.equal(second[0].at, first[0].at); assert.equal(second[1].checked, true);
+  const d = (await call('/getTabletData', null, token, 'GET')).data;
+  assert.equal(d.orders.find(o => o.id === 'o1').qc_checklist.length, 2);
+  assert.equal((await call('/tabletAction', { action: 'qc_save', order_id: 'o2', qc: [{ label: 'x', checked: true }] }, token)).status, 404);
+  assert.equal((await call('/tabletAction', { action: 'qc_save', order_id: 'o1', qc: [] }, token)).status, 400);
+});
 await t('Aufgaben-Fotos und Sprachberichte kommen mit getTabletData zurück', async () => {
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   const up = (await call('/tabletAction', { action: 'media_upload', order_id: 'o1', task_id: 'tk-1', data_url: png, caption: 'Bremse' }, token)).data;

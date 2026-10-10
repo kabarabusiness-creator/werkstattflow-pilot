@@ -448,6 +448,23 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     invalidate('InternalNote');
     return { ok: true };
   }
+  // Qualitätskontrolle: jeder Haken wird sofort am Auftrag gespeichert (überlebt Neuladen/Gerätewechsel)
+  if (action === 'qc_save') {
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    if (!Array.isArray(body.qc) || !body.qc.length || body.qc.length > 50) throw new HttpError(400, 'params');
+    const prev = Array.isArray(order.qc_checklist) ? order.qc_checklist : [];
+    const qc = body.qc.map(q => {
+      const label = String((q && q.label) || '').slice(0, 200);
+      const checked = !!(q && q.checked);
+      const old = prev.find(p => p.label === label);
+      // Wer/wann nur ändern, wenn sich der Haken wirklich ändert
+      if (old && !!old.checked === checked) return { label, checked, by: old.by || '', at: old.at || '' };
+      return { label, checked, by: checked ? emp.name : '', at: checked ? nowIso() : '' };
+    });
+    await db.update('Order', order.id, { qc_checklist: qc });
+    invalidate('Order');
+    return { ok: true, qc };
+  }
   if (action === 'order_complete') {
     const order = await ownRecord(db, 'Order', body.order_id, code);
     const qc = Array.isArray(body.qc) ? body.qc.slice(0, 50) : [];

@@ -538,6 +538,7 @@
   .qc-ring svg{width:44px;height:44px;transform:rotate(-90deg);}
   .qc-ring-bg{fill:none;stroke:var(--surface);stroke-width:3;}
   .qc-ring-fill{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;transition:stroke-dasharray .3s;}
+  .qc-by{display:block;font-style:normal;font-size:11px;color:var(--text-faint);margin-top:2px;}
   .qc-ring span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;}
 
   .part-row{
@@ -1510,7 +1511,9 @@ function carryOverLocalState(prevOrders, nextOrders){
   nextOrders.forEach(no=>{
     const po = prevById.get(no.id);
     if(po){
-      if(Array.isArray(po.qc) && po.qc.length) no.qc = po.qc;
+      const pq = state.pendingQC && state.pendingQC[no.id];
+      if(pq) no.qc = po.qc;
+      else if(Array.isArray(po.qc) && po.qc.length && !(Array.isArray(no._serverQC) && no._serverQC.length)) no.qc = po.qc;
       no.tasks.forEach(nt=>{
         const pt = (po.tasks||[]).find(t=>t.id===nt.id);
         if(!pt) return;
@@ -1611,7 +1614,8 @@ function b44MapOrder(o, allTasks, demoImageByBrand){
     tel: o.phone || '',
     email: o.email || '', hasPortal: !!o.has_portal,
     desc: o.description || '',
-    qc: defaultQC(),
+    qc: qcFromServer(o.qc_checklist),
+    _serverQC: o.qc_checklist || null,
     tasks,
   };
 }
@@ -1687,6 +1691,8 @@ async function loadFromBase44(){
   orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
   attachSavedTaskData(orders, data);
   carryOverLocalState(prevOrders, orders);
+  // fehlgeschlagene Checklisten-Speicherungen beim nächsten Abgleich erneut senden
+  Object.keys(state.pendingQC||{}).forEach(id=>{ const o = orders.find(x=>x.id===id); if(o && Date.now()-state.pendingQC[id].ts > 5000) saveQC(o); else if(!o) delete state.pendingQC[id]; });
   state.b44Appointments = Array.isArray(data.appointments) ? data.appointments : [];
   state.tireSets = Array.isArray(data.tire_sets) ? data.tire_sets : null; // kommt mit getTabletData-Update
   state.apiUsers = data.employees.filter(e=>e.is_active).map(e => ({ id: e.id, name: e.name, email:'', role: e.role, active: 1 }));
@@ -2999,6 +3005,26 @@ function task(id,title,cat,catColor,duration,status,statusLabel,desc,progress,im
   return {id,title,cat,catColor,duration,mechanic:'Sie',status,statusLabel,desc,progress,images:images||0};
 }
 
+// Haken sofort speichern; bei mehreren schnellen Klicks nur den letzten Stand senden
+const qcSaveTimers = {};
+function saveQC(o){
+  state.pendingQC = state.pendingQC || {};
+  state.pendingQC[o.id] = { qc: o.qc.map(q=>({ label:q.label, checked:!!q.checked, by:q.by||'' })), ts: Date.now() };
+  clearTimeout(qcSaveTimers[o.id]);
+  qcSaveTimers[o.id] = setTimeout(async ()=>{
+    const pend = (state.pendingQC||{})[o.id]; if(!pend) return;
+    const r = await tabletAction('qc_save', { order_id:o.id, qc: pend.qc.map(q=>({ label:q.label, checked:q.checked })) });
+    if(r && state.pendingQC && state.pendingQC[o.id] === pend) delete state.pendingQC[o.id]; // sonst beim nächsten Abgleich lokal behalten
+  }, 600);
+}
+// Gespeicherte Checkliste vom Server übernehmen (Punkte der Standardliste behalten ihre Reihenfolge)
+function qcFromServer(list){
+  const base = defaultQC();
+  if(!Array.isArray(list) || !list.length) return base;
+  const out = base.map(b=>{ const s = list.find(x=>x && x.label===b.label); return s ? { label:b.label, checked:!!s.checked, by:s.by||'', at:s.at||'' } : b; });
+  list.forEach(x=>{ if(x && x.label && !out.some(q=>q.label===x.label)) out.push({ label:x.label, checked:!!x.checked, by:x.by||'', at:x.at||'' }); });
+  return out;
+}
 function defaultQC(){
   return [
     {label:'Drehmoment geprüft', checked:false},
@@ -3334,7 +3360,7 @@ function renderTabPanel(){
       ${o.qc.map((q,i)=>`
         <div class="checklist-item ${q.checked?'checked':''}">
           <div class="check ${q.checked?'done':''}" data-qccheck="${i}">${q.checked?iconCheck:''}</div>
-          <span class="lab">${q.label}</span>
+          <span class="lab">${escHtml(q.label)}${q.checked && q.by ? `<em class="qc-by">${escHtml(q.by)}</em>` : ''}</span>
         </div>
       `).join('')}
     `;
@@ -3820,6 +3846,8 @@ document.addEventListener('click', (e)=>{
     const o = getSelectedOrder();
     const i = parseInt(qccheck.dataset.qccheck,10);
     o.qc[i].checked = !o.qc[i].checked;
+    o.qc[i].by = o.qc[i].checked && state.currentUser ? state.currentUser.name : '';
+    saveQC(o);
     renderTabPanel();
     return;
   }
@@ -5034,7 +5062,6 @@ function tireState(o, fresh){
   return state.tireScan;
 }
 // Bereits gespeicherten Reifenscan vom Server holen – sonst wäre er nach Neuladen/Auftragswechsel am Tablet „weg“.
-state.tireSavedCache = state.tireSavedCache || {};
 function applySavedTire(ts, saved){
   if(!saved || ts.busy || ts.result || Object.keys(ts.photos).length) return false; // Mechaniker arbeitet schon an einem neuen Scan
   ts.photos = Object.assign({}, saved.photos || {});
@@ -5043,6 +5070,7 @@ function applySavedTire(ts, saved){
   return true;
 }
 async function loadSavedTire(o, ts){
+  state.tireSavedCache = state.tireSavedCache || {};
   const cached = state.tireSavedCache[o.id];
   if(cached) applySavedTire(ts, cached);
   ts.loading = !cached;
@@ -5206,7 +5234,7 @@ async function saveTireScan(){
   if(note){
     const photos = {}; TIRE_SLOTS.forEach(s=>{ const p = ts.photos[s.key]; if(p && !p.startsWith('data:')) photos[s.key] = p; });
     const saved = { result: JSON.parse(JSON.stringify(r)), photos, saved_at: new Date().toISOString(), saved_by: state.currentUser ? state.currentUser.name : '' };
-    state.tireSavedCache[o.id] = saved; ts.savedInfo = { at: saved.saved_at, by: saved.saved_by };
+    state.tireSavedCache = state.tireSavedCache || {}; state.tireSavedCache[o.id] = saved; ts.savedInfo = { at: saved.saved_at, by: saved.saved_by };
     tabletRequest('tire_scan_store', { order_id:o.id, result: saved.result, photos }, 20000);
   }
   if(note) showUpdateToast(r.manual ? 'Reifendaten am Auftrag gespeichert' : 'Reifenscan am Auftrag gespeichert');
