@@ -379,6 +379,7 @@
   .cat-chip.amber{background:var(--warning-soft);color:var(--warning);}
   .cat-chip.teal{background:var(--teal-soft);color:var(--teal);}
   .cat-chip.red{background:rgba(239,68,68,.14);color:#f87171;}
+  .cat-chip.green{background:rgba(34,197,94,.14);color:#4ade80;}
   .tsd{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px;display:flex;flex-direction:column;gap:12px;}
   .tsd-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;} .tsd-head h3{margin:0;font-size:18px;} .tsd-sub{font-size:12.5px;color:var(--text-faint);margin-top:4px;}
   .tsd-place{display:flex;gap:12px;align-items:center;padding:14px;border-radius:12px;background:var(--accent-soft);} .tsd-place svg{width:22px;height:22px;color:var(--accent-2);flex-shrink:0;}
@@ -1580,7 +1581,7 @@ function b44MapTaskStatus(s){
 }
 function b44MapOrder(o, allTasks, demoImageByBrand){
   const tasks = allTasks.filter(t=>t.order_id===o.id).sort((a,b)=>(a.order_index||0)-(b.order_index||0)).map(t=>({
-    id: t.id, title: t.title, cat: 'Allgemein', catColor: 'violet',
+    id: t.id, title: t.title, cat: taskCategory(t), catColor: catColorFor(taskCategory(t)),
     duration: t.estimated_minutes ? minutesToLabel(t.estimated_minutes) : '–',
     mechanic: t.assigned_employee || 'Nicht zugewiesen',
     status: b44MapTaskStatus(t.status),
@@ -1773,8 +1774,25 @@ const FALLBACK_CAR_IMAGE = 'data:image/svg+xml;utf8,' + encodeURIComponent(
    </svg>`
 );
 
+// Kategorie einer Aufgabe: aus der verknüpften Dienstleistung, sonst aus dem Aufgabentitel abgeleitet
+const SERVICE_CAT = { oel_wartung:'Wartung', inspektion:'Wartung', reifen:'Reifen', bremse:'Bremse', diagnose:'Diagnose' };
+const TASK_CAT_RULES = [
+  ['Bremse', /brems/],
+  ['Reifen', /reifen|räder|\brad\b|radwechsel|rdks|achsvermess|spur|felge|wucht|einlager/],
+  ['Klima', /klima|kondensator|kältemittel/],
+  ['Diagnose', /diagnose|fehlerspeicher|auslesen|lecksuche|live-daten|messen|prüfen|test|ursache/],
+  ['Prüfung', /\bhu\b|\bau\b|tüv|probefahrt|endkontrolle|annehm|annahme|abnahme|qualität/],
+  ['Wartung', /öl|inspektion|service|filter|zahnriemen|wasserpumpe|kühl|zündkerze|kerzen|flüssigkeit|batterie|wischer/],
+  ['Reparatur', /erneuern|tauschen|ersetzen|wechseln|reinigen|reparatur|instandsetz|montieren|einbauen/],
+];
+function taskCategory(t){
+  if(t.category && SERVICE_CAT[t.category]) return SERVICE_CAT[t.category];
+  const title = String(t.title||'').toLowerCase();
+  for(const [cat, re] of TASK_CAT_RULES) if(re.test(title)) return cat;
+  return 'Allgemein';
+}
 function catColorFor(cat){
-  const map = { Wartung:'violet', Reparatur:'blue', Prüfung:'amber', Diagnose:'teal' };
+  const map = { Wartung:'violet', Reparatur:'blue', Prüfung:'amber', Diagnose:'teal', Bremse:'red', Reifen:'green', Klima:'blue' };
   return map[cat] || 'violet';
 }
 function minutesToLabel(min){
@@ -3111,7 +3129,7 @@ const statusMeta = {
   pruefung:{label:'In Prüfung', cls:'pruefung'},
   erledigt:{label:'Erledigt', cls:'erledigt'},
 };
-const catColorMap = {violet:'#8b5cf6', blue:'#4f9eff', amber:'#f5a524', teal:'#2dd4bf'};
+const catColorMap = {violet:'#8b5cf6', blue:'#4f9eff', amber:'#f5a524', teal:'#2dd4bf', red:'#f87171', green:'#4ade80'};
 
 let state = {
   mainView:'auftraege',

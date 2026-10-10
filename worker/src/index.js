@@ -25,7 +25,7 @@ const LOCK_MINUTES = 15;
 const CACHE_MS = 30_000;
 const WORKTIME_CAP_MIN = 720;
 const TIME_SLOTS = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00','15:30'];
-const TABLET_ENTITIES = ['Order', 'OrderTask', 'Employee', 'WorkTime', 'Lift', 'Appointment', 'TireSet', 'Workshop'];
+const TABLET_ENTITIES = ['Order', 'OrderTask', 'Employee', 'WorkTime', 'Lift', 'Appointment', 'TireSet', 'Workshop', 'Service'];
 
 /* ---------------- Hilfsfunktionen ---------------- */
 const enc = new TextEncoder();
@@ -209,7 +209,11 @@ async function getTabletData(db, sess) {
     workshop_code: code,
     workshop: { name: ws.name || '', trial_ends_at: ws.trial_ends_at || null, subscription_status: ws.subscription_status || null },
     orders: orders.map(stripOrder),
-    tasks: by.OrderTask.filter(t => t.workshop_code === code || orderIds.has(t.order_id)),
+    // Kategorie der verknüpften Dienstleistung mitgeben (Tablet zeigt sonst „Allgemein“)
+    tasks: by.OrderTask.filter(t => t.workshop_code === code || orderIds.has(t.order_id)).map(t => {
+      const svc = t.service_id ? by.Service.find(x => x.id === t.service_id) : null;
+      return svc && svc.category ? { ...t, category: svc.category } : t;
+    }),
     employees: mine(by.Employee).filter(e => e.is_active !== false).map(stripEmployee),
     worktimes: mine(by.WorkTime).slice(0, 300),
     parts: [],
