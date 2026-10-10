@@ -943,6 +943,16 @@
   .dash-status-row{display:flex;justify-content:space-between;align-items:center;}
   .dash-status-row b{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',Arial,sans-serif;font-size:16px;}
   .dash-timeline{position:relative;padding-left:2px;}
+  .dash-appt-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+  .dash-appt-filter{display:flex;gap:6px;flex-wrap:wrap;}
+  .dash-appt-chip{font:inherit;font-size:12px;font-weight:600;padding:6px 11px;border-radius:999px;border:1px solid var(--border-soft);background:transparent;color:var(--text-faint);cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+  .dash-appt-chip span{font-size:11px;opacity:.75;}
+  .dash-appt-chip.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2);}
+  .dash-appt-list{max-height:420px;overflow-y:auto;}
+  .dash-appt-day{font-size:11.5px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;padding:12px 0 2px;}
+  .dash-appt-day:first-child{padding-top:0;}
+  .dash-appt-empty{font-size:13px;color:var(--text-faint);padding:10px 0;}
+  .dash-tl-item.past{opacity:.5;}
   .dash-tl-item{display:flex;align-items:center;gap:13px;padding:11px 0;position:relative;}
   .dash-tl-item[data-order]{cursor:pointer;}
   .dash-tl-item[data-order]:hover .dash-tl-title{color:var(--accent-2);}
@@ -2447,6 +2457,52 @@ function renderFahrzeugeView(ov){
 }
 
 // Termine kommen jetzt aus getTabletData (data.appointments, bereits nach Werkstatt gefiltert).
+/* Dashboard „Anstehende Termine“: Filter Heute / Diese Woche / Nächste Woche (Mo–So) */
+const DASH_APPT_RANGES = [ { key:'heute', label:'Heute' }, { key:'woche', label:'Diese Woche' }, { key:'naechste', label:'Nächste Woche' } ];
+function dashApptRange(){
+  if(!state.dashApptRange){ try{ state.dashApptRange = localStorage.getItem('al_dash_appt_range') || 'heute'; }catch(_){ state.dashApptRange = 'heute'; } }
+  return DASH_APPT_RANGES.some(r=>r.key===state.dashApptRange) ? state.dashApptRange : 'heute';
+}
+function isoDay(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function apptDayLabel(iso){
+  const [y,m,d] = iso.split('-').map(Number); const dt = new Date(y, m-1, d);
+  const today = isoDay(new Date()); const tm = new Date(); tm.setDate(tm.getDate()+1);
+  const wd = ['So','Mo','Di','Mi','Do','Fr','Sa'][dt.getDay()];
+  const prefix = iso===today ? 'Heute · ' : iso===isoDay(tm) ? 'Morgen · ' : '';
+  return `${prefix}${wd}, ${String(d).padStart(2,'0')}.${String(m).padStart(2,'0')}.`;
+}
+function apptsInRange(range){
+  const now = new Date(); const todayISO = isoDay(now);
+  let from = todayISO, to = todayISO;
+  if(range!=='heute'){
+    const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay()+6)%7));
+    if(range==='naechste') monday.setDate(monday.getDate()+7);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+    from = range==='woche' ? todayISO : isoDay(monday); // diese Woche: ab heute (Vergangenes ist nicht mehr „anstehend“)
+    to = isoDay(sunday);
+  }
+  const nowHM = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  const typeLabel = t => String(t||'Termin').replace(/_/g,' ').replace(/^./, c=>c.toUpperCase());
+  return (state.b44Appointments || []).filter(a=>{
+    if(a.status==='storniert') return false;
+    const d = String(a.appointment_date||'').slice(0,10);
+    return d >= from && d <= to;
+  }).map(a=>{
+    const date = String(a.appointment_date||'').slice(0,10);
+    const tm = String(a.time_slot||'').match(/\d{1,2}:\d{2}/);
+    const time = tm ? tm[0].padStart(5,'0') : (a.time_slot || '–');
+    const order = a.order_id ? orders.find(o => o.id === a.order_id) : null;
+    return {
+      date, time,
+      title: a.service_name || typeLabel(a.appointment_type),
+      sub: [a.customer_name, order ? ('Auftrag #'+order.orderNumber) : null].filter(Boolean).join(' · ') || 'Kein Kunde verknüpft',
+      badge: a.status==='bestaetigt' ? 'Bestätigt' : (a.status==='abgeschlossen' ? 'Erledigt' : 'Geplant'),
+      cls: 'arbeit',
+      order: order ? String(order.orderNumber) : null,
+      past: a.status==='abgeschlossen' || (date===todayISO && tm && time < nowHM),
+    };
+  }).sort((x,y)=> (x.date+x.time).localeCompare(y.date+y.time));
+}
 function getAppointmentsData(){
   const heute = [], morgen = [];
   const now = new Date();
@@ -2773,21 +2829,29 @@ function renderDashboardView(ov){
     </div>
 
     <div class="dash-panel" style="margin-top:14px;">
-      <div class="dash-panel-head">Anstehende Termine</div>
-      <div class="dash-timeline">
+      <div class="dash-panel-head dash-appt-head">Anstehende Termine
+        <div class="dash-appt-filter">${DASH_APPT_RANGES.map(r=>`<button type="button" class="dash-appt-chip ${dashApptRange()===r.key?'active':''}" data-apptrange="${r.key}">${r.label}<span>${apptsInRange(r.key).length}</span></button>`).join('')}</div>
+      </div>
+      <div class="dash-timeline dash-appt-list">
         ${(()=>{
-          const {heute, morgen} = getAppointmentsData();
-          const upcoming = [...heute, ...morgen].slice(0,6);
-          return upcoming.map(a=>`
-            <div class="dash-tl-item" ${a.order?`data-order="${a.order}"`:''}>
+          const range = dashApptRange();
+          const items = apptsInRange(range);
+          if(!items.length) return `<div class="dash-appt-empty">${range==='heute' ? 'Heute keine Termine.' : range==='woche' ? 'Diese Woche keine weiteren Termine.' : 'Nächste Woche noch keine Termine.'}</div>`;
+          let lastDay = '';
+          return items.map(a=>{
+            const dayHead = range!=='heute' && a.date!==lastDay ? `<div class="dash-appt-day">${escHtml(apptDayLabel(a.date))}</div>` : '';
+            lastDay = a.date;
+            return `${dayHead}
+            <div class="dash-tl-item ${a.past?'past':''}" ${a.order?`data-order="${a.order}"`:''}>
               <div class="dash-tl-time">${a.time}</div>
               <div class="dash-tl-dot ${a.cls}"></div>
               <div class="dash-tl-body">
-                <div class="dash-tl-title">${a.title}</div>
-                <div class="dash-tl-sub">${a.sub}</div>
+                <div class="dash-tl-title">${escHtml(a.title)}</div>
+                <div class="dash-tl-sub">${escHtml(a.sub)}</div>
               </div>
               <span class="status-pill dot ${a.cls} tm-badge">${a.badge}</span>
-            </div>`).join('');
+            </div>`;
+          }).join('');
         })()}
       </div>
     </div>
@@ -3865,6 +3929,13 @@ document.addEventListener('click', (e)=>{
     const o = getSelectedOrder();
     const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
     if(t){ t.zusatzarbeit = zusatzBtn.dataset.zusatzarbeit==='ja'; renderTaskDetail(t); }
+    return;
+  }
+  const apptChip = e.target.closest('[data-apptrange]');
+  if(apptChip){
+    state.dashApptRange = apptChip.dataset.apptrange;
+    try{ localStorage.setItem('al_dash_appt_range', state.dashApptRange); }catch(_){}
+    renderOtherView('dashboard');
     return;
   }
   const qccheck = e.target.closest('[data-qccheck]');
