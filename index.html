@@ -235,6 +235,7 @@
     cursor:pointer;
     transition:border-color .15s, background .15s, transform .1s;
   }
+  .oc-wait{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11.5px;font-weight:700;color:var(--warning);} .oc-wait svg{width:13px;height:13px;}
   .order-card:hover{border-color:#33335c;background:var(--panel-2);}
   .order-card.selected{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent) inset;}
   .oc-top{display:flex;gap:10px;}
@@ -1561,7 +1562,8 @@ const B44_STATUS_LABELS = {
 };
 function b44SimplifiedStatus(s){
   if(s==='abgeschlossen' || s==='abholbereit') return 'erledigt'; // abholbereit = Arbeit fertig, wartet nur auf den Kunden
-  if(['qualitaetspruefung','freigabe_erforderlich','kostenvoranschlag','ersatzteile_bestellt','warte_auf_ersatzteile'].includes(s)) return 'pruefung';
+  // „Wartet“: Auto steht, bis Kunde/Teile/Kostenvoranschlag da sind. Qualitätsprüfung macht der Mechaniker selbst → „In Arbeit“.
+  if(['freigabe_erforderlich','kostenvoranschlag','ersatzteile_bestellt','warte_auf_ersatzteile'].includes(s)) return 'pruefung';
   return 'arbeit';
 }
 function b44ProgressForStatus(s){
@@ -2415,7 +2417,7 @@ function renderAlleAuftraege(ov){
         <span class="aa-num">#${o.orderNumber}</span>
         <div class="aa-veh"><img src="${o.image}" alt="${o.vehicle}"><div class="aa-veh-info"><div class="aa-veh-name">${o.vehicle}</div><div class="aa-veh-plate">${o.plate}</div></div></div>
         <span class="aa-cust">${o.customer}</span>
-        <span class="status-pill dot ${sm.cls}">${sm.label}</span>
+        <span class="status-pill dot ${sm.cls}">${statusText(o)}</span>
         <div><div class="aa-progress-bar"><div class="aa-progress-fill" style="width:${o.progress}%;background:${progressColor(o.progress)}"></div></div></div>
         <span class="aa-date">${o.created.split(' · ')[0]}</span>
       </div>`;
@@ -2830,7 +2832,7 @@ function renderHebebuehnenView(ov){
         <div class="bay-card ${o?o.status:'frei'}" ${o?`data-order="${o.id}"`:''}>
           <div class="bay-card-head">
             <span class="bay-num">${b.n}</span>
-            ${o ? `<span class="status-pill dot ${sm.cls}">${sm.label}</span>` : `<span class="status-pill dot frei">Frei</span>`}
+            ${o ? `<span class="status-pill dot ${sm.cls}">${statusText(o)}</span>` : `<span class="status-pill dot frei">Frei</span>`}
           </div>
           ${o ? `
             <img src="${o.image}" alt="${o.vehicle}">
@@ -3126,7 +3128,7 @@ let orders = [
 
 const statusMeta = {
   arbeit:{label:'In Arbeit', cls:'arbeit'},
-  pruefung:{label:'In Prüfung', cls:'pruefung'},
+  pruefung:{label:'Wartet', cls:'pruefung'},
   erledigt:{label:'Erledigt', cls:'erledigt'},
 };
 const catColorMap = {violet:'#8b5cf6', blue:'#4f9eff', amber:'#f5a524', teal:'#2dd4bf', red:'#f87171', green:'#4ade80'};
@@ -3186,7 +3188,7 @@ function renderWorklistTabs(){
   const c = counts();
   const tabs = [
     {key:'arbeit', label:'In Arbeit', n:c.arbeit},
-    {key:'pruefung', label:'In Prüfung', n:c.pruefung},
+    {key:'pruefung', label:'Wartet', n:c.pruefung},
     {key:'erledigt', label:'Erledigt', n:c.erledigt},
   ];
   document.getElementById('worklistTabs').innerHTML = tabs.map(t=>`
@@ -3216,12 +3218,18 @@ function renderOrderList(){
         </div>
       </div>
       <div class="oc-cust"><span class="avatar">${initials(o.customer)}</span>${o.customer}</div>
+      ${o.status==='pruefung' && o._b44StatusLabel ? `<div class="oc-wait">${iconClock} Wartet: ${escHtml(o._b44StatusLabel)}</div>` : ''}
       <div class="oc-progress-wrap">
         <div class="oc-progress-bar"><div class="oc-progress-fill" style="width:${o.progress}%;background:${progressColor(o.progress)}"></div></div>
         <span class="oc-progress-pct">${o.progress}%</span>
       </div>
     </div>
   `).join('');
+}
+// Bei wartenden Aufträgen den Grund zeigen (z. B. „Wartet · Freigabe nötig“)
+function statusText(o){
+  const sm = statusMeta[o.status] || { label:'' };
+  return o.status==='pruefung' && o._b44StatusLabel ? `Wartet · ${escHtml(o._b44StatusLabel)}` : sm.label;
 }
 function initials(name){return name.split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();}
 function progressColor(p){ if(p>=100) return 'var(--success)'; if(p>=50) return 'var(--accent)'; return 'var(--warning)'; }
@@ -3266,7 +3274,7 @@ function renderDetail(){
   panel.innerHTML = `
     <div class="detail-head">
       <div class="dh-left">
-        <h2>Auftrag #${o.orderNumber} <span class="status-pill dot ${sm.cls}">${sm.label}</span></h2>
+        <h2>Auftrag #${o.orderNumber} <span class="status-pill dot ${sm.cls}">${statusText(o)}</span></h2>
         <div class="created">Erstellt: ${o.created}</div>
       </div>
       <div class="dh-right">
