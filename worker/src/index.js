@@ -700,6 +700,22 @@ async function runBackup(env) {
   return st.last_backup;
 }
 
+/* Tiefer Statuscheck für externe Überwachung (z. B. UptimeRobot): 200 = alles ok, 503 = etwas stimmt nicht.
+ * /health bleibt bewusst immer 200 (Server lebt). /status erkennt zusätzlich: Prüfung läuft nicht mehr,
+ * Störung (Datenbank, Seiten, E-Mail-Schlüssel) oder Backup älter als 36 Std. */
+const STATUS_STALE_MS = 45 * 60_000;
+async function statusReport(env) {
+  const st = env.PHOTOS ? await readMonitor(env) : {};
+  const problems = st.down && Array.isArray(st.problems) ? [...st.problems] : [];
+  const checkedAge = st.checked_at ? Date.now() - new Date(st.checked_at).getTime() : null;
+  if (!env.PHOTOS) problems.push('Speicher nicht eingerichtet');
+  else if (checkedAge === null) problems.push('Prüfung noch nie gelaufen');
+  else if (checkedAge > STATUS_STALE_MS) problems.push(`Prüfung läuft nicht mehr (letzte vor ${Math.round(checkedAge / 60_000)} Min.)`);
+  const lb = st.last_backup && st.last_backup.at;
+  if (env.PHOTOS && (!lb || Date.now() - new Date(lb).getTime() > 36 * 3600_000)) problems.push('Backup älter als 36 Std.');
+  return { ok: problems.length === 0, problems, checked_at: st.checked_at || null, last_backup: st.last_backup ? st.last_backup.day : null, time: nowIso() };
+}
+
 async function listBackups(env) {
   const listed = await env.PHOTOS.list({ prefix: BACKUP_PREFIX });
   return listed.keys.map(k => ({ name: k.name.slice(BACKUP_PREFIX.length), ...(k.metadata || {}) })).sort((a, b) => b.name.localeCompare(a.name));
@@ -727,9 +743,8 @@ async function runChecks(env) {
   const fails = problems.length ? (st.fail_count || 0) + 1 : 0;
   const down = problems.length > 0 && fails >= FAIL_THRESHOLD;
   const changed = down !== prevDown || (down && JSON.stringify(problems) !== JSON.stringify(st.problems || []));
-  if (changed || fails !== (st.fail_count || 0)) {
-    await writeMonitor(env, { ...st, fail_count: fails, down, problems: down ? problems : [], since: down ? (prevDown ? st.since : nowIso()) : null, checked_at: nowIso() });
-  }
+  // checked_at bei jedem Lauf setzen: /status erkennt damit, wenn die Prüfung selbst nicht mehr läuft
+  await writeMonitor(env, { ...st, fail_count: fails, down, problems: down ? problems : [], since: down ? (prevDown ? st.since : nowIso()) : null, checked_at: nowIso() });
   if (changed) {
     const list = problems.map(p => `<li>${esc(p)}</li>`).join('');
     await sendMail(env, null, down
@@ -774,6 +789,7 @@ export default {
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
       if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, ...(await (async () => { if (!env.PHOTOS) return {}; const st = await readMonitor(env); return { last_backup: st.last_backup ? st.last_backup.day : null, monitor: st.down ? 'störung' : 'ok', checked_at: st.checked_at || null }; })()), secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/status') { const r = await statusReport(env); return json(r, r.ok ? 200 : 503, cors); }
       if (path === '/demo' && request.method === 'GET') {
         // Demo-Dashboard: frischer Einmal-Login (60 s gültig) für den Demo-Nutzer, sieht per RLS nur AL-DEMO
         rateLimit('demo:' + (request.headers.get('CF-Connecting-IP') || 'x'), 20, 60_000);

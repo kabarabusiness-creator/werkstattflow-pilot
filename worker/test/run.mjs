@@ -402,11 +402,23 @@ await t('Cron: tägliches Backup (14 Tage), Überwachung mailt nur bei Statuswec
   globalThis.SITE_STATUS = 503;
   await run('*/15 * * * *'); assert.equal(mails.length, m0, 'Alarm schon nach 1 Fehlprüfung');
   await run('*/15 * * * *'); assert.equal(mails.length, m0 + 1); assert.match(mails[m0].subject, /Störung/); assert.match(mails[m0].html, /Tablet-App: HTTP 503/);
+  const sDown = await worker.fetch(new Request('https://api.test/status'), env, ctx);
+  assert.equal(sDown.status, 503); assert.match(JSON.stringify((await sDown.json()).problems), /Tablet-App: HTTP 503/);
   await run('*/15 * * * *'); assert.equal(mails.length, m0 + 1, 'Alarm doppelt');
   globalThis.SITE_STATUS = 200;
   await run('*/15 * * * *'); assert.equal(mails.length, m0 + 2); assert.match(mails[m0 + 1].subject, /wieder in Ordnung/);
   const h = await (await worker.fetch(new Request('https://api.test/health'), env, ctx)).json();
-  assert.equal(h.monitor, 'ok'); assert.match(h.last_backup, /^\d{4}-/);
+  assert.equal(h.monitor, 'ok'); assert.match(h.last_backup, /^\d{4}-/); assert.match(h.checked_at, /^\d{4}-/, 'checked_at wird bei jedem Lauf gesetzt');
+  const sOk = await worker.fetch(new Request('https://api.test/status'), env, ctx);
+  assert.equal(sOk.status, 200, await sOk.clone().text()); assert.equal((await sOk.json()).ok, true);
+  // Prüfung läuft nicht mehr (checked_at 2 Std. alt) → 503, obwohl nichts als Störung gespeichert ist
+  const stRaw = kv.get('_monitor/state'); const stObj = JSON.parse(typeof stRaw.v === 'string' ? stRaw.v : new TextDecoder().decode(stRaw.v));
+  stObj.checked_at = new Date(Date.now() - 2 * 3600_000).toISOString();
+  kv.set('_monitor/state', { ...stRaw, v: typeof stRaw.v === 'string' ? JSON.stringify(stObj) : new TextEncoder().encode(JSON.stringify(stObj)) });
+  const sStale = await worker.fetch(new Request('https://api.test/status'), env, ctx);
+  assert.equal(sStale.status, 503); assert.match(JSON.stringify((await sStale.json()).problems), /Prüfung läuft nicht mehr/);
+  await run('*/15 * * * *');
+  assert.equal((await worker.fetch(new Request('https://api.test/status'), env, ctx)).status, 200, 'nach neuem Lauf wieder ok');
   const form = k => { const f = new FormData(); f.set('key', k); return f; };
   assert.equal((await worker.fetch(new Request('https://api.test/admin/backups', { method: 'POST', body: form('falsch') }), env, ctx)).status, 401);
   const page = await (await worker.fetch(new Request('https://api.test/admin/backups', { method: 'POST', body: form('x'.repeat(20)) }), env, ctx)).text();
