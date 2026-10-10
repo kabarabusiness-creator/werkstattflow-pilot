@@ -157,28 +157,44 @@ export async function handleFunction(name, body, c) {
     const own = isAdmin ? 'admin' : 'user';
     const last = msgs.filter(m => m.sender === own).sort((a, b) => String(b.created_date).localeCompare(String(a.created_date)))[0];
     if (!last) return { ok: true, sent: false };
-    await bg(h.mailSupportChat(env, { toAdmin: !isAdmin, session, content: last.content, user }));
+    const atts = Array.isArray(last.attachments) ? last.attachments.filter(a => a && typeof a.url === 'string' && a.url.startsWith(origin + '/photo/')).slice(0, 5) : [];
+    await bg(h.mailSupportChat(env, { toAdmin: !isAdmin, session, content: last.content, user, attachments: atts }));
     return { ok: true };
+  }
+
+  // Datei/Foto für den Chat hochladen (Support-Chat oder Kundennachricht)
+  if (name === 'chatAttachmentUpload') {
+    const user = await authUser();
+    rateLimit('chatfile:' + user.id, 60, 3600_000);
+    let code = user.workshop_code || 'SUPPORT';
+    if (body.order_id) {
+      const order = await getRec('Order', String(body.order_id));
+      if (!order) throw new HttpError(404, 'not_found');
+      if (user.role !== 'admin' && order.workshop_code !== user.workshop_code) throw new HttpError(403, 'forbidden');
+      code = order.workshop_code;
+    }
+    return { ok: true, attachment: await h.storeAttachment(env, origin, code, body.data_url, body.name) };
   }
 
   // Kundennachricht aus dem Dashboard (Werkstatt → Kunde), Kunde bekommt Mail mit Portal-Link
   if (name === 'orderMessageSend') {
     const user = await authUser();
     rateLimit('ordermsg:' + user.id, 120, 3600_000);
-    const content = String(body.content || '').trim().slice(0, 2000);
-    if (!content) throw new HttpError(400, 'params');
     const order = await getRec('Order', String(body.order_id || ''));
     if (!order) throw new HttpError(404, 'not_found');
     if (user.role !== 'admin') {
       if (!user.workshop_code || order.workshop_code !== user.workshop_code) throw new HttpError(403, 'forbidden');
     }
     if (!order.customer_token) throw new HttpError(400, 'no_portal', { message: 'Für diesen Auftrag gibt es noch keinen Kundenportal-Zugang.' });
+    const attachments = h.cleanAttachments(body.attachments, origin, order.workshop_code);
+    const content = String(body.content || '').trim().slice(0, 2000) || (attachments.length ? h.ATTACH_MARK : '');
+    if (!content) throw new HttpError(400, 'params');
     const created = await db.create('OrderMessage', {
       order_id: order.id, workshop_code: order.workshop_code, sender: 'werkstatt',
       sender_name: String(body.sender_name || '').trim().slice(0, 80),
-      content, read_by_customer: false, read_by_workshop: true,
+      content, attachments, read_by_customer: false, read_by_workshop: true,
     });
-    bg(h.mailWorkshopMessage(env, db, order, content));
+    bg(h.mailWorkshopMessage(env, db, order, content, attachments));
     return { ok: true, message: created, email: !!(env.RESEND_API_KEY && order.email) };
   }
 

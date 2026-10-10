@@ -231,6 +231,37 @@ function decodeDataUrl(dataUrl) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return { bytes, contentType: m[1], ext: m[2] === 'jpeg' ? 'jpg' : m[2] };
 }
+/* ---- Chat-Anhänge (Fotos + PDF) im Foto-Speicher (KV) ---- */
+const FILE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+const MAX_FILE_BYTES = 6 * 1024 * 1024;
+const ATTACH_MARK = '📎 Anhang';
+function cleanFileName(n, ext) {
+  let s = String(n || '').replace(/[\u0000-\u001f\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+  if (!s) s = ext === 'pdf' ? 'Dokument.pdf' : 'Foto.' + ext;
+  return s;
+}
+async function storeAttachment(env, origin, code, dataUrl, name) {
+  if (!env.PHOTOS) throw new HttpError(503, 'not_available', { message: 'Datei-Speicher ist noch nicht eingerichtet.' });
+  const m = /^data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(String(dataUrl || ''));
+  if (!m || !FILE_TYPES[m[1]]) throw new HttpError(400, 'invalid_file', { message: 'Nur Fotos (JPG, PNG, WebP) und PDF-Dateien sind erlaubt.' });
+  const bin = atob(m[2].replace(/\s+/g, ''));
+  if (bin.length > MAX_FILE_BYTES) throw new HttpError(413, 'too_large', { message: 'Datei ist zu groß (max. 6 MB).' });
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  if (m[1] === 'application/pdf' && !(bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46)) throw new HttpError(400, 'invalid_file', { message: 'Die Datei ist kein gültiges PDF.' });
+  const ext = FILE_TYPES[m[1]];
+  const fileName = cleanFileName(name, ext);
+  const key = `${String(code || 'SUPPORT').toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'SUPPORT'}/chat/${randomHex(16)}.${ext}`;
+  await env.PHOTOS.put(key, bytes, { metadata: { contentType: m[1], name: fileName, uploaded_at: nowIso() } });
+  return { url: `${origin}/photo/${key}`, name: fileName, type: m[1], size: bytes.length };
+}
+// Nur Anhänge aus dem eigenen Speicher und der eigenen Werkstatt übernehmen
+function cleanAttachments(list, origin, code) {
+  if (!Array.isArray(list)) return [];
+  const prefix = `${origin}/photo/${String(code || 'SUPPORT').toUpperCase()}/chat/`;
+  return list.slice(0, 5).filter(a => a && typeof a.url === 'string' && a.url.startsWith(prefix) && /\/[a-f0-9]{32}\.(jpg|png|webp|pdf)$/.test(a.url))
+    .map(a => ({ url: a.url, name: String(a.name || '').slice(0, 100), type: Object.keys(FILE_TYPES).includes(a.type) ? a.type : (a.url.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'), size: Number(a.size) || 0 }));
+}
 async function ownRecord(db, entity, id, code) {
   if (!id) throw new HttpError(400, 'params');
   let rec;
@@ -373,7 +404,7 @@ async function portalOrder(db, token) {
   if (!rows[0]) throw new HttpError(404, 'not_found');
   return rows[0];
 }
-async function portalApi(db, body, env, ctx) {
+async function portalApi(db, body, env, ctx, origin) {
   const order = await portalOrder(db, body.token);
   const code = order.workshop_code;
   const action = body.action || 'get';
@@ -405,7 +436,7 @@ async function portalApi(db, body, env, ctx) {
         .map(s => ({ id: s.id, name: s.name, category: s.category, description: s.description, estimated_duration_minutes: s.estimated_duration_minutes, base_price: s.base_price, price_range_min: s.price_range_min, price_range_max: s.price_range_max, is_active: s.is_active, workshop_code: s.workshop_code })),
       workshop_logs: logs.map(l => ({ id: l.id, title: l.title, log_type: l.log_type, description: l.description, log_date: l.log_date, employee_name: l.employee_name })),
       workshop: { name: prof.company_name || '', phone: prof.phone || '', email: prof.email || '', address: [prof.address_street, [prof.address_zip, prof.address_city].filter(Boolean).join(' ')].filter(Boolean).join(', ') },
-      messages: messages.map(m => ({ id: m.id, sender: m.sender, sender_name: m.sender === 'kunde' ? '' : (m.sender_name || prof.company_name || 'Werkstatt'), content: m.content, created_date: m.created_date }))
+      messages: messages.map(m => ({ id: m.id, sender: m.sender, sender_name: m.sender === 'kunde' ? '' : (m.sender_name || prof.company_name || 'Werkstatt'), content: m.content, attachments: Array.isArray(m.attachments) ? m.attachments : [], created_date: m.created_date }))
         .sort((a, b) => String(a.created_date).localeCompare(String(b.created_date))),
     };
   }
@@ -451,16 +482,21 @@ async function portalApi(db, body, env, ctx) {
     const { customer_token: _ct, owner_user_id: _ou, ...pubAppt } = created;
     return { ok: true, appointment_id: created.id, appointment: pubAppt };
   }
+  if (action === 'attachment_upload') {
+    rateLimit('portalfile:' + order.id, 30, 3600_000);
+    return { ok: true, attachment: await storeAttachment(env, origin, code, body.data_url, body.name) };
+  }
   if (action === 'message_send') {
-    const content = String(body.content || '').trim().slice(0, 2000);
+    const attachments = cleanAttachments(body.attachments, origin, code);
+    const content = String(body.content || '').trim().slice(0, 2000) || (attachments.length ? ATTACH_MARK : '');
     if (!content) throw new HttpError(400, 'params');
     rateLimit('portalmsg:' + order.id, 30, 3600_000);
     const created = await db.create('OrderMessage', {
       order_id: order.id, workshop_code: code, sender: 'kunde', sender_name: order.customer_name || 'Kunde',
-      content, read_by_customer: true, read_by_workshop: false,
+      content, attachments, read_by_customer: true, read_by_workshop: false,
     });
-    if (ctx) ctx.waitUntil(mailCustomerMessage(env, db, order, content).catch(e => console.log('mail', String(e))));
-    return { ok: true, message: { id: created.id, sender: 'kunde', content, created_date: created.created_date || nowIso() } };
+    if (ctx) ctx.waitUntil(mailCustomerMessage(env, db, order, content, attachments).catch(e => console.log('mail', String(e))));
+    return { ok: true, message: { id: created.id, sender: 'kunde', content, attachments, created_date: created.created_date || nowIso() } };
   }
   if (action === 'cancel') {
     const ap = await db.get('Appointment', body.appointment_id).catch(() => null);
@@ -576,37 +612,41 @@ function throttled(key, ms) {
   if (notifyThrottle.size > 5000) notifyThrottle.clear();
   return false;
 }
-const quote = t => `<div style="white-space:pre-wrap;background:#f7f6fb;border-left:3px solid #7c3aed;border-radius:8px;padding:10px 12px;margin:0 0 16px;font-size:14.5px;line-height:1.5">${esc(String(t || '').slice(0, 1500))}</div>`;
-async function mailCustomerMessage(env, db, order, content) {
+const quote = (t, atts) => {
+  const text = String(t || '') === ATTACH_MARK && atts && atts.length ? '' : String(t || '').slice(0, 1500);
+  const files = (atts || []).map(a => `<div style="margin-top:6px">📎 <a href="${esc(a.url)}" style="color:#7c3aed">${esc(a.name || 'Anhang')}</a></div>`).join('');
+  return `<div style="white-space:pre-wrap;background:#f7f6fb;border-left:3px solid #7c3aed;border-radius:8px;padding:10px 12px;margin:0 0 16px;font-size:14.5px;line-height:1.5">${esc(text)}${files}</div>`;
+};
+async function mailCustomerMessage(env, db, order, content, atts) {
   const ws = await workshopInfo(db, order.workshop_code);
   if (!ws.email || throttled('kunde>ws:' + order.id, 10 * 60_000)) return { sent: false };
   return sendMail(env, db, { to: ws.email, replyTo: order.email || undefined, orderId: order.id, code: order.workshop_code, statusText: 'Kundennachricht',
     subject: `Neue Kundennachricht: ${order.customer_name || 'Kunde'} · ${order.license_plate || ''}`,
-    html: mailHtml({ title: 'Neue Nachricht im Kundenportal', intro: `<b>${esc(order.customer_name || 'Ein Kunde')}</b> hat Ihnen geschrieben:</p>${quote(content)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">`,
+    html: mailHtml({ title: 'Neue Nachricht im Kundenportal', intro: `<b>${esc(order.customer_name || 'Ein Kunde')}</b> hat Ihnen geschrieben:</p>${quote(content, atts)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">`,
       rows: [['Fahrzeug', [order.vehicle_brand, order.vehicle_model].filter(Boolean).join(' ') || '–'], ['Kennzeichen', order.license_plate || '–'], ['Auftrag', '#' + (order.order_number || '')]],
       button: { label: 'Im Dashboard antworten', href: `${DASHBOARD_URL}/live-chat?tab=kunden&order=${encodeURIComponent(order.id)}` } }) });
 }
-async function mailWorkshopMessage(env, db, order, content) {
+async function mailWorkshopMessage(env, db, order, content, atts) {
   if (!order.email || throttled('ws>kunde:' + order.id, 10 * 60_000)) return { sent: false };
   const ws = await workshopInfo(db, order.workshop_code);
   return sendMail(env, db, { to: order.email, replyTo: ws.email, orderId: order.id, code: order.workshop_code, statusText: 'Nachricht an Kunden',
     subject: `Neue Nachricht von ${ws.name}`,
-    html: mailHtml({ title: `Hallo ${order.customer_name || ''},`, intro: `<b>${esc(ws.name)}</b> hat Ihnen zu Ihrem Fahrzeug ${esc(order.license_plate || '')} geschrieben:</p>${quote(content)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">Antworten Sie bitte direkt im Kundenportal – dort sehen Sie auch den aktuellen Stand.`,
+    html: mailHtml({ title: `Hallo ${order.customer_name || ''},`, intro: `<b>${esc(ws.name)}</b> hat Ihnen zu Ihrem Fahrzeug ${esc(order.license_plate || '')} geschrieben:</p>${quote(content, atts)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">Antworten Sie bitte direkt im Kundenportal – dort sehen Sie auch den aktuellen Stand.`,
       button: { label: 'Nachricht beantworten', href: portalLink(order) + '#nachrichten' }, footer: contactFooter(ws) }) });
 }
-async function mailSupportChat(env, { toAdmin, session, content, user }) {
+async function mailSupportChat(env, { toAdmin, session, content, user, attachments }) {
   if (throttled((toAdmin ? 'sup>admin:' : 'sup>user:') + session.id, 3 * 60_000)) return { sent: false };
   const link = `${DASHBOARD_URL}/live-chat?chat=${encodeURIComponent(session.id)}`;
   if (toAdmin) {
     return sendMail(env, null, { to: SUPPORT_TO(env), replyTo: session.user_email || undefined,
       subject: `[Live-Chat ${user.workshop_code || '–'}] ${session.subject || 'Neue Anfrage'}`,
-      html: mailHtml({ title: 'Neue Live-Chat-Nachricht', intro: `<b>${esc(session.user_name || session.user_email || 'Ein Nutzer')}</b> (Werkstatt-Code ${esc(user.workshop_code || '–')}) schreibt im Live-Chat:</p>${quote(content)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">Betreff: ${esc(session.subject || '–')}`,
+      html: mailHtml({ title: 'Neue Live-Chat-Nachricht', intro: `<b>${esc(session.user_name || session.user_email || 'Ein Nutzer')}</b> (Werkstatt-Code ${esc(user.workshop_code || '–')}) schreibt im Live-Chat:</p>${quote(content, attachments)}<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">Betreff: ${esc(session.subject || '–')}`,
         button: { label: 'Im Live-Chat antworten', href: link }, footer: 'Die Antwort erscheint beim Nutzer sofort im Dashboard; er bekommt zusätzlich eine E-Mail.' }) });
   }
   if (!session.user_email) return { sent: false };
   return sendMail(env, null, { to: session.user_email, replyTo: SUPPORT_TO(env),
     subject: `Antwort vom AutoLeitwerk-Support: ${session.subject || 'Ihre Anfrage'}`,
-    html: mailHtml({ title: 'Neue Antwort im Live-Chat', intro: 'Das AutoLeitwerk-Team hat auf Ihre Anfrage geantwortet:</p>' + quote(content) + '<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">',
+    html: mailHtml({ title: 'Neue Antwort im Live-Chat', intro: 'Das AutoLeitwerk-Team hat auf Ihre Anfrage geantwortet:</p>' + quote(content, attachments) + '<p style="font-size:13px;color:#6b6b88;margin:0 0 16px">',
       button: { label: 'Im Live-Chat öffnen', href: link }, footer: 'AutoLeitwerk · info@autoleitwerk.de' }) });
 }
 
@@ -661,10 +701,14 @@ export default {
       }
       if (path.startsWith('/photo/') && request.method === 'GET') {
         const key = decodeURIComponent(path.slice('/photo/'.length));
-        if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp)$/i.test(key)) throw new HttpError(404, 'not_found');
+        if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp|pdf)$/i.test(key)) throw new HttpError(404, 'not_found');
         const obj = await env.PHOTOS.getWithMetadata(key, { type: 'stream' });
         if (!obj || !obj.value) throw new HttpError(404, 'not_found');
-        return new Response(obj.value, { headers: { 'Content-Type': (obj.metadata && obj.metadata.contentType) || 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff' } });
+        const meta = obj.metadata || {};
+        const ctype = FILE_TYPES[meta.contentType] ? meta.contentType : 'image/jpeg';
+        const headers = { 'Content-Type': ctype, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff' };
+        if (meta.name) headers['Content-Disposition'] = `inline; filename*=UTF-8''${encodeURIComponent(meta.name)}`;
+        return new Response(obj.value, { headers });
       }
       const db = new Base44(env);
       let body = {};
@@ -677,10 +721,10 @@ export default {
       if (path === '/workshopLogin') { rateLimit('login:' + (request.headers.get('CF-Connecting-IP') || 'x'), 40, 60_000); return json(await workshopLogin(db, body), 200, cors); }
       if (path === '/getTabletData') return json(await getTabletData(db, await requireSession(db, request)), 200, cors);
       if (path === '/tabletAction') return json(await tabletAction(db, await requireSession(db, request), body, env, url.origin, ctx), 200, cors);
-      if (path === '/portalApi') return json(await portalApi(db, body, env, ctx), 200, cors);
-      if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx), 200, cors);
+      if (path === '/portalApi') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
+      if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat }, ctx });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK }, ctx });
         invalidate('Order');
         return json(r, 200, cors);
       }

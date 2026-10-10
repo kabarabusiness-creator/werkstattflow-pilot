@@ -363,5 +363,28 @@ await t('Live-Chat Support: Nutzer-Nachricht → Mail an info@ mit Antwort-Link,
   assert.equal((await fnU('chatNotify', { session_id: 'cs2' })).s, 403);
   await fnU('chatNotify', { session_id: 'cs1' }); assert.equal(mails.length, m0 + 1, 'Drosselung greift nicht');
 });
+await t('Chat-Anhänge: Foto/PDF hochladen, nur eigene Anhänge in Nachrichten, PDF-Abruf, falsche Typen abgelehnt', async () => {
+  const portal = body => worker.fetch(new Request('https://api.test/portalApi', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://kabarabusiness-creator.github.io' }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  const fnU = (n, body) => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  const pdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 test').toString('base64');
+  const up = await portal({ action: 'attachment_upload', token: 'tok-aaaaaa', data_url: pdf, name: 'Kosten<voranschlag>.pdf' });
+  assert.equal(up.s, 200, JSON.stringify(up.d));
+  const att = up.d.attachment; assert.match(att.url, /^https:\/\/api\.test\/photo\/AL-T1\/chat\/[a-f0-9]{32}\.pdf$/); assert.equal(att.type, 'application/pdf'); assert.ok(!att.name.includes('<'));
+  assert.equal((await portal({ action: 'attachment_upload', token: 'tok-aaaaaa', data_url: 'data:text/html;base64,PGgxPg==' })).s, 400);
+  assert.equal((await portal({ action: 'attachment_upload', token: 'tok-aaaaaa', data_url: 'data:application/pdf;base64,' + Buffer.from('<html>').toString('base64') })).s, 400);
+  const foreign = { url: 'https://api.test/photo/AL-T2/chat/' + 'a'.repeat(32) + '.jpg', name: 'x.jpg', type: 'image/jpeg' };
+  const evil = { url: 'https://evil.example/x.pdf', name: 'x.pdf' };
+  const sent = await portal({ action: 'message_send', token: 'tok-aaaaaa', content: '', attachments: [att, foreign, evil] });
+  assert.equal(sent.s, 200, JSON.stringify(sent.d));
+  assert.deepEqual(sent.d.message.attachments.map(a => a.url), [att.url]); assert.equal(sent.d.message.content, '📎 Anhang');
+  const file = await worker.fetch(new Request(att.url), env, ctx);
+  assert.equal(file.status, 200); assert.equal(file.headers.get('Content-Type'), 'application/pdf'); assert.match(file.headers.get('Content-Disposition'), /filename\*=UTF-8''Kosten/);
+  const img = await fnU('chatAttachmentUpload', { order_id: 'o1', data_url: 'data:image/png;base64,iVBORw0KGgo=', name: 'Schaden.png' });
+  assert.equal(img.s, 200, JSON.stringify(img.d)); assert.match(img.d.attachment.url, /AL-T1\/chat\/.+\.png$/);
+  assert.equal((await fnU('chatAttachmentUpload', { order_id: 'o2', data_url: 'data:image/png;base64,iVBORw0KGgo=' })).s, 403);
+  const m0 = mails.length;
+  const ws = await fnU('orderMessageSend', { order_id: 'o1', content: 'Siehe Foto', attachments: [img.d.attachment, foreign] });
+  assert.equal(ws.s, 200); assert.equal(ws.d.message.attachments.length, 1);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
