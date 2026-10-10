@@ -5890,5 +5890,13 @@ autoProfileScreen();
 renderChrome();
 setMainView('auftraege');
 </script>
+<script>
+// Link aus dem Dashboard (…/index.html?code=AL-1234): Werkstatt-Code im Login vorausfüllen
+(function(){ try{
+  const c = new URLSearchParams(location.search).get('code');
+  const el = document.getElementById('loginWorkshopCode');
+  if(c && el && !el.value && /^[A-Za-z0-9-]{3,20}$/.test(c)) el.value = c.toUpperCase();
+}catch(_){} })();
+</script>
 </body>
 </html>
