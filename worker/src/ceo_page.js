@@ -83,6 +83,7 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
       <button class="tab active" data-tab="overview">Übersicht</button>
       <button class="tab" data-tab="workshops">Werkstätten &amp; Funktionen</button>
       <button class="tab" data-tab="support">Support <span class="n hidden" id="supN"></span></button>
+      <button class="tab" data-tab="usage">Verbrauch &amp; Limits</button>
       <button class="tab" data-tab="dev">Entwickler-Tools</button>
       <button class="tab" data-tab="settings">Einstellungen</button>
     </nav>
@@ -145,6 +146,7 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
       if(state.tab === 'settings') renderSettings();
       if(state.tab === 'support'){ state.sup = await api('support_list'); renderSupport(); }
       if(state.tab === 'dev'){ state.dev = await api('dev'); renderDev(); }
+      if(state.tab === 'usage'){ state.usage = await api('usage', { days: 31 }); renderUsage(); }
     } catch(e){ if(e.message !== 'unauthorized') v.innerHTML = '<div class="card msg err">' + esc(e.message) + '</div>'; }
   }
   function badge(n){ var el = $('supN'); el.textContent = n; el.classList.toggle('hidden', !n); }
@@ -158,11 +160,64 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
     $('view').innerHTML = '<h1>Übersicht</h1><div class="sub">Alle Werkstätten auf einen Blick · ' + dt(new Date().toISOString()) + '</div>'
       + (o.settings.maintenance ? '<div class="card" style="border-color:var(--warn)"><b style="color:var(--warn)">Wartungsmodus ist AN</b> – Tablet und Kundenportal sind für alle Werkstätten gesperrt. <a href="#" data-go="settings">Ändern</a></div>' : '')
       + '<div class="grid kpis">' + k.map(function(x){ return '<div class="kpi"><b>' + esc(x[1]) + '</b><span>' + esc(x[0]) + '</span></div>'; }).join('') + '</div>'
-      + '<div class="card"><div class="row"><h2 style="margin:0">Systemstatus</h2><span class="sp"></span>' + statusPill(o.status) + '</div><div class="msg">Letzte Prüfung: ' + dt(o.status.checked_at) + ' · Letztes Backup: ' + day(o.status.last_backup) + '</div></div><div id="urCard"></div>'
+      + '<div class="card"><div class="row"><h2 style="margin:0">Systemstatus</h2><span class="sp"></span>' + statusPill(o.status) + '</div><div class="msg">Letzte Prüfung: ' + dt(o.status.checked_at) + ' · Letztes Backup: ' + day(o.status.last_backup) + '</div></div><div id="quotaCard"></div><div id="urCard"></div>'
       + '<div class="card"><h2>Werkstätten</h2><div class="tbl-wrap"><table><thead><tr><th>Werkstatt</th><th>Code</th><th>Status</th><th>Abo</th><th>Aktive Aufträge</th><th>Aufträge Monat</th><th>Umsatz Monat</th><th>Mitarbeiter</th><th>Termine 7 Tage</th><th>Tablet-Logins 7 Tage</th><th>Letzte Aktivität</th></tr></thead><tbody>'
       + (o.workshops.length ? o.workshops.map(function(w){ return '<tr><td><b>' + esc(w.name) + '</b></td><td>' + esc(w.code) + '</td><td>' + (w.is_active ? '<span class="pill ok">Aktiv</span>' : '<span class="pill bad">Gesperrt</span>') + '</td><td>' + aboPill(w) + (w.trial_ends_at && w.subscription_status === 'trial' ? ' <small style="color:var(--faint)">bis ' + day(w.trial_ends_at) + '</small>' : '') + '</td><td>' + w.orders_active + '</td><td>' + w.orders_month + '</td><td>' + eur(w.revenue_month) + '</td><td>' + w.employees + '</td><td>' + w.appts_week + '</td><td>' + w.tablet_logins_7d + '</td><td>' + dt(w.last_activity) + '</td></tr>'; }).join('') : '<tr><td colspan="11" class="empty">Noch keine Werkstätten.</td></tr>')
       + '</tbody></table></div></div>';
     loadUptime('urCard');
+    loadQuotaCard();
+  }
+
+  /* ---------- Verbrauch & Limits ---------- */
+  function nf(n){ return (Math.round(Number(n)||0)).toLocaleString('de-DE'); }
+  function bar(label, used, limit, sub){
+    var p = limit ? Math.min(100, used / limit * 100) : 0;
+    var cls = p >= 90 ? 'bad' : p >= 70 ? 'warn' : 'ok';
+    var col = { ok:'#22c55e', warn:'#f5a524', bad:'#f87171' }[cls];
+    return '<div class="kpi"><div class="row" style="gap:6px"><span style="font-size:12.5px;color:var(--muted);flex:1">' + esc(label) + '</span><span class="pill ' + cls + '">' + Math.round(p) + ' %</span></div>'
+      + '<b style="font-size:20px;margin-top:6px">' + nf(used) + ' <span style="font-size:13px;color:var(--faint);font-weight:500">/ ' + nf(limit) + '</span></b>'
+      + '<div style="height:6px;background:var(--panel2);border-radius:99px;margin-top:8px;overflow:hidden"><div style="height:100%;width:' + p.toFixed(1) + '%;background:' + col + '"></div></div>'
+      + (sub ? '<span style="display:block;margin-top:6px">' + sub + '</span>' : '') + '</div>';
+  }
+  function untilReset(){ var n = new Date(); var r = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1)); var m = Math.round((r - n) / 60000); return Math.floor(m / 60) + ' Std. ' + (m % 60) + ' Min.'; }
+  function quotaBars(u){
+    var t = u.days[0], L = u.limits;
+    var per = t.ai_calls ? t.neurons / t.ai_calls : 200;
+    var left = Math.max(0, L.neurons.day - t.neurons);
+    return '<div class="grid kpis" style="margin-bottom:0">'
+      + bar('KI-Neuronen heute (geschätzt)', t.neurons, L.neurons.day, nf(t.ai_calls) + ' KI-Aufrufe · reicht noch für ca. ' + nf(left / per) + ' · Reset in ' + untilReset() + (t.ai_quota_hits ? '<br><span style="color:var(--bad)">Kontingent erschöpft seit ' + dt(t.ai_quota_first) + ' (' + t.ai_quota_hits + '× abgelehnt)</span>' : ''))
+      + bar('Server-Anfragen heute', t.requests, L.requests.day, 'Tablet, Portal, Dashboard-Funktionen')
+      + bar('E-Mails heute', t.emails, L.emails.day, 'Monat: ' + nf(u.month_emails) + ' / ' + nf(L.emails.month) + (t.emails_failed ? ' · <span style="color:var(--bad)">' + t.emails_failed + ' fehlgeschlagen</span>' : ''))
+      + bar('Speicher-Schreibvorgänge heute', t.kv_writes + (u.cron_kv_writes_per_day || 0), L.kv_writes.day, 'inkl. ~' + (u.cron_kv_writes_per_day || 0) + ' für Prüfung & Backup')
+      + '</div>';
+  }
+  async function loadQuotaCard(){
+    var el = $('quotaCard'); if(!el) return;
+    try { var u = await api('usage', { days: 1 }); if(!$('quotaCard')) return; el.innerHTML = '<div class="card"><div class="row"><h2 style="margin:0">Kontingente heute</h2><span class="sp"></span><a href="#" data-go="usage">Details</a></div><div style="margin-top:12px">' + quotaBars(u) + '</div></div>'; }
+    catch(e){ el.innerHTML = ''; }
+  }
+  function renderUsage(){
+    var u = state.usage, names = u.workshop_names || {};
+    var days = u.days.slice(0, 14);
+    var wsRows = function(list){
+      var agg = {};
+      list.forEach(function(d){ Object.keys(d.workshops || {}).forEach(function(c){ var w = d.workshops[c], a = agg[c] || (agg[c] = { alex:0, scans:0, photos:0, emails:0 }); ['alex','scans','photos','emails'].forEach(function(k){ a[k] += Number(w[k]) || 0; }); }); });
+      var codes = Object.keys(agg).sort(function(a, b){ return (agg[b].alex + agg[b].scans) - (agg[a].alex + agg[a].scans); });
+      return codes.length ? codes.map(function(c){ var a = agg[c]; return '<tr><td><b>' + esc(names[c] || c) + '</b> <span style="color:var(--faint)">' + esc(c) + '</span></td><td>' + nf(a.alex) + '</td><td>' + nf(a.scans) + '</td><td>' + nf(a.photos) + '</td><td>' + nf(a.emails) + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">Noch keine Nutzung.</td></tr>';
+    };
+    var maxN = Math.max.apply(null, days.map(function(d){ return d.neurons; }).concat([u.limits.neurons.day]));
+    $('view').innerHTML = '<h1>Verbrauch &amp; Limits</h1><div class="sub">Kostenlose Kontingente von Cloudflare und Resend. Gezählt vom eigenen Server (bis zu 5 Min. Verzögerung je Server-Instanz); KI-Neuronen sind aus den Token geschätzt.</div>'
+      + quotaBars(u)
+      + '<div class="card" style="margin-top:14px"><h2>KI-Verbrauch der letzten 14 Tage</h2><div style="display:flex;align-items:flex-end;gap:6px;height:120px;border-bottom:1px solid var(--line);position:relative">'
+      + '<div style="position:absolute;left:0;right:0;bottom:' + (u.limits.neurons.day / maxN * 100).toFixed(1) + '%;border-top:1px dashed var(--bad)"><span style="position:absolute;right:0;top:-16px;font-size:11px;color:var(--bad)">Limit ' + nf(u.limits.neurons.day) + '</span></div>'
+      + days.slice().reverse().map(function(d){ var h = d.neurons / maxN * 100; return '<div title="' + esc(day(d.day)) + ': ' + nf(d.neurons) + ' Neuronen" style="flex:1;height:' + Math.max(1, h).toFixed(1) + '%;background:' + (d.neurons > u.limits.neurons.day * 0.9 ? '#f87171' : '#8b5cf6') + ';border-radius:4px 4px 0 0;min-width:6px"></div>'; }).join('')
+      + '</div><div style="display:flex;gap:6px;font-size:10.5px;color:var(--faint);margin-top:4px">' + days.slice().reverse().map(function(d){ return '<span style="flex:1;text-align:center;min-width:6px">' + esc(d.day.slice(8, 10)) + '</span>'; }).join('') + '</div></div>'
+      + '<div class="card"><h2>Tageswerte</h2><div class="tbl-wrap"><table><thead><tr><th>Tag</th><th>KI-Neuronen</th><th>KI-Aufrufe</th><th>ALEX-Fragen</th><th>Scans</th><th>KI-Fehler</th><th>Kontingent erschöpft</th><th>Server-Anfragen</th><th>E-Mails</th><th>Fotos</th></tr></thead><tbody>'
+      + days.map(function(d){ var al = 0, sc = 0; Object.keys(d.workshops || {}).forEach(function(c){ al += Number(d.workshops[c].alex) || 0; sc += Number(d.workshops[c].scans) || 0; }); return '<tr><td>' + day(d.day) + '</td><td>' + nf(d.neurons) + '</td><td>' + nf(d.ai_calls) + '</td><td>' + nf(al) + '</td><td>' + nf(sc) + '</td><td>' + nf(d.ai_errors) + '</td><td>' + (d.ai_quota_hits ? '<span class="pill bad">ab ' + dt(d.ai_quota_first).slice(-5) + '</span>' : '–') + '</td><td>' + nf(d.requests) + '</td><td>' + nf(d.emails) + (d.emails_failed ? ' <span style="color:var(--bad)">(' + d.emails_failed + ' ✗)</span>' : '') + '</td><td>' + nf(d.photos) + '</td></tr>'; }).join('')
+      + '</tbody></table></div></div>'
+      + '<div class="split" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><div class="card"><h2>Werkstätten heute</h2><div class="tbl-wrap"><table><thead><tr><th>Werkstatt</th><th>ALEX</th><th>Scans</th><th>Fotos</th><th>Mails</th></tr></thead><tbody>' + wsRows(u.days.slice(0, 1)) + '</tbody></table></div></div>'
+      + '<div class="card"><h2>Werkstätten letzte 30 Tage</h2><div class="tbl-wrap"><table><thead><tr><th>Werkstatt</th><th>ALEX</th><th>Scans</th><th>Fotos</th><th>Mails</th></tr></thead><tbody>' + wsRows(u.days) + '</tbody></table></div></div></div>'
+      + '<div class="card"><h2>Was passiert bei Überschreitung?</h2><div class="kv"><span>KI (10.000 Neuronen/Tag)</span><b>ALEX antwortet mit dem lokalen Wissen, Reifenscan nur manuell – Reset 02:00 Uhr (Sommerzeit). Mit dem Workers-Paid-Plan (5 $/Monat) wird darüber hinaus pro Nutzung abgerechnet.</b><span>Server-Anfragen</span><b>Ab 100.000/Tag lehnt Cloudflare weitere Anfragen ab.</b><span>E-Mails</span><b>Resend Free: 100/Tag und 3.000/Monat – darüber werden Mails nicht zugestellt.</b><span>Speicher-Schreibvorgänge</span><b>Ab 1.000/Tag schlagen Foto-Uploads und Backups fehl.</b></div></div>';
   }
 
   /* ---------- UptimeRobot ---------- */

@@ -11,6 +11,7 @@
  * Fotos: Cloudflare KV (statt Base44 UploadFile). Fahrzeugschein-Fotos: nur temporär (30 Min.),
  * nie öffentlich abrufbar, nach der Auswertung gelöscht. KI: Cloudflare Workers AI.
  */
+import { count as countUsage } from './usage.js';
 import { tireScanImages, registrationScan, capacityDays } from './ai.js';
 
 const TOKEN_TTL_MIN = 30;
@@ -103,6 +104,7 @@ export async function handleFunction(name, body, c) {
     const { bytes, contentType, ext } = decodeDataUrl(dataUrl);
     const key = `${(code || 'ALLGEMEIN').toUpperCase()}/${folder}/${randomHex(16)}.${ext}`;
     await env.PHOTOS.put(key, bytes, { metadata: { contentType, uploaded_at: new Date().toISOString(), ...(meta || {}) } });
+    countUsage('photos', 1, code || undefined); countUsage('kv_writes');
     return `${origin}/photo/${key}`;
   }
   async function photoUrlToDataUrl(url) {
@@ -143,6 +145,7 @@ export async function handleFunction(name, body, c) {
       body: JSON.stringify({ from: env.MAIL_FROM || 'AutoLeitwerk <noreply@autoleitwerk.de>', to: [env.SUPPORT_EMAIL || 'info@autoleitwerk.de'],
         subject: `[Support ${user.workshop_code || '–'}] ${subject}`, html, reply_to: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email) ? user.email : undefined }),
     });
+    countUsage(res.ok ? 'emails' : 'emails_failed', 1, user.workshop_code || undefined);
     if (!res.ok) { console.log('support_mail', res.status, (await res.text()).slice(0, 200)); throw new HttpError(502, 'mail_failed', { message: 'Anfrage konnte nicht gesendet werden. Bitte per E-Mail an info@autoleitwerk.de.' }); }
     return { ok: true };
   }
@@ -225,6 +228,7 @@ export async function handleFunction(name, body, c) {
     for (const u of existing) forAi.push(await photoUrlToDataUrl(u));
     for (const d of dataUrls) { decodeDataUrl(d); forAi.push(d); imageUrls.push(await storePhoto(user.workshop_code, 'reifenscan', d)); }
     const result = await tireScanImages('u:' + user.id, forAi.slice(0, 3), env);
+    countUsage('scans', 1, user.workshop_code || undefined);
     return { ok: true, result, image_urls: imageUrls };
   }
 

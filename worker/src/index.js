@@ -19,6 +19,7 @@
 import { alexAsk, tireScan } from './ai.js';
 import { handleFunction } from './dash.js';
 import { handleCeo, readSettings, parseModules, logError, storeTicket } from './ceo.js';
+import { count as countUsage, maybeFlush } from './usage.js';
 
 const SESSION_HOURS = 12;
 const MAX_FAILED = 5;
@@ -275,6 +276,7 @@ async function storeAttachment(env, origin, code, dataUrl, name) {
   const fileName = cleanFileName(name, ext);
   const key = `${String(code || 'SUPPORT').toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'SUPPORT'}/chat/${randomHex(16)}.${ext}`;
   await env.PHOTOS.put(key, bytes, { metadata: { contentType: m[1], name: fileName, uploaded_at: nowIso() } });
+  countUsage('kv_writes');
   return { url: `${origin}/photo/${key}`, name: fileName, type: m[1], size: bytes.length };
 }
 // Nur Anhänge aus dem eigenen Speicher und der eigenen Werkstatt übernehmen
@@ -373,11 +375,15 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
 
   if (action === 'alex_ask') {
     const [tablet, inventory] = await Promise.all([getTabletData(db, sess), cachedList(db, 'InventoryItem')]);
-    return alexAsk(db, sess, body, env, { ...tablet, inventory: inventory.filter(i => i.workshop_code === code) });
+    const res = await alexAsk(db, sess, body, env, { ...tablet, inventory: inventory.filter(i => i.workshop_code === code) });
+    countUsage('alex', 1, code);
+    return res;
   }
   if (action === 'tire_scan') {
     if (body.order_id) await ownRecord(db, 'Order', body.order_id, code);
-    return tireScan(sess, body, env, decodeDataUrl);
+    const res = await tireScan(sess, body, env, decodeDataUrl);
+    countUsage('scans', 1, code);
+    return res;
   }
   // Zuletzt gespeicherten Reifenscan eines Auftrags laden (Tablet zeigt ihn nach Neuladen wieder an)
   if (action === 'tire_scan_get') {
@@ -396,6 +402,7 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
       const u = body.photos && body.photos[s];
       if (typeof u === 'string' && u.startsWith(prefix) && /\/[a-f0-9]{32}\.(jpg|png|webp)$/.test(u)) photos[s] = u;
     }
+    countUsage('kv_writes');
     await env.PHOTOS.put(tireKey(code, order.id), JSON.stringify({ result: JSON.parse(raw), photos, saved_at: nowIso(), saved_by: emp.name }));
     return { ok: true, stored: true };
   }
@@ -459,6 +466,7 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     const { bytes, contentType, ext } = decodeDataUrl(body.data_url);
     const key = `${code}/${order.id}/${randomHex(16)}.${ext}`;
     await env.PHOTOS.put(key, bytes, { metadata: { contentType, uploaded_by: emp.name, uploaded_at: nowIso() } });
+    countUsage('photos', 1, code); countUsage('kv_writes');
     const fileUrl = `${origin}/photo/${key}`;
     const media = await db.create('MediaItem', {
       file_url: fileUrl, media_type: 'foto', order_id: order.id, workshop_code: code,
@@ -734,6 +742,7 @@ async function sendMail(env, db, { to, subject, html, replyTo, orderId, code, st
     });
     if (!res.ok) { state = 'fehlgeschlagen'; reason = `${res.status} ${(await res.text()).slice(0, 200)}`; console.log('mail_error', reason); }
   } catch (e) { state = 'fehlgeschlagen'; reason = String(e); }
+  countUsage(state === 'gesendet' ? 'emails' : 'emails_failed', 1, code);
   if (orderId && db) {
     await db.create('Notification', { order_id: orderId, channel: 'email', subject, body: subject, recipient: to, status_text: statusText || '', delivery_state: state, workshop_code: code }).catch(() => {});
   }
@@ -966,6 +975,12 @@ export default {
     }
   },
   async fetch(request, env, ctx) {
+    countUsage('requests');
+    try { return await handleFetch(request, env, ctx); } finally { maybeFlush(env, ctx); }
+  },
+};
+
+async function handleFetch(request, env, ctx) {
     const cors = corsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const url = new URL(request.url);
@@ -1075,5 +1090,4 @@ export default {
       logError(new URL(request.url).pathname, e);
       return json({ error: 'server_error' }, 500, cors);
     }
-  },
-};
+}

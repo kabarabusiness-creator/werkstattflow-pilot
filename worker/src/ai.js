@@ -6,6 +6,7 @@
  *  - alexAsk:  Werkstatt-Fragen mit Wissensdatenbank (AlexKnowledge) + Werkstattdaten
  *  - tireScan: Reifen-/Felgenfotos auswerten (Größe, DOT, Profil, Schäden)
  */
+import { recordAi } from './usage.js';
 import KB_BUNDLED from '../../docs/alex_kb.json' with { type: 'json' };
 
 export const TEXT_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
@@ -46,14 +47,19 @@ function limitPerHour(key, max) {
 
 export async function runAi(env, model, input) {
   if (!env.AI) throw new AiError(503, 'not_available', 'KI ist auf dem Server noch nicht eingerichtet.');
+  const kind = JSON.stringify((input && input.messages) || '').includes('image_url') ? 'vision' : 'text';
   try {
-    return await env.AI.run(model, input);
+    const r = await env.AI.run(model, input);
+    recordAi(model, r, kind);
+    return r;
   } catch (e) {
     const msg = String((e && e.message) || e);
     console.log('ai_error', model, msg.slice(0, 300));
     if (/neuron|quota|daily|allocation|4006|exceeded/i.test(msg)) {
+      recordAi(model, null, kind, 'quota');
       throw new AiError(503, 'ai_quota', 'Das kostenlose KI-Tageskontingent ist aufgebraucht – ab 2 Uhr nachts wieder verfügbar.');
     }
+    recordAi(model, null, kind, 'error');
     throw new AiError(502, 'ai_error', 'Die KI hat gerade nicht geantwortet. Bitte noch einmal versuchen.');
   }
 }

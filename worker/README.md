@@ -72,3 +72,4 @@ Achtung: Auf dem Workers-**Paid**-Plan würde Nutzung über dem Kontingent berec
 - **Entwickler-Tools:** Status, Prüfung/Backup sofort, Backups laden, Komplett-Export, Test-Mail, Cache leeren, andere CEO-Sitzungen beenden, letzte Server-Fehler.
 - **Einstellungen:** Wartungsmodus (sperrt Tablet + Kundenportal für alle) und Ankündigung im Tablet (KV `_ceo/settings`).
 - **UptimeRobot:** Secret `UPTIMEROBOT_API_KEY` (Read-Only-Key aus UptimeRobot → Integrations & API) setzen → Übersicht und Entwickler-Tools zeigen Status, Verfügbarkeit 24 h / 7 / 30 Tage, Antwortzeiten und letzte Ausfälle (API v2 getMonitors, 60 s Cache).
+- **Verbrauch & Limits:** eigener Zähler (`worker/src/usage.js`): KI-Neuronen (aus Token geschätzt), KI-Aufrufe/Fehler/„Kontingent erschöpft“, Server-Anfragen, E-Mails, Fotos, KV-Schreibvorgänge – pro Tag und Werkstatt. Im Speicher gezählt, alle 5 Min. pro Server-Instanz nach KV `_usage/<Tag>/<Instanz>` (40 Tage).

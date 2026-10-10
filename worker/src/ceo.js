@@ -6,6 +6,7 @@
  * Jede Anfrage wird serverseitig geprüft – kein Werkstatt-Login und kein Base44-Admin kommt hier rein.
  */
 import { renderCeoPage } from './ceo_page.js';
+import { readUsage, count as countUsage } from './usage.js';
 
 const CODE_KEY = '_ceo/code';
 const SESS_PREFIX = '_ceo/sess/';
@@ -291,6 +292,13 @@ export async function handleCeo(request, env, ctx, d) {
     return new Response(raw, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}"`, ...secHeaders } });
   }
 
+  /* ---------- Verbrauch & Kontingente ---------- */
+  if (action === 'usage') {
+    const u = await readUsage(env, Math.min(31, Math.max(1, Number(body.days) || 31)));
+    const names = Object.fromEntries((await db.list('Workshop', null).catch(() => [])).map(w => [w.code, w.name]));
+    return out({ ok: true, ...u, workshop_names: names, cron_kv_writes_per_day: 98 });
+  }
+
   /* ---------- Externe Überwachung (UptimeRobot) ---------- */
   if (action === 'uptime') return out({ ok: true, ...(await uptimeRobot(env, !!body.refresh)) });
 
@@ -359,5 +367,6 @@ export async function storeTicket(env, t) {
   const id = `${new Date().toISOString()}_${[...a].map(b => b.toString(16).padStart(2, '0')).join('')}`;
   const rec = { id, created_at: new Date().toISOString(), status: 'offen', source: t.source || 'Dashboard', subject: t.subject, message: t.message, name: t.name || '', email: t.email || '', workshop_code: t.workshop_code || '', replies: [] };
   await env.PHOTOS.put(TICKET_PREFIX + id, JSON.stringify(rec), { metadata: { status: 'offen', subject: String(t.subject).slice(0, 80) } });
+  countUsage('kv_writes');
   return rec;
 }

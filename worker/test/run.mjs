@@ -572,6 +572,22 @@ await t('CEO-Konsole: Login nur mit Code an CEO-Adresse, Funktionen sperren, Sup
   // Entwickler-Tools
   const dev = (await ceo({ action: 'dev' }, tok)).data; assert.equal(dev.config.ceo_email, 'info@autoleitwerk.de'); assert.ok(Array.isArray(dev.backups));
   assert.equal((await ceo({ action: 'dev_test_mail' }, tok)).data.ok, true);
+  // Verbrauch: KI-Token → Neuronen, ALEX pro Werkstatt, Mails
+  env.AI = { run: async () => ({ response: 'Antwort', usage: { prompt_tokens: 2000, completion_tokens: 500 } }) };
+  r = await call('/tabletAction', { action: 'alex_ask', messages: [{ role: 'user', content: 'Wie wechsle ich Bremsbeläge?' }] }, token);
+  assert.equal(r.status, 200);
+  delete env.AI;
+  const us = (await ceo({ action: 'usage', days: 3 }, tok)).data;
+  assert.equal(us.days.length, 3); const today = us.days[0];
+  assert.ok(today.neurons >= 88 && today.neurons <= 2000, 'neurons ' + today.neurons); // 2000×31876/1e6 + 500×50488/1e6 ≈ 89
+  assert.ok(today.ai_calls >= 1); assert.ok(today.workshops['AL-T1'].alex >= 1);
+  assert.ok(today.requests > 0); assert.ok(today.emails > 0); assert.equal(us.limits.neurons.day, 10000);
+  // KI-Kontingent erschöpft wird erkannt
+  env.AI = { run: async () => { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); } };
+  r = await call('/tabletAction', { action: 'alex_ask', messages: [{ role: 'user', content: 'Test' }] }, token);
+  delete env.AI;
+  const us2 = (await ceo({ action: 'usage', days: 1 }, tok)).data.days[0];
+  assert.ok(us2.ai_quota_hits >= 1); assert.ok(us2.ai_quota_first);
   // UptimeRobot: ohne Schlüssel Anleitung, mit Schlüssel Monitore (60 s zwischengespeichert)
   assert.equal((await ceo({ action: 'uptime' }, tok)).data.configured, false);
   env.UPTIMEROBOT_API_KEY = 'ur-test';
