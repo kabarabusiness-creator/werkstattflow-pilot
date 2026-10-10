@@ -227,6 +227,15 @@ await t('Reifenscan: gespeicherten Befund wieder laden (Notiz-Fallback + struktu
   s = (await call('/tabletAction', { action: 'tire_scan_get', order_id: 'o1' }, token)).data.saved;
   assert.equal(s.result.brand.value, 'Michelin'); assert.equal(s.photos.flanke, up.file_url); assert.equal(s.photos.felge, undefined);
 });
+await t('Aufgaben-Fotos und Sprachberichte kommen mit getTabletData zurück', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const up = (await call('/tabletAction', { action: 'media_upload', order_id: 'o1', task_id: 'tk-1', data_url: png, caption: 'Bremse' }, token)).data;
+  await call('/tabletAction', { action: 'note_add', order_id: 'o1', task_id: 'tk-1', content: 'Beläge 2 mm' }, token);
+  const d = (await call('/getTabletData', null, token, 'GET')).data;
+  assert.ok(d.task_media.some(m => m.task_id === 'tk-1' && m.file_url === up.file_url));
+  assert.ok(d.task_notes.some(n => n.task_id === 'tk-1' && n.content === 'Beläge 2 mm'));
+  assert.ok(d.task_media.every(m => m.order_id === 'o1'));
+});
 await t('Portal: get liefert nur eigenen Auftrag, ohne Token/Rechnungsadresse', async () => {
   const r = await call('/portalApi', { action: 'get', token: 'tok-aaaaaa' });
   assert.equal(r.status, 200); assert.equal(r.data.order.id, 'o1'); assert.equal(r.data.order.customer_token, undefined); assert.equal(r.data.order.billing_street, undefined);

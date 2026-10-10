@@ -203,6 +203,7 @@ async function getTabletData(db, sess) {
   const orders = mine(by.Order);
   const orderIds = new Set(orders.map(o => o.id));
   const ws = by.Workshop.find(w => w.code === code) || {};
+  const [media, notes] = await Promise.all([cachedList(db, 'MediaItem').catch(() => []), cachedList(db, 'InternalNote').catch(() => [])]);
   return {
     generated_at: nowIso(),
     workshop_code: code,
@@ -215,6 +216,11 @@ async function getTabletData(db, sess) {
     lifts: mine(by.Lift),
     appointments: mine(by.Appointment),
     tire_sets: mine(by.TireSet),
+    // Fotos und Sprachberichte zu Aufgaben – damit sie nach Neuladen am Tablet wieder da sind
+    task_media: media.filter(m => m.workshop_code === code && orderIds.has(m.order_id) && (m.media_type === 'foto' || !m.media_type))
+      .slice(0, 2000).map(m => ({ id: m.id, order_id: m.order_id, task_id: m.task_id || null, caption: m.caption || '', file_url: m.file_url, created_date: m.created_date })),
+    task_notes: notes.filter(n => n.task_id && n.workshop_code === code && orderIds.has(n.order_id))
+      .slice(0, 2000).map(n => ({ id: n.id, order_id: n.order_id, task_id: n.task_id, content: n.content || '', created_date: n.created_date })),
     backend: 'worker',
   };
 }
@@ -388,7 +394,9 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     const media = await db.create('MediaItem', {
       file_url: fileUrl, media_type: 'foto', order_id: order.id, workshop_code: code,
       caption: String(body.caption || '').slice(0, 200), uploaded_by_name: emp.name,
+      ...(body.task_id ? { task_id: String(body.task_id).slice(0, 64) } : {}),
     });
+    invalidate('MediaItem');
     if (body.set_as_vehicle_photo) { await db.update('Order', order.id, { vehicle_photo: fileUrl }); invalidate('Order'); }
     return { ok: true, file_url: fileUrl, media_id: media.id };
   }
@@ -436,7 +444,8 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     const content = String(body.content || '').trim().slice(0, 5000);
     if (!content) throw new HttpError(400, 'params');
     await ownRecord(db, 'Order', body.order_id, code);
-    await db.create('InternalNote', { order_id: body.order_id, content, author_name: emp.name, author_role: ['admin', 'serviceberater', 'mechaniker'].includes(emp.role) ? emp.role : 'mechaniker', workshop_code: code });
+    await db.create('InternalNote', { order_id: body.order_id, content, author_name: emp.name, author_role: ['admin', 'serviceberater', 'mechaniker'].includes(emp.role) ? emp.role : 'mechaniker', workshop_code: code, ...(body.task_id ? { task_id: String(body.task_id).slice(0, 64) } : {}) });
+    invalidate('InternalNote');
     return { ok: true };
   }
   if (action === 'order_complete') {

@@ -1514,7 +1514,12 @@ function carryOverLocalState(prevOrders, nextOrders){
       no.tasks.forEach(nt=>{
         const pt = (po.tasks||[]).find(t=>t.id===nt.id);
         if(!pt) return;
-        LOCAL_TASK_FIELDS.forEach(f=>{ if(pt[f]!==undefined && !(f==='photos' && (!pt.photos||!pt.photos.length))) nt[f] = pt[f]; });
+        LOCAL_TASK_FIELDS.forEach(f=>{
+          if(pt[f]===undefined) return;
+          if(f==='photos' && (!pt.photos||!pt.photos.length)) return;
+          if(f==='voiceNote' && !pt.voiceNote && nt.voiceNote) return; // gespeicherter Bericht vom Server nicht mit „leer“ überschreiben
+          nt[f] = pt[f];
+        });
       });
     }
     nt_pending(no, now, MAX_AGE);
@@ -1653,6 +1658,23 @@ function handleSessionExpired(){
   if(el) el.textContent = 'Sitzung abgelaufen. Bitte neu anmelden.';
 }
 let b44PollInterval = null;
+// Bereits gespeicherte Aufgaben-Fotos und Sprachberichte vom Server an die Aufgaben hängen (sonst nach Neuladen „weg“)
+function attachSavedTaskData(list, data){
+  const media = Array.isArray(data.task_media) ? data.task_media : [];
+  const notes = Array.isArray(data.task_notes) ? data.task_notes : [];
+  if(!media.length && !notes.length) return;
+  const ts = x => Date.parse(/Z|[+-]\d\d:?\d\d$/.test(String(x||'')) ? x : String(x||'') + 'Z') || 0;
+  list.forEach(o=>{
+    const om = media.filter(m=>m.order_id===o.id).sort((a,b)=>ts(a.created_date)-ts(b.created_date));
+    o.tasks.forEach(t=>{
+      // mit Aufgaben-Zuordnung; ältere Fotos ohne Zuordnung über die Beschriftung (= Aufgabentitel)
+      const ph = om.filter(m=> m.task_id ? m.task_id===t.id : (t.title && m.caption===t.title)).map(m=>m.file_url).filter(Boolean);
+      if(ph.length) t.photos = ph;
+      const n = notes.filter(x=>x.task_id===t.id).sort((a,b)=>ts(b.created_date)-ts(a.created_date))[0];
+      if(n) t.voiceNote = { bericht: n.content, kunde: '', transcript: '', fromServer: true, savedAt: n.created_date ? new Date(ts(n.created_date)).toISOString() : null };
+    });
+  });
+}
 async function loadFromBase44(){
   const demoImageByBrand = {};
   orders.forEach(o => {
@@ -1663,6 +1685,7 @@ async function loadFromBase44(){
   state.base44Data = data;
   const prevOrders = orders;
   orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
+  attachSavedTaskData(orders, data);
   carryOverLocalState(prevOrders, orders);
   state.b44Appointments = Array.isArray(data.appointments) ? data.appointments : [];
   state.tireSets = Array.isArray(data.tire_sets) ? data.tire_sets : null; // kommt mit getTabletData-Update
@@ -3404,7 +3427,9 @@ function renderTaskDetail(t){
     </div>
     <div class="td-images">
       ${Array.from({length:t.images||0}).map(()=>`<div class="td-img">${iconCamera}</div>`).join('')}
-      ${(t.photos||[]).map((src,i)=>`<div class="td-img has-photo" data-removephoto="${i}"><img src="${src}" alt="Foto"><span class="td-img-remove">${iconClose}</span></div>`).join('')}
+      ${(t.photos||[]).map((src,i)=> String(src).startsWith('data:')
+        ? `<div class="td-img has-photo" data-removephoto="${i}"><img src="${src}" alt="Foto"><span class="td-img-remove">${iconClose}</span></div>`
+        : `<div class="td-img has-photo" title="Am Auftrag gespeichert"><img src="${escHtml(src)}" alt="Foto"></div>`).join('')}
       ${(!t.images && (!t.photos||t.photos.length===0)) ? `<div class="td-img" style="opacity:.5">${iconCamera}</div>` : ''}
     </div>
     ${'' /* KI-Fotoerkennung deaktiviert: renderAiAnalysisBlock(t) */}
@@ -3552,10 +3577,10 @@ function renderVoiceBlock(t){
         </div>` : ''}
       ${t.voiceNote ? `
         <div class="td-voice-result">
-          <div class="td-voice-result-head">${iconBot} KI-Dokumentation erstellt</div>
-          <div class="td-voice-field"><span class="k">Werkstattbericht</span><span class="v">${t.voiceNote.bericht}</span></div>
-          <div class="td-voice-field"><span class="k">Kundenbeschreibung</span><span class="v">${t.voiceNote.kunde}</span></div>
-          <div class="td-voice-field"><span class="k">Original-Aufnahme</span><span class="v muted">"${t.voiceNote.transcript}"</span></div>
+          <div class="td-voice-result-head">${iconBot} ${t.voiceNote.fromServer ? `Gespeicherter Bericht${t.voiceNote.savedAt ? ' · ' + escHtml(formatDateTimeDE(t.voiceNote.savedAt)) : ''}` : 'KI-Dokumentation erstellt'}</div>
+          <div class="td-voice-field"><span class="k">Werkstattbericht</span><span class="v">${escHtml(t.voiceNote.bericht||'')}</span></div>
+          ${t.voiceNote.kunde ? `<div class="td-voice-field"><span class="k">Kundenbeschreibung</span><span class="v">${escHtml(t.voiceNote.kunde)}</span></div>` : ''}
+          ${t.voiceNote.transcript ? `<div class="td-voice-field"><span class="k">Original-Aufnahme</span><span class="v muted">"${escHtml(t.voiceNote.transcript)}"</span></div>` : ''}
         </div>` : ''}
     </div>`;
 }
