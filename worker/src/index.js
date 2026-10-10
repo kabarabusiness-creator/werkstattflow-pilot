@@ -254,6 +254,22 @@ function decodeDataUrl(dataUrl) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return { bytes, contentType: m[1], ext: m[2] === 'jpeg' ? 'jpg' : m[2] };
 }
+/* ---- Dashboard-Uploads (Fotos + Videos, ersetzt Base44 UploadPublicFile) ---- */
+const MEDIA_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/heic': 'heic', 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
+const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
+async function storeMedia(env, origin, code, dataUrl, folder) {
+  if (!env.PHOTOS) throw new HttpError(503, 'not_available', { message: 'Datei-Speicher ist noch nicht eingerichtet.' });
+  const m = /^data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(String(dataUrl || ''));
+  if (!m || !MEDIA_TYPES[m[1]]) throw new HttpError(400, 'invalid_file', { message: 'Nur Fotos (JPG, PNG, WebP, GIF, HEIC) und Videos (MP4, WebM, MOV) sind erlaubt.' });
+  const bin = atob(m[2].replace(/\s+/g, ''));
+  if (bin.length > MAX_MEDIA_BYTES) throw new HttpError(413, 'too_large', { message: 'Datei ist zu groß (max. 20 MB).' });
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const key = `${String(code || 'ALLGEMEIN').toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'ALLGEMEIN'}/${folder || 'media'}/${randomHex(16)}.${MEDIA_TYPES[m[1]]}`;
+  await env.PHOTOS.put(key, bytes, { metadata: { contentType: m[1], uploaded_at: nowIso() } });
+  countUsage('photos', 1, code || undefined); countUsage('kv_writes');
+  return { file_url: `${origin}/photo/${key}`, content_type: m[1], size: bytes.length };
+}
 /* ---- Chat-Anhänge (Fotos + PDF) im Foto-Speicher (KV) ---- */
 const FILE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -792,6 +808,57 @@ async function mailApprovalAnswer(env, db, order, ap, decision) {
       rows: [['Arbeit', ap.title || '–'], ['Kosten', ap.additional_cost != null ? `${Number(ap.additional_cost).toLocaleString('de-DE')} €` : '–'], ['Kennzeichen', order.license_plate || '–'], ['Telefon', order.phone || '–']] }) });
 }
 
+/* ---- Kunden-Mails aus dem Dashboard (ersetzt Base44 notifyCustomer / sendReviewRequest, ohne Base44-Credits) ---- */
+const STATUS_MAIL = {
+  fahrzeug_angenommen: ['Fahrzeug angenommen', v => `Ihr ${v} ist bei uns eingetroffen und wurde angenommen. Wir halten Sie über den Fortschritt auf dem Laufenden.`],
+  diagnose_laeuft: ['Diagnose läuft', v => `Ihr ${v} wird nun im Detail geprüft. Die Diagnose läuft.`],
+  kostenvoranschlag: ['Kostenvoranschlag wird erstellt', v => `Die Diagnose Ihres ${v} ist abgeschlossen. Wir erstellen jetzt einen Kostenvoranschlag für Sie.`],
+  freigabe_erforderlich: ['Freigabe erforderlich', v => `Die Diagnose Ihres ${v} ist abgeschlossen. Für eine zusätzliche Arbeit brauchen wir Ihre Freigabe – bitte prüfen Sie sie im Kundenportal.`],
+  ersatzteile_bestellt: ['Ersatzteile bestellt', v => `Die benötigten Ersatzteile für Ihr ${v} wurden bestellt.`],
+  warte_auf_ersatzteile: ['Warte auf Ersatzteile', v => `Wir warten auf die Lieferung der Ersatzteile für Ihr ${v}.`],
+  reparatur_laeuft: ['Reparatur läuft', v => `Ihr ${v} befindet sich aktuell in der Reparatur.`],
+  qualitaetspruefung: ['Qualitätsprüfung', v => `Die Reparatur an Ihrem ${v} ist abgeschlossen und wird jetzt geprüft.`],
+  abgeschlossen: ['Auftrag abgeschlossen', v => `Ihr Auftrag für ${v} ist abgeschlossen. Vielen Dank für Ihr Vertrauen!`],
+};
+async function mailStatusUpdate(env, db, order, statusKey) {
+  if (statusKey === 'abholbereit') return mailReady(env, db, order);
+  const def = STATUS_MAIL[statusKey];
+  if (!def) return { sent: false, reason: 'unknown_status' };
+  const ws = await workshopInfo(db, order.workshop_code);
+  const vehicle = [order.vehicle_brand, order.vehicle_model].filter(Boolean).join(' ') || 'Fahrzeug';
+  return sendMail(env, db, {
+    to: order.email, replyTo: ws.email, orderId: order.id, code: order.workshop_code, statusText: def[0],
+    subject: statusKey === 'freigabe_erforderlich' ? `Freigabe erforderlich – ${vehicle}` : `${ws.name}: Update zu Ihrem ${vehicle}`,
+    html: mailHtml({ title: `Hallo ${order.customer_name || ''},`, intro: esc(def[1](vehicle)),
+      rows: [['Status', def[0]], ['Kennzeichen', order.license_plate || '–'], ['Auftrag', '#' + (order.order_number || '')]],
+      button: order.customer_token ? { label: statusKey === 'freigabe_erforderlich' ? 'Jetzt im Kundenportal freigeben' : 'Stand im Kundenportal ansehen', href: portalLink(order) } : null,
+      footer: contactFooter(ws) }),
+  });
+}
+async function mailAppointmentConfirm(env, db, appt) {
+  const ws = await workshopInfo(db, appt.workshop_code);
+  const d = new Date(String(appt.appointment_date).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Berlin' });
+  const time = appt.end_time ? `${appt.time_slot} – ${appt.end_time} Uhr` : `${appt.time_slot || ''} Uhr`;
+  const rows = [['Datum', d], ['Uhrzeit', time], ...(appt.service_name ? [['Leistung', appt.service_name]] : []), ['Fahrzeug', [appt.vehicle_brand, appt.vehicle_model].filter(Boolean).join(' ') || appt.license_plate || '–']];
+  return sendMail(env, db, {
+    to: appt.email, replyTo: ws.email, orderId: appt.order_id || null, code: appt.workshop_code, statusText: 'Termin bestätigt',
+    subject: `Terminbestätigung bei ${ws.name}: ${fmtDate(appt.appointment_date)}, ${appt.time_slot || ''} Uhr`,
+    html: mailHtml({ title: `Hallo ${appt.customer_name || ''},`, intro: `Ihr Termin bei <b>${esc(ws.name)}</b> ist bestätigt. Wir freuen uns auf Ihren Besuch.`, rows,
+      button: appt.customer_token ? { label: 'Termin im Kundenportal ansehen', href: `${PORTAL_BASE}?token=${encodeURIComponent(appt.customer_token)}` } : null, footer: contactFooter(ws) }),
+  });
+}
+async function mailReviewRequest(env, db, order) {
+  const ws = await workshopInfo(db, order.workshop_code);
+  const profile = (await cachedList(db, 'WorkshopProfile')).find(p => p.workshop_code === order.workshop_code) || {};
+  const review = profile.google_review_url || profile.review_url || '';
+  return sendMail(env, db, {
+    to: order.email, replyTo: ws.email, orderId: order.id, code: order.workshop_code, statusText: 'Bewertungsanfrage',
+    subject: `Wie zufrieden waren Sie mit ${ws.name}?`,
+    html: mailHtml({ title: `Hallo ${order.customer_name || ''},`, intro: `wir hoffen, Sie sind mit der Arbeit an Ihrem ${esc([order.vehicle_brand, order.vehicle_model].filter(Boolean).join(' ') || 'Fahrzeug')} (${esc(order.license_plate || '–')}) zufrieden. Über eine kurze Bewertung würden wir uns sehr freuen – sie hilft uns und anderen Kunden.`,
+      button: review ? { label: 'Jetzt bewerten', href: review } : (order.customer_token ? { label: 'Zum Kundenportal', href: portalLink(order) } : null), footer: contactFooter(ws) + '<br>Vielen Dank für Ihr Vertrauen!' }),
+  });
+}
+
 /* ---------------- Nachrichten & Live-Chat ---------------- */
 const DASHBOARD_URL = 'https://autoleitwerk.base44.app';
 const SUPPORT_TO = env => env.SUPPORT_EMAIL || 'info@autoleitwerk.de';
@@ -1008,20 +1075,34 @@ async function handleFetch(request, env, ctx) {
       }
       if (path.startsWith('/photo/') && request.method === 'GET') {
         const key = decodeURIComponent(path.slice('/photo/'.length));
-        if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp|pdf)$/i.test(key)) throw new HttpError(404, 'not_found');
-        const obj = await env.PHOTOS.getWithMetadata(key, { type: 'stream' });
+        if (!env.PHOTOS || !/^[A-Z0-9-]+\/[a-z0-9]+\/[a-f0-9]{32}\.(jpg|png|webp|pdf|gif|heic|mp4|webm|mov)$/i.test(key)) throw new HttpError(404, 'not_found');
+        const isVideo = /\.(mp4|webm|mov)$/i.test(key);
+        const obj = await env.PHOTOS.getWithMetadata(key, { type: isVideo ? 'arrayBuffer' : 'stream' });
         if (!obj || !obj.value) throw new HttpError(404, 'not_found');
         const meta = obj.metadata || {};
-        const ctype = FILE_TYPES[meta.contentType] ? meta.contentType : 'image/jpeg';
+        const ctype = FILE_TYPES[meta.contentType] || MEDIA_TYPES[meta.contentType] ? meta.contentType : 'image/jpeg';
         const headers = { 'Content-Type': ctype, 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff' };
         if (meta.name) headers['Content-Disposition'] = `inline; filename*=UTF-8''${encodeURIComponent(meta.name)}`;
+        if (isVideo) {
+          // Videos brauchen Teilabrufe (Range), sonst spielt Safari/iPhone sie nicht ab
+          const buf = obj.value; const total = buf.byteLength;
+          headers['Accept-Ranges'] = 'bytes';
+          const rm = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('Range') || '');
+          if (rm && (rm[1] || rm[2])) {
+            let start = rm[1] ? Number(rm[1]) : Math.max(0, total - Number(rm[2]));
+            let end = rm[1] && rm[2] ? Math.min(Number(rm[2]), total - 1) : total - 1;
+            if (start >= total || start > end) return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${total}` } });
+            return new Response(buf.slice(start, end + 1), { status: 206, headers: { ...headers, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': String(end - start + 1) } });
+          }
+          return new Response(buf, { headers: { ...headers, 'Content-Length': String(total) } });
+        }
         return new Response(obj.value, { headers });
       }
       const db = new Base44(env);
       let body = {};
       if (request.method === 'POST' && !(request.headers.get('Content-Type') || '').includes('form')) {
         const len = Number(request.headers.get('Content-Length') || 0);
-        if (len > 9_000_000) throw new HttpError(413, 'too_large');
+        if (len > (path === '/fn/uploadFile' ? 30_000_000 : 9_000_000)) throw new HttpError(413, 'too_large');
         body = await request.json().catch(() => ({}));
       }
       if (path === '/workshopProfiles') return json(await workshopProfiles(db, body, request.headers.get('CF-Connecting-IP') || 'x'), 200, cors);
@@ -1040,7 +1121,7 @@ async function handleFetch(request, env, ctx) {
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket }, ctx });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia }, ctx });
         invalidate('Order');
         return json(r, 200, cors);
       }

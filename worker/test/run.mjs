@@ -470,6 +470,43 @@ await t('Cron: tägliches Backup (14 Tage), Überwachung mailt nur bei Statuswec
   const dl = await worker.fetch(new Request('https://api.test/admin/backup', { method: 'POST', body: f2 }), env, ctx);
   assert.equal(dl.status, 200); assert.ok(JSON.parse(await dl.text()).entities.Order);
 });
+await t('Dashboard-Ersatz: Kunden-Mails, Bewertungsanfrage, Foto/Video-Upload (ohne Base44-Credits)', async () => {
+  const fn = async (name, body, tok = 'USER-AL-T1-xxxxxxxxxxxxxxxx', extra = {}) => {
+    const res = await worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}), ...extra }, body: JSON.stringify(body) }), env, ctx);
+    await Promise.all(pending.splice(0));
+    return { status: res.status, data: await res.json().catch(() => ({})) };
+  };
+  // Status-Mail
+  let n = mails.length;
+  let r = await fn('notifyCustomer', { action: 'status_update', order_id: 'o1', status_key: 'freigabe_erforderlich' });
+  assert.equal(r.status, 200); assert.equal(r.data.delivery_state, 'gesendet');
+  let m = mails.at(-1); assert.deepEqual(m.to, ['kunde@example.com']); assert.match(m.subject, /Freigabe erforderlich/); assert.match(m.html, /tok-aaaaaa/);
+  r = await fn('notifyCustomer', { action: 'status_update', order_id: 'o1', status_key: 'abholbereit' });
+  assert.match(mails.at(-1).subject, /abholbereit/);
+  assert.ok(db.Notification.some(x => x.order_id === 'o1' && x.status_text === 'Freigabe erforderlich'));
+  // fremde Werkstatt / ohne Login
+  assert.equal((await fn('notifyCustomer', { action: 'status_update', order_id: 'o2', status_key: 'abholbereit' })).status, 403);
+  assert.equal((await fn('notifyCustomer', { action: 'status_update', order_id: 'o1', status_key: 'abholbereit' }, null)).status, 401);
+  // Terminbestätigung
+  db.Appointment.push({ id: 'ap9', workshop_code: 'AL-T1', email: 'termin@example.com', customer_name: 'Herr T', appointment_date: '2026-10-20', time_slot: '09:00', service_name: 'Inspektion', vehicle_brand: 'BMW', notification_channel: 'email' });
+  r = await fn('notifyCustomer', { action: 'appointment', appointment_id: 'ap9' });
+  assert.equal(r.data.delivery_state, 'gesendet'); assert.deepEqual(mails.at(-1).to, ['termin@example.com']); assert.match(mails.at(-1).subject, /Terminbestätigung.*20\.10\.2026/);
+  // Bewertungsanfrage
+  r = await fn('sendReviewRequest', { order_id: 'o1' });
+  assert.equal(r.data.delivery_state, 'gesendet'); assert.match(mails.at(-1).subject, /zufrieden/);
+  // Upload Foto + Video (mit Teilabruf)
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  r = await fn('uploadFile', { data_url: png });
+  assert.equal(r.status, 200); assert.match(r.data.file_url, /^https:\/\/api\.test\/photo\/AL-T1\/media\/[a-f0-9]{32}\.png$/);
+  const vid = 'data:video/mp4;base64,' + Buffer.from('0123456789abcdef').toString('base64');
+  r = await fn('uploadFile', { data_url: vid });
+  assert.match(r.data.file_url, /\.mp4$/);
+  let g = await worker.fetch(new Request(r.data.file_url, { headers: { Range: 'bytes=2-5' } }), env, ctx);
+  assert.equal(g.status, 206); assert.equal(g.headers.get('Content-Range'), 'bytes 2-5/16'); assert.equal(await g.text(), '2345');
+  g = await worker.fetch(new Request(r.data.file_url), env, ctx); assert.equal(g.status, 200); assert.equal(g.headers.get('Accept-Ranges'), 'bytes'); assert.equal((await g.text()).length, 16);
+  assert.equal((await fn('uploadFile', { data_url: 'data:text/html;base64,PGI+' })).status, 400);
+  assert.equal((await fn('uploadFile', { data_url: png }, null)).status, 401);
+});
 await t('Tablet-Support: Ticket direkt an info@, Live-Chat starten/antworten, fremde Chats gesperrt', async () => {
   const n = mails.length;
   let r = await call('/tabletAction', { action: 'support_ticket', subject: 'Foto-Upload', message: 'Fotos laden nicht', device: 'iPad' }, token);

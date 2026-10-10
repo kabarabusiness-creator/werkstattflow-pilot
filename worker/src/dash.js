@@ -150,6 +150,47 @@ export async function handleFunction(name, body, c) {
     return { ok: true };
   }
 
+  /* ---- Ersatz für Base44-Funktionen mit Integrations-Credits ---- */
+  // Kunden-Mail bei Statuswechsel / Terminbestätigung (Base44 notifyCustomer)
+  if (name === 'notifyCustomer') {
+    const user = await authUser();
+    rateLimit('notify:' + user.id, 200, 3600_000);
+    if (body.action === 'status_update') {
+      const order = await getRec('Order', String(body.order_id || ''));
+      if (!order) throw new HttpError(404, 'order_not_found');
+      sameWorkshop(order, user.workshop_code);
+      const r = await h.mailStatusUpdate(env, db, order, String(body.status_key || order.status || ''));
+      return { ok: true, delivery_state: r.sent ? 'gesendet' : (r.reason === 'no_email' ? 'fehlgeschlagen' : r.reason === 'unknown_status' ? 'geplant' : 'fehlgeschlagen') };
+    }
+    if (body.action === 'appointment') {
+      const appt = await getRec('Appointment', String(body.appointment_id || ''));
+      if (!appt) throw new HttpError(404, 'appointment_not_found');
+      sameWorkshop(appt, user.workshop_code);
+      if (appt.notification_channel && appt.notification_channel !== 'email') return { ok: true, delivery_state: 'geplant' };
+      const r = await h.mailAppointmentConfirm(env, db, appt);
+      return { ok: true, delivery_state: r.sent ? 'gesendet' : 'fehlgeschlagen' };
+    }
+    throw new HttpError(400, 'unknown_action');
+  }
+  // Bewertungsanfrage an den Kunden (Base44 sendReviewRequest)
+  if (name === 'sendReviewRequest') {
+    const user = await authUser();
+    rateLimit('review:' + user.id, 50, 3600_000);
+    const order = await getRec('Order', String(body.order_id || ''));
+    if (!order) throw new HttpError(404, 'not_found');
+    sameWorkshop(order, user.workshop_code);
+    if (!order.email) return { ok: true, delivery_state: 'geplant', channel: order.phone ? 'sms' : 'email' };
+    const r = await h.mailReviewRequest(env, db, order);
+    return { ok: true, delivery_state: r.sent ? 'gesendet' : 'fehlgeschlagen', channel: 'email' };
+  }
+  // Foto/Video hochladen (Base44 UploadPublicFile) – liefert dieselbe Antwort { file_url }
+  if (name === 'uploadFile') {
+    const user = await authUser();
+    rateLimit('upload:' + user.id, 120, 3600_000);
+    const r = await h.storeMedia(env, origin, user.workshop_code || 'ALLGEMEIN', body.data_url, 'media');
+    return { ok: true, ...r };
+  }
+
   // Live-Chat (Support): nach jeder Nachricht aufgerufen – Mail an info@ bzw. an den Nutzer
   if (name === 'chatNotify') {
     const user = await authUser();
