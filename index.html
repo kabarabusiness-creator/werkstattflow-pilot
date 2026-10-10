@@ -5001,9 +5001,45 @@ function renderTireField(k, l, r){
   }
   return `<label class="ts-f ${chk?'ts-chk':''} ${f && f.manual && !empty?'ts-man':''}"><span>${l}</span>${ctl}${chk?'<em>bitte prüfen</em>':''}</label>`;
 }
-function tireState(o){
-  if(!state.tireScan || state.tireScan.orderId !== o.id) state.tireScan = { orderId:o.id, photos:{}, busy:false, result:null, imageUrls:[], saved:false, error:null };
+function tireState(o, fresh){
+  if(!state.tireScan || state.tireScan.orderId !== o.id){
+    state.tireScan = { orderId:o.id, photos:{}, busy:false, result:null, imageUrls:[], saved:false, error:null, loading:false, savedInfo:null };
+    if(!fresh) loadSavedTire(o, state.tireScan);
+  }
   return state.tireScan;
+}
+// Bereits gespeicherten Reifenscan vom Server holen – sonst wäre er nach Neuladen/Auftragswechsel am Tablet „weg“.
+state.tireSavedCache = state.tireSavedCache || {};
+function applySavedTire(ts, saved){
+  if(!saved || ts.busy || ts.result || Object.keys(ts.photos).length) return false; // Mechaniker arbeitet schon an einem neuen Scan
+  ts.photos = Object.assign({}, saved.photos || {});
+  if(saved.result){ ts.result = JSON.parse(JSON.stringify(saved.result)); ts.saved = true; }
+  ts.savedInfo = { at: saved.saved_at, by: saved.saved_by };
+  return true;
+}
+async function loadSavedTire(o, ts){
+  const cached = state.tireSavedCache[o.id];
+  if(cached) applySavedTire(ts, cached);
+  ts.loading = !cached;
+  const r = await tabletRequest('tire_scan_get', { order_id:o.id }, 20000);
+  ts.loading = false;
+  if(r.ok && r.data){
+    const saved = r.data.saved || null;
+    state.tireSavedCache[o.id] = saved;
+    if(saved && cached && ts.saved && JSON.stringify(cached)!==JSON.stringify(saved)){ ts.photos = {}; ts.result = null; ts.saved = false; }
+    applySavedTire(ts, saved);
+  }
+  if(state.tireScan === ts) rerenderTirePanel();
+}
+// Fotos vom Server (https://…) für eine neue Auswertung wieder in Daten-URLs umwandeln
+async function tirePhotoDataUrl(src){
+  if(!src || src.startsWith('data:')) return src;
+  try{ const b = await (await fetch(src)).blob(); return await compressImage(new File([b], 'reifen.jpg', { type: b.type || 'image/jpeg' }), 1600, 0.82); }
+  catch(_){ return null; }
+}
+function fmtSavedAt(iso){
+  const d = iso ? new Date(iso) : null; if(!d || isNaN(d)) return '';
+  return d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}) + ', ' + d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) + ' Uhr';
 }
 function tireVal(f){ return f && typeof f==='object' && 'value' in f ? f.value : f; }
 function tireConf(f){ return f && typeof f==='object' && 'confidence' in f ? Number(f.confidence)||0 : 1; }
@@ -5052,15 +5088,17 @@ function renderTireScanPanel(o){
       ${r.manual ? '' : renderDamageList('Felge', r.rim_damages)}
       ${renderTireNotes(r)}
       ${r.manual ? '' : '<div class="alex-hint">KI-Einschätzung – ersetzt keine Sichtprüfung durch den Mechaniker.</div>'}
-      ${ts.saved ? `<div class="alex-done">${iconCheck} ${Object.keys(ts.photos).length ? 'Fotos und Befund' : 'Befund'} am Auftrag gespeichert – Änderungen danach erneut speichern</div>`
+      ${ts.saved ? `<div class="alex-done">${iconCheck} ${Object.keys(ts.photos).length ? 'Fotos und Befund' : 'Befund'} am Auftrag gespeichert${ts.savedInfo && ts.savedInfo.at ? ` (${escHtml(fmtSavedAt(ts.savedInfo.at))}${ts.savedInfo.by ? ' – ' + escHtml(ts.savedInfo.by) : ''})` : ''} – Änderungen danach erneut speichern</div>
+        <div class="alex-draft-actions"><button class="btn" id="tireResetBtn">Neuen Scan starten</button></div>`
         : `<div class="alex-draft-actions"><button class="btn primary" id="tireSaveBtn">${iconCheck} ${r.manual?'Am Auftrag speichern':'Übernehmen &amp; am Auftrag speichern'}</button><button class="btn" id="tireResetBtn">${r.manual?'Verwerfen':'Neu scannen'}</button></div>`}
     </div>`;
   }
   return `<div class="ts-wrap">
     <div class="ts-intro">${iconTire}<div><b>Reifenscan</b><span>Fotos machen – ALEX liest Größe, DOT und Profil aus und prüft Reifen und Felge auf Schäden.</span></div></div>
+    ${ts.loading ? `<div class="ts-busy"><span class="alex-typing"><i></i><i></i><i></i></span> Gespeicherten Reifenscan laden…</div>` : ''}
     <div class="ts-slots">${slots}</div>
     ${ts.error ? `<div class="alex-warn">${iconWarn} ${escHtml(ts.error)}</div>` : ''}
-    ${!ts.result && !ts.busy ? `<div class="ts-alt"><button class="btn primary ts-go" id="tireScanBtn" ${count?'':'disabled'}>${iconScan} ${count?`Auswerten (${count} Foto${count>1?'s':''})`:'Mindestens ein Foto aufnehmen'}</button><button class="btn" id="tireManualBtn">Ohne Scan manuell eintragen</button></div>` : ''}
+    ${!ts.result && !ts.busy && !ts.loading ?`<div class="ts-alt"><button class="btn primary ts-go" id="tireScanBtn" ${count?'':'disabled'}>${iconScan} ${count?`Auswerten (${count} Foto${count>1?'s':''})`:'Mindestens ein Foto aufnehmen'}</button><button class="btn" id="tireManualBtn">Ohne Scan manuell eintragen</button></div>` : ''}
     ${result}
   </div>`;
 }
@@ -5101,9 +5139,10 @@ function rerenderTirePanelKeepNote(){
 async function runTireScan(){
   const o = getSelectedOrder(); if(!o) return;
   const ts = tireState(o);
-  const images = TIRE_SLOTS.map(s=>ts.photos[s.key]).filter(Boolean);
-  if(!images.length || ts.busy) return;
+  if(!TIRE_SLOTS.some(s=>ts.photos[s.key]) || ts.busy) return;
   ts.busy = true; ts.error = null; rerenderTirePanel();
+  const images = (await Promise.all(TIRE_SLOTS.map(s=>tirePhotoDataUrl(ts.photos[s.key])))).filter(Boolean);
+  if(!images.length){ ts.busy = false; ts.error = 'Fotos konnten nicht geladen werden – bitte neu aufnehmen.'; if(state.tireScan === ts) rerenderTirePanel(); return; }
   const r = await tabletRequest('tire_scan', { order_id:o.id, images }, 90000);
   ts.busy = false;
   if(r.ok && r.data && r.data.result){ ts.result = r.data.result; ts.imageUrls = r.data.image_urls || []; }
@@ -5120,8 +5159,9 @@ async function saveTireScan(){
     showUpdateToast('Bitte mindestens ein Feld ausfüllen.'); if(btn){ btn.innerHTML = `${iconCheck} Am Auftrag speichern`; btn.style.pointerEvents=''; } return;
   }
   for(const s of TIRE_SLOTS){
-    const ph = ts.photos[s.key]; if(!ph) continue;
-    await tabletAction('media_upload', { order_id:o.id, filename:`reifenscan-${o.orderNumber}-${s.key}-${Date.now()}.jpg`, data_url:ph, caption:`Reifenscan – ${s.label}` });
+    const ph = ts.photos[s.key]; if(!ph || !ph.startsWith('data:')) continue; // schon gespeicherte Fotos nicht doppelt hochladen
+    const up = await tabletAction('media_upload', { order_id:o.id, filename:`reifenscan-${o.orderNumber}-${s.key}-${Date.now()}.jpg`, data_url:ph, caption:`Reifenscan – ${s.label}` });
+    if(up && up.file_url) ts.photos[s.key] = up.file_url;
   }
   const fmt = k => { const v = tireVal(r[k]); return (v===null||v===undefined||v===''||v===0) ? '–' : v; };
   const dmg = (list)=> Array.isArray(list)&&list.length ? list.map(d=>typeof d==='string'?d:[d.type||d.damage||d.title, d.description, d.location, d.severity&&`(${d.severity})`].filter(Boolean).join(' ')).join('; ') : 'keine erkannt';
@@ -5138,6 +5178,12 @@ async function saveTireScan(){
   ];
   const note = await tabletAction('note_add', { order_id:o.id, content: lines.join('\n') });
   ts.saved = !!note;
+  if(note){
+    const photos = {}; TIRE_SLOTS.forEach(s=>{ const p = ts.photos[s.key]; if(p && !p.startsWith('data:')) photos[s.key] = p; });
+    const saved = { result: JSON.parse(JSON.stringify(r)), photos, saved_at: new Date().toISOString(), saved_by: state.currentUser ? state.currentUser.name : '' };
+    state.tireSavedCache[o.id] = saved; ts.savedInfo = { at: saved.saved_at, by: saved.saved_by };
+    tabletRequest('tire_scan_store', { order_id:o.id, result: saved.result, photos }, 20000);
+  }
   if(note) showUpdateToast(r.manual ? 'Reifendaten am Auftrag gespeichert' : 'Reifenscan am Auftrag gespeichert');
   rerenderTirePanel();
 }
@@ -5151,7 +5197,7 @@ function handleTireScanClick(e){
     if(t && document.getElementById('tireSaveBtn')){ t.value = ts.result.mech_notes; t.focus(); t.setSelectionRange(t.value.length, t.value.length); } else rerenderTirePanelKeepNote();
   } } return true; }
   if(e.target.closest('#tireManualBtn')){ const o = getSelectedOrder(); if(o){ const ts = tireState(o); ts.result = emptyTireResult(); ts.saved = false; ts.error = null; rerenderTirePanel(); const f = document.querySelector('[data-tirefield="brand"]'); if(f) f.focus(); } return true; }
-  if(e.target.closest('#tireResetBtn')){ const o = getSelectedOrder(); if(o){ state.tireScan = null; tireState(o); rerenderTirePanel(); } return true; }
+  if(e.target.closest('#tireResetBtn')){ const o = getSelectedOrder(); if(o){ state.tireScan = null; tireState(o, true); rerenderTirePanel(); } return true; }
   return false;
 }
 

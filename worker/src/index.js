@@ -277,6 +277,72 @@ async function employeeOf(db, sess) {
   cache.set(key, { ts: Date.now(), row });
   return row || { name: 'Tablet', role: sess.role };
 }
+/* ---- Gespeicherter Reifenscan ---- */
+const TIRE_SLOT_KEYS = ['flanke', 'laufflaeche', 'felge'];
+const TIRE_SLOT_BY_LABEL = { 'flanke': 'flanke', 'lauffläche': 'laufflaeche', 'felge': 'felge' };
+const tireKey = (code, orderId) => `_tirescan/${code}/${orderId}`;
+const utcMs = d => { if (!d) return 0; const s = String(d); return Date.parse(/Z|[+-]\d\d:?\d\d$/.test(s) ? s : s + 'Z') || 0; };
+const tf = v => ({ value: v === undefined ? null : v, confidence: 1, manual: true });
+// Befund-Notiz („Reifenscan (KI) – …“) zurück in Felder übersetzen – für Scans, die vor der strukturierten Ablage gespeichert wurden
+function parseTireNote(text) {
+  const lines = String(text || '').split('\n').map(l => l.trim());
+  const head = lines[0] || '';
+  const r = {}; ['brand', 'model', 'size', 'load_index', 'speed_index', 'season', 'dot_code', 'production_week', 'production_year', 'tire_age_years', 'tread_depth_mm', 'overall_condition'].forEach(k => { r[k] = tf(null); });
+  r.tire_damages = []; r.rim_damages = []; r.mech_notes = '';
+  r.manual = /^Reifendaten/.test(head);
+  if (/korrigiert/.test(head)) r.edited = true;
+  const num = s => { const n = Number(String(s).replace(',', '.')); return Number.isFinite(n) ? n : null; };
+  const dmg = s => (!s || /^keine erkannt$/i.test(s.trim())) ? [] : s.split(/;\s*/).map(x => x.trim()).filter(Boolean);
+  for (const l of lines.slice(1)) {
+    let m;
+    if ((m = /^Reifen:\s*(.*)$/.exec(l))) {
+      let rest = m[1];
+      const sm = /,?\s*Saison\s+(\S+)\s*$/.exec(rest);
+      if (sm) { r.season = tf(sm[1].toLowerCase()); rest = rest.slice(0, sm.index); }
+      const zm = /(\d{3}\/\d{2}\s*Z?R\s*\d{2}(?:[.,]\d)?)(?:\s+(?:(\d{2,3})|–)?([A-Z]{1,2})?)?/.exec(rest);
+      if (zm) {
+        r.size = tf(zm[1].replace(/\s+/g, ' '));
+        if (zm[2]) r.load_index = tf(parseInt(zm[2], 10));
+        if (zm[3]) r.speed_index = tf(zm[3]);
+        rest = rest.slice(0, zm.index);
+      }
+      const bm = rest.replace(/,\s*$/, '').trim();
+      if (bm) { const p = bm.split(/\s+/); r.brand = tf(p[0]); if (p.length > 1) r.model = tf(p.slice(1).join(' ')); }
+    } else if (/^(DOT\b|Profil\b|Zustand\b|ca\.)/.test(l)) {
+      if ((m = /DOT\s+(\d{3,4})/.exec(l))) {
+        r.dot_code = tf(m[1]);
+        const d = /(\d{2})(\d{2})$/.exec(m[1]);
+        if (d && +d[1] >= 1 && +d[1] <= 53) { r.production_week = tf(+d[1]); r.production_year = tf(2000 + +d[2]); }
+      }
+      if ((m = /ca\.\s*([\d.,]+)\s*Jahre/.exec(l))) r.tire_age_years = tf(num(m[1]));
+      if ((m = /Profil\s+([\d.,]+)\s*mm/.exec(l))) r.tread_depth_mm = tf(num(m[1]));
+      if ((m = /Zustand\s+([^\s,]+)/.exec(l)) && m[1] !== '–') r.overall_condition = tf(m[1]);
+    } else if ((m = /^Schäden Reifen:\s*(.*)$/.exec(l))) r.tire_damages = dmg(m[1]);
+    else if ((m = /^Schäden Felge:\s*(.*)$/.exec(l))) r.rim_damages = dmg(m[1]);
+    else if ((m = /^Schäden\/Bemerkungen Mechaniker:\s*(.*)$/.exec(l))) r.mech_notes = m[1].split(/;\s*/).join('\n');
+  }
+  return r;
+}
+async function loadSavedTireScan(db, env, code, orderId) {
+  const [stored, notes, media] = await Promise.all([
+    env.PHOTOS ? env.PHOTOS.get(tireKey(code, orderId), { type: 'json' }).catch(() => null) : null,
+    db.list('InternalNote', { order_id: orderId }, { sort: '-created_date' }).catch(() => []),
+    db.list('MediaItem', { order_id: orderId }, { sort: '-created_date' }).catch(() => []),
+  ]);
+  const note = notes.filter(n => n.workshop_code === code && /^(Reifenscan|Reifendaten) \(/.test(String(n.content || '')))
+    .sort((a, b) => utcMs(b.created_date) - utcMs(a.created_date))[0];
+  // Strukturierte Ablage gewinnt, außer es gibt eine deutlich neuere Befund-Notiz (z. B. aus einem anderen Weg)
+  if (stored && stored.result && !(note && utcMs(note.created_date) > utcMs(stored.saved_at) + 60_000)) {
+    return { result: stored.result, photos: stored.photos || {}, saved_at: stored.saved_at, saved_by: stored.saved_by || '' };
+  }
+  const photos = {};
+  media.filter(m => m.workshop_code === code && /^Reifenscan – /.test(String(m.caption || '')))
+    .sort((a, b) => utcMs(b.created_date) - utcMs(a.created_date))
+    .forEach(m => { const slot = TIRE_SLOT_BY_LABEL[String(m.caption).slice('Reifenscan – '.length).trim().toLowerCase()]; if (slot && !photos[slot]) photos[slot] = m.file_url; });
+  if (!note && !Object.keys(photos).length) return null;
+  return { result: note ? parseTireNote(note.content) : null, photos, saved_at: note ? new Date(utcMs(note.created_date)).toISOString() : null, saved_by: note ? (note.author_name || '') : '', from_note: !!note };
+}
+
 async function tabletAction(db, sess, body, env, origin, ctx) {
   const action = body.action;
   const code = sess.workshop_code;
@@ -290,6 +356,26 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
   if (action === 'tire_scan') {
     if (body.order_id) await ownRecord(db, 'Order', body.order_id, code);
     return tireScan(sess, body, env, decodeDataUrl);
+  }
+  // Zuletzt gespeicherten Reifenscan eines Auftrags laden (Tablet zeigt ihn nach Neuladen wieder an)
+  if (action === 'tire_scan_get') {
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    return { ok: true, saved: await loadSavedTireScan(db, env, code, order.id) };
+  }
+  // Strukturierte Kopie des Befunds (Felder + Foto-Adressen) zusätzlich zur Notiz ablegen
+  if (action === 'tire_scan_store') {
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    if (!env.PHOTOS) return { ok: true, stored: false };
+    const raw = JSON.stringify(body.result || null);
+    if (!body.result || typeof body.result !== 'object' || raw.length > 30000) throw new HttpError(400, 'params');
+    const prefix = `${origin}/photo/${code}/${order.id}/`;
+    const photos = {};
+    for (const s of TIRE_SLOT_KEYS) {
+      const u = body.photos && body.photos[s];
+      if (typeof u === 'string' && u.startsWith(prefix) && /\/[a-f0-9]{32}\.(jpg|png|webp)$/.test(u)) photos[s] = u;
+    }
+    await env.PHOTOS.put(tireKey(code, order.id), JSON.stringify({ result: JSON.parse(raw), photos, saved_at: nowIso(), saved_by: emp.name }));
+    return { ok: true, stored: true };
   }
 
   if (action === 'media_upload') {

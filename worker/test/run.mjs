@@ -207,6 +207,26 @@ await t('Foto hochladen, als Fahrzeugfoto setzen und ausliefern', async () => {
   assert.equal((await call('/tabletAction', { action: 'media_upload', order_id: 'o1', data_url: 'data:text/html;base64,PGI+' }, token)).data.error, 'invalid_image');
   assert.equal((await worker.fetch(new Request('https://api.test/photo/../../x'), env)).status, 404);
 });
+await t('Reifenscan: gespeicherten Befund wieder laden (Notiz-Fallback + strukturierte Ablage)', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  assert.equal((await call('/tabletAction', { action: 'tire_scan_get', order_id: 'o2' }, token)).status, 404);
+  const up = (await call('/tabletAction', { action: 'media_upload', order_id: 'o1', data_url: png, caption: 'Reifenscan – Flanke' }, token)).data;
+  await call('/tabletAction', { action: 'note_add', order_id: 'o1', content: 'Reifenscan (KI, vom Mechaniker korrigiert) – Test\nReifen: Continental AllSeasonContact, 195/55 R15 87H, Saison ganzjahr\nDOT 2319 (ca. 7 Jahre), Profil 5,5 mm, Zustand mittel\nSchäden Reifen: keine erkannt\nSchäden Felge: Kratzer Kleine Kratzer an der Felge (niedrig)\nSchäden/Bemerkungen Mechaniker: Ventil defekt; Felge verbogen\nKI-Einschätzung – Sichtprüfung durch Mechaniker erforderlich.' }, token);
+  let s = (await call('/tabletAction', { action: 'tire_scan_get', order_id: 'o1' }, token)).data.saved;
+  assert.equal(s.photos.flanke, up.file_url);
+  const v = k => s.result[k].value;
+  assert.equal(v('brand'), 'Continental'); assert.equal(v('model'), 'AllSeasonContact'); assert.equal(v('size'), '195/55 R15');
+  assert.equal(v('load_index'), 87); assert.equal(v('speed_index'), 'H'); assert.equal(v('season'), 'ganzjahr');
+  assert.equal(v('dot_code'), '2319'); assert.equal(v('production_week'), 23); assert.equal(v('production_year'), 2019);
+  assert.equal(v('tire_age_years'), 7); assert.equal(v('tread_depth_mm'), 5.5); assert.equal(v('overall_condition'), 'mittel');
+  assert.deepEqual(s.result.tire_damages, []); assert.equal(s.result.rim_damages.length, 1);
+  assert.equal(s.result.mech_notes, 'Ventil defekt\nFelge verbogen'); assert.equal(s.result.manual, false);
+  // strukturierte Ablage: nur eigene Foto-Adressen werden übernommen
+  const result = { brand: { value: 'Michelin', confidence: 1 }, tire_damages: [], rim_damages: [] };
+  assert.equal((await call('/tabletAction', { action: 'tire_scan_store', order_id: 'o1', result, photos: { flanke: up.file_url, felge: 'https://evil.test/x.jpg' } }, token)).data.stored, true);
+  s = (await call('/tabletAction', { action: 'tire_scan_get', order_id: 'o1' }, token)).data.saved;
+  assert.equal(s.result.brand.value, 'Michelin'); assert.equal(s.photos.flanke, up.file_url); assert.equal(s.photos.felge, undefined);
+});
 await t('Portal: get liefert nur eigenen Auftrag, ohne Token/Rechnungsadresse', async () => {
   const r = await call('/portalApi', { action: 'get', token: 'tok-aaaaaa' });
   assert.equal(r.status, 200); assert.equal(r.data.order.id, 'o1'); assert.equal(r.data.order.customer_token, undefined); assert.equal(r.data.order.billing_street, undefined);
