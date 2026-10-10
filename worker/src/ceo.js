@@ -257,7 +257,7 @@ export async function handleCeo(request, env, ctx, d) {
       config: {
         base44: !!env.BASE44_TOKEN, app_id: env.BASE44_APP_ID || null, ki: !!env.AI, speicher: !!env.PHOTOS, email: !!env.RESEND_API_KEY,
         admin_key: String(env.ADMIN_KEY || '').trim().length >= 16, ceo_email: ceoEmail(env), mail_from: env.MAIL_FROM || 'AutoLeitwerk <noreply@autoleitwerk.de>',
-        support_email: d.SUPPORT_TO(env), allowed_origins: env.ALLOWED_ORIGINS || '', ceo_sessions: ceoSessions,
+        support_email: d.SUPPORT_TO(env), allowed_origins: env.ALLOWED_ORIGINS || '', ceo_sessions: ceoSessions, uptimerobot: !!env.UPTIMEROBOT_API_KEY,
       },
       errors: recentErrors.slice(0, 30), time: nowIso(),
     });
@@ -291,6 +291,9 @@ export async function handleCeo(request, env, ctx, d) {
     return new Response(raw, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}"`, ...secHeaders } });
   }
 
+  /* ---------- Externe Überwachung (UptimeRobot) ---------- */
+  if (action === 'uptime') return out({ ok: true, ...(await uptimeRobot(env, !!body.refresh)) });
+
   /* ---------- Einstellungen ---------- */
   if (action === 'settings_save') {
     const cur = await readSettings(env);
@@ -307,6 +310,40 @@ export async function handleCeo(request, env, ctx, d) {
   }
 
   throw new HttpError(400, 'unknown_action');
+}
+
+/* UptimeRobot (API v2 getMonitors). Schlüssel als Secret UPTIMEROBOT_API_KEY (Read-Only-Key reicht).
+ * Free-Plan erlaubt 10 Abfragen/Minute → Ergebnis 60 s zwischenspeichern. */
+const UR_STATUS = { 0: ['paused', 'Pausiert'], 1: ['pending', 'Noch nicht geprüft'], 2: ['up', 'Online'], 8: ['down', 'Scheint down'], 9: ['down', 'Down'] };
+const UR_LOG = { 1: 'Ausfall', 2: 'Wieder online', 98: 'Gestartet', 99: 'Pausiert' };
+let urCache = null;
+export async function uptimeRobot(env, refresh) {
+  const key = String(env.UPTIMEROBOT_API_KEY || '').trim();
+  if (!key) return { configured: false };
+  if (!refresh && urCache && Date.now() - urCache.ts < 60_000) return urCache.v;
+  const form = new URLSearchParams({ api_key: key, format: 'json', logs: '1', logs_limit: '10', response_times: '1', response_times_limit: '48', custom_uptime_ratios: '1-7-30', all_time_uptime_ratio: '1' });
+  let j;
+  try {
+    const res = await fetch('https://api.uptimerobot.com/v2/getMonitors', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' }, body: form.toString() });
+    j = await res.json().catch(() => null);
+    if (!res.ok || !j) return { configured: true, error: `UptimeRobot antwortet nicht (HTTP ${res.status}).` };
+  } catch (e) { return { configured: true, error: 'UptimeRobot nicht erreichbar.' }; }
+  if (j.stat !== 'ok') return { configured: true, error: (j.error && (j.error.message || j.error.type)) ? `UptimeRobot: ${j.error.message || j.error.type}` : 'UptimeRobot-Fehler (API-Schlüssel prüfen).' };
+  const ratios = r => String(r || '').split('-').map(x => (x === '' ? null : Number(x)));
+  const monitors = (j.monitors || []).map(m => {
+    const [d1, d7, d30] = ratios(m.custom_uptime_ratio);
+    const st = UR_STATUS[m.status] || ['pending', 'Unbekannt'];
+    return {
+      id: m.id, name: m.friendly_name, url: m.url, interval_min: Math.round((Number(m.interval) || 0) / 60),
+      status: st[0], status_label: st[1], uptime_1d: d1, uptime_7d: d7, uptime_30d: d30, uptime_all: m.all_time_uptime_ratio != null ? Number(m.all_time_uptime_ratio) : null,
+      avg_response_ms: m.average_response_time != null ? Math.round(Number(m.average_response_time)) : null,
+      response_times: (m.response_times || []).slice(0, 48).reverse().map(r => ({ t: (Number(r.datetime) || 0) * 1000, ms: Number(r.value) || 0 })),
+      logs: (m.logs || []).slice(0, 10).map(l => ({ type: UR_LOG[l.type] || String(l.type), down: l.type === 1, at: new Date((Number(l.datetime) || 0) * 1000).toISOString(), duration_min: Math.round((Number(l.duration) || 0) / 60), reason: l.reason ? String(l.reason.detail || l.reason.code || '') : '' })),
+    };
+  });
+  const v = { configured: true, fetched_at: new Date().toISOString(), monitors, all_up: monitors.length > 0 && monitors.every(m => m.status === 'up' || m.status === 'paused') };
+  urCache = { ts: Date.now(), v };
+  return v;
 }
 
 async function listTickets(env) {

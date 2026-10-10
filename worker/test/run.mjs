@@ -28,6 +28,7 @@ const mails = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url); const method = init.method || 'GET';
   if (u.host.endsWith('github.io') || u.host === 'autoleitwerk.base44.app') return new Response('<html></html>', { status: globalThis.SITE_STATUS || 200 });
+  if (u.host === 'api.uptimerobot.com') { globalThis.UR_CALLS = (globalThis.UR_CALLS || 0) + 1; const f = new URLSearchParams(init.body); assert.equal(f.get('api_key'), 'ur-test'); return new Response(JSON.stringify(globalThis.UR_RESPONSE), { status: 200 }); }
   if (u.host === 'api.resend.com') { assert.equal(init.headers.Authorization, 'Bearer RE_TEST'); mails.push(JSON.parse(init.body)); return new Response('{"id":"m1"}', { status: 200 }); }
   if (u.pathname.endsWith('/entities/User/me')) {
     const a = (init.headers && (init.headers.Authorization || init.headers.authorization)) || '';
@@ -571,6 +572,23 @@ await t('CEO-Konsole: Login nur mit Code an CEO-Adresse, Funktionen sperren, Sup
   // Entwickler-Tools
   const dev = (await ceo({ action: 'dev' }, tok)).data; assert.equal(dev.config.ceo_email, 'info@autoleitwerk.de'); assert.ok(Array.isArray(dev.backups));
   assert.equal((await ceo({ action: 'dev_test_mail' }, tok)).data.ok, true);
+  // UptimeRobot: ohne Schlüssel Anleitung, mit Schlüssel Monitore (60 s zwischengespeichert)
+  assert.equal((await ceo({ action: 'uptime' }, tok)).data.configured, false);
+  env.UPTIMEROBOT_API_KEY = 'ur-test';
+  globalThis.UR_RESPONSE = { stat: 'ok', monitors: [
+    { id: 1, friendly_name: 'Server /health', url: 'https://x/health', interval: 300, status: 2, custom_uptime_ratio: '100.000-99.950-99.800', all_time_uptime_ratio: '99.9', average_response_time: '123.4', response_times: [{ datetime: 1760000000, value: 120 }, { datetime: 1759999700, value: 130 }], logs: [{ type: 1, datetime: 1759990000, duration: 600, reason: { code: '503', detail: 'Service Unavailable' } }, { type: 2, datetime: 1759990600, duration: 0 }] },
+    { id: 2, friendly_name: 'Server /status', url: 'https://x/status', interval: 300, status: 9, custom_uptime_ratio: '98.5-99-99.5', logs: [] }] };
+  let up = (await ceo({ action: 'uptime' }, tok)).data;
+  assert.equal(up.configured, true); assert.equal(up.monitors.length, 2); assert.equal(up.all_up, false);
+  const m1 = up.monitors[0]; assert.equal(m1.status, 'up'); assert.equal(m1.uptime_7d, 99.95); assert.equal(m1.avg_response_ms, 123); assert.equal(m1.interval_min, 5);
+  assert.equal(m1.logs[0].down, true); assert.equal(m1.logs[0].duration_min, 10); assert.equal(m1.logs[0].reason, 'Service Unavailable');
+  assert.equal(m1.response_times[0].ms, 130); // älteste zuerst
+  assert.equal(up.monitors[1].status, 'down');
+  const calls0 = globalThis.UR_CALLS; await ceo({ action: 'uptime' }, tok); assert.equal(globalThis.UR_CALLS, calls0); // Cache
+  globalThis.UR_RESPONSE = { stat: 'fail', error: { type: 'invalid_parameter', message: 'api_key is invalid.' } };
+  up = (await ceo({ action: 'uptime', refresh: true }, tok)).data; assert.match(up.error, /api_key is invalid/);
+  assert.equal((await ceo({ action: 'dev' }, tok)).data.config.uptimerobot, true);
+  delete env.UPTIMEROBOT_API_KEY;
   // Abmelden beendet die Sitzung
   await ceo({ action: 'logout' }, tok);
   assert.equal((await ceo({ action: 'overview' }, tok)).status, 401);

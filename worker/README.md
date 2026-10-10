@@ -71,3 +71,4 @@ Achtung: Auf dem Workers-**Paid**-Plan würde Nutzung über dem Kontingent berec
 - **Support:** Live-Chats (Base44 `ChatSession`/`ChatMessage`) beantworten + Status; Anfragen aus dem Support-Formular (KV `_tickets/`) per Mail beantworten + Status.
 - **Entwickler-Tools:** Status, Prüfung/Backup sofort, Backups laden, Komplett-Export, Test-Mail, Cache leeren, andere CEO-Sitzungen beenden, letzte Server-Fehler.
 - **Einstellungen:** Wartungsmodus (sperrt Tablet + Kundenportal für alle) und Ankündigung im Tablet (KV `_ceo/settings`).
+- **UptimeRobot:** Secret `UPTIMEROBOT_API_KEY` (Read-Only-Key aus UptimeRobot → Integrations & API) setzen → Übersicht und Entwickler-Tools zeigen Status, Verfügbarkeit 24 h / 7 / 30 Tage, Antwortzeiten und letzte Ausfälle (API v2 getMonitors, 60 s Cache).

@@ -158,11 +158,48 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
     $('view').innerHTML = '<h1>Übersicht</h1><div class="sub">Alle Werkstätten auf einen Blick · ' + dt(new Date().toISOString()) + '</div>'
       + (o.settings.maintenance ? '<div class="card" style="border-color:var(--warn)"><b style="color:var(--warn)">Wartungsmodus ist AN</b> – Tablet und Kundenportal sind für alle Werkstätten gesperrt. <a href="#" data-go="settings">Ändern</a></div>' : '')
       + '<div class="grid kpis">' + k.map(function(x){ return '<div class="kpi"><b>' + esc(x[1]) + '</b><span>' + esc(x[0]) + '</span></div>'; }).join('') + '</div>'
-      + '<div class="card"><div class="row"><h2 style="margin:0">Systemstatus</h2><span class="sp"></span>' + statusPill(o.status) + '</div><div class="msg">Letzte Prüfung: ' + dt(o.status.checked_at) + ' · Letztes Backup: ' + day(o.status.last_backup) + '</div></div>'
+      + '<div class="card"><div class="row"><h2 style="margin:0">Systemstatus</h2><span class="sp"></span>' + statusPill(o.status) + '</div><div class="msg">Letzte Prüfung: ' + dt(o.status.checked_at) + ' · Letztes Backup: ' + day(o.status.last_backup) + '</div></div><div id="urCard"></div>'
       + '<div class="card"><h2>Werkstätten</h2><div class="tbl-wrap"><table><thead><tr><th>Werkstatt</th><th>Code</th><th>Status</th><th>Abo</th><th>Aktive Aufträge</th><th>Aufträge Monat</th><th>Umsatz Monat</th><th>Mitarbeiter</th><th>Termine 7 Tage</th><th>Tablet-Logins 7 Tage</th><th>Letzte Aktivität</th></tr></thead><tbody>'
       + (o.workshops.length ? o.workshops.map(function(w){ return '<tr><td><b>' + esc(w.name) + '</b></td><td>' + esc(w.code) + '</td><td>' + (w.is_active ? '<span class="pill ok">Aktiv</span>' : '<span class="pill bad">Gesperrt</span>') + '</td><td>' + aboPill(w) + (w.trial_ends_at && w.subscription_status === 'trial' ? ' <small style="color:var(--faint)">bis ' + day(w.trial_ends_at) + '</small>' : '') + '</td><td>' + w.orders_active + '</td><td>' + w.orders_month + '</td><td>' + eur(w.revenue_month) + '</td><td>' + w.employees + '</td><td>' + w.appts_week + '</td><td>' + w.tablet_logins_7d + '</td><td>' + dt(w.last_activity) + '</td></tr>'; }).join('') : '<tr><td colspan="11" class="empty">Noch keine Werkstätten.</td></tr>')
       + '</tbody></table></div></div>';
+    loadUptime('urCard');
   }
+
+  /* ---------- UptimeRobot ---------- */
+  function pct(v){ return v == null || isNaN(v) ? '–' : (Math.round(v * 100) / 100).toLocaleString('de-DE') + ' %'; }
+  function pctCls(v){ return v == null ? '' : v >= 99.9 ? 'ok' : v >= 99 ? 'warn' : 'bad'; }
+  function spark(rt){
+    if(!rt || rt.length < 2) return '';
+    var w = 160, h = 34, max = Math.max.apply(null, rt.map(function(r){ return r.ms; })) || 1;
+    var pts = rt.map(function(r, i){ return (i * (w / (rt.length - 1))).toFixed(1) + ',' + (h - 3 - (r.ms / max) * (h - 6)).toFixed(1); }).join(' ');
+    return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" aria-label="Antwortzeiten"><polyline fill="none" stroke="#8b5cf6" stroke-width="1.6" points="' + pts + '"/></svg>';
+  }
+  async function loadUptime(id, refresh){
+    var el = $(id); if(!el) return;
+    if(!refresh) el.innerHTML = '<div class="card"><h2 style="margin:0">Externe Überwachung (UptimeRobot)</h2><div class="msg">Lädt…</div></div>';
+    var r;
+    try { r = await api('uptime', refresh ? { refresh: true } : {}); } catch(e){ if(e.message === 'unauthorized') return; el.innerHTML = '<div class="card"><h2>Externe Überwachung (UptimeRobot)</h2><div class="msg err">' + esc(e.message) + '</div></div>'; return; }
+    if(!$(id)) return;
+    if(!r.configured){
+      el.innerHTML = '<div class="card"><h2>Externe Überwachung (UptimeRobot)</h2><div class="msg" style="margin-top:0">Noch nicht verbunden. So geht es (einmalig, ca. 2 Minuten):</div><ol style="font-size:13.5px;color:var(--muted);line-height:1.7;margin:8px 0 0;padding-left:20px"><li>UptimeRobot → <b>Integrations &amp; API</b> → <b>API</b> → <b>Read-Only API Key</b> erstellen und kopieren.</li><li>Cloudflare → Workers &amp; Pages → <b>werkstattflow-pilot</b> → Settings → Variables and Secrets → <b>Add</b>, Typ <b>Secret</b>, Name <code>UPTIMEROBOT_API_KEY</code>, Wert einfügen, speichern.</li><li>Diese Seite neu laden.</li></ol></div>';
+      return;
+    }
+    if(r.error){ el.innerHTML = '<div class="card"><div class="row"><h2 style="margin:0">Externe Überwachung (UptimeRobot)</h2><span class="sp"></span><button class="btn" data-urrefresh="' + esc(id) + '">Neu laden</button></div><div class="msg err">' + esc(r.error) + '</div></div>'; return; }
+    var stCls = { up:'ok', down:'bad', paused:'', pending:'warn' };
+    var downNow = r.monitors.filter(function(m){ return m.status === 'down'; }).length;
+    var logs = [];
+    r.monitors.forEach(function(m){ (m.logs || []).forEach(function(l){ if(l.down) logs.push({ m: m.name, l: l }); }); });
+    logs.sort(function(a, b){ return b.l.at.localeCompare(a.l.at); });
+    el.innerHTML = '<div class="card"><div class="row"><h2 style="margin:0">Externe Überwachung (UptimeRobot)</h2><span class="sp"></span>'
+      + (r.monitors.length ? (downNow ? '<span class="pill bad">● ' + downNow + ' down</span>' : '<span class="pill ok">● Alle online</span>') : '<span class="pill warn">Keine Monitore</span>')
+      + '<button class="btn" data-urrefresh="' + esc(id) + '" style="padding:6px 12px">Neu laden</button></div>'
+      + (r.monitors.length ? '<div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th>Monitor</th><th>Status</th><th>24 Std.</th><th>7 Tage</th><th>30 Tage</th><th>Ø Antwort</th><th>Antwortzeiten</th><th>Intervall</th></tr></thead><tbody>'
+        + r.monitors.map(function(m){ return '<tr><td><b>' + esc(m.name) + '</b><div style="font-size:11.5px;color:var(--faint);max-width:280px;overflow:hidden;text-overflow:ellipsis">' + esc(m.url) + '</div></td><td><span class="pill ' + (stCls[m.status] || '') + '">' + esc(m.status_label) + '</span></td><td><span class="pill ' + pctCls(m.uptime_1d) + '">' + pct(m.uptime_1d) + '</span></td><td><span class="pill ' + pctCls(m.uptime_7d) + '">' + pct(m.uptime_7d) + '</span></td><td><span class="pill ' + pctCls(m.uptime_30d) + '">' + pct(m.uptime_30d) + '</span></td><td>' + (m.avg_response_ms != null ? m.avg_response_ms + ' ms' : '–') + '</td><td>' + spark(m.response_times) + '</td><td>' + (m.interval_min ? m.interval_min + ' Min.' : '–') + '</td></tr>'; }).join('')
+        + '</tbody></table></div>' : '<div class="msg">Im UptimeRobot-Konto sind noch keine Monitore angelegt.</div>')
+      + '<div class="sec-t">Letzte Ausfälle</div>' + (logs.length ? logs.slice(0, 8).map(function(x){ return '<div style="font-size:13.5px;margin-top:6px"><span class="pill bad">Ausfall</span> <b>' + esc(x.m) + '</b> · ' + dt(x.l.at) + ' · ' + (x.l.duration_min ? x.l.duration_min + ' Min.' : 'läuft noch') + (x.l.reason ? ' · <span style="color:var(--muted)">' + esc(x.l.reason) + '</span>' : '') + '</div>'; }).join('') : '<div class="empty">Keine Ausfälle in den letzten Einträgen.</div>')
+      + '<div class="msg">Stand ' + dt(r.fetched_at) + ' · Daten von UptimeRobot (max. 1× pro Minute abgefragt)</div></div>';
+  }
+  document.addEventListener('click', function(e){ var b = e.target.closest('[data-urrefresh]'); if(b){ b.disabled = true; loadUptime(b.dataset.urrefresh, true); } });
 
   /* ---------- Werkstätten & Funktionen ---------- */
   function sw(attrs, on){ return '<label class="sw"><input type="checkbox" ' + attrs + (on ? ' checked' : '') + '><i></i></label>'; }
@@ -239,10 +276,11 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
     $('view').innerHTML = '<h1>Entwickler-Tools</h1><div class="sub">Server-Zustand, Prüfungen, Backups und Konfiguration. Stand ' + dt(d.time) + '</div>'
       + '<div class="card"><div class="row"><h2 style="margin:0">Status</h2><span class="sp"></span>' + statusPill(d.status) + '</div><div class="kv" style="margin-top:12px"><span>Letzte Prüfung</span><b>' + dt(d.status.checked_at) + '</b><span>Fehlprüfungen in Folge</span><b>' + esc(m.fail_count || 0) + '</b><span>Störung seit</span><b>' + (m.since ? dt(m.since) : '–') + '</b><span>Letztes Backup</span><b>' + (m.last_backup ? day(m.last_backup.day) + ' · ' + Math.round((m.last_backup.bytes||0)/1024) + ' KB' : '–') + '</b><span>Externe Prüfung</span><b><a href="/health" target="_blank">/health</a> · <a href="/status" target="_blank">/status</a></b></div>'
       + '<div class="row" style="margin-top:14px"><button class="btn" data-dev="dev_run_checks">Prüfung jetzt ausführen</button><button class="btn" data-dev="dev_backup_now">Backup jetzt erstellen</button><button class="btn" data-dev="dev_test_mail">Test-Mail an mich</button><button class="btn" data-dev="dev_clear_cache">Server-Cache leeren</button><button class="btn" id="exportAll">Komplett-Export laden</button></div></div>'
-      + '<div class="card"><h2>Konfiguration</h2><div class="kv"><span>Datenbank (Base44)</span><b>' + yes(c.base44) + ' ' + esc(c.app_id || '') + '</b><span>KI (Workers AI)</span><b>' + yes(c.ki) + '</b><span>Speicher (KV)</span><b>' + yes(c.speicher) + '</b><span>E-Mail-Versand</span><b>' + yes(c.email) + ' ' + esc(c.mail_from) + '</b><span>Admin-Schlüssel</span><b>' + yes(c.admin_key) + '</b><span>Support-Adresse</span><b>' + esc(c.support_email) + '</b><span>CEO-Adresse</span><b>' + esc(c.ceo_email) + '</b><span>Erlaubte Seiten</span><b>' + esc(c.allowed_origins || 'alle') + '</b><span>CEO-Sitzungen</span><b>' + esc(c.ceo_sessions) + ' <button class="btn danger" data-dev="dev_logout_all" style="padding:4px 10px;margin-left:8px">Alle anderen abmelden</button></b></div></div>'
+      + '<div id="urDev"></div><div class="card"><h2>Konfiguration</h2><div class="kv"><span>Datenbank (Base44)</span><b>' + yes(c.base44) + ' ' + esc(c.app_id || '') + '</b><span>KI (Workers AI)</span><b>' + yes(c.ki) + '</b><span>Speicher (KV)</span><b>' + yes(c.speicher) + '</b><span>E-Mail-Versand</span><b>' + yes(c.email) + ' ' + esc(c.mail_from) + '</b><span>Admin-Schlüssel</span><b>' + yes(c.admin_key) + '</b><span>UptimeRobot verbunden</span><b>' + yes(c.uptimerobot) + '</b><span>Support-Adresse</span><b>' + esc(c.support_email) + '</b><span>CEO-Adresse</span><b>' + esc(c.ceo_email) + '</b><span>Erlaubte Seiten</span><b>' + esc(c.allowed_origins || 'alle') + '</b><span>CEO-Sitzungen</span><b>' + esc(c.ceo_sessions) + ' <button class="btn danger" data-dev="dev_logout_all" style="padding:4px 10px;margin-left:8px">Alle anderen abmelden</button></b></div></div>'
       + '<div class="card"><h2>Backups (letzte 14 Tage)</h2>' + (d.backups.length ? '<div class="tbl-wrap"><table><thead><tr><th>Tag</th><th>Größe</th><th>Datensätze</th><th>Zustand</th><th></th></tr></thead><tbody>' + d.backups.map(function(b){ return '<tr><td>' + day(b.name.slice(0,10)) + '</td><td>' + Math.round((b.bytes||0)/1024) + ' KB</td><td>' + esc(b.records == null ? '–' : b.records) + '</td><td>' + (b.failed && b.failed.length ? '<span class="pill warn">unvollständig</span>' : '<span class="pill ok">ok</span>') + '</td><td><button class="btn" data-bk="' + esc(b.name) + '" style="padding:5px 10px">Laden</button></td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">Noch keine Backups.</div>') + '</div>'
       + '<div class="card"><h2>Letzte Server-Fehler</h2><div class="msg" style="margin-top:0">Nur seit dem letzten Neustart dieser Server-Instanz.</div>' + (d.errors.length ? d.errors.map(function(x){ return '<div style="margin-top:10px"><b style="font-size:13px">' + dt(x.at) + ' · ' + esc(x.where) + '</b><pre>' + esc(x.error) + '</pre></div>'; }).join('') : '<div class="empty">Keine Fehler.</div>') + '</div>';
     $('exportAll').onclick = function(){ download('dev_export', {}, this); };
+    loadUptime('urDev');
   }
   async function download(action, data, btn){
     if(btn) btn.disabled = true;
