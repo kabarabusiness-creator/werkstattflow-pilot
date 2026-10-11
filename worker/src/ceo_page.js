@@ -56,6 +56,51 @@ h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 12px}.sub{color:va
 pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin:6px 0 0}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#24243a;border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:14px;z-index:20;max-width:calc(100% - 32px)}
 .empty{color:var(--faint);font-size:13.5px;padding:10px 0}
+.split2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.fld{flex:1 1 160px;max-width:240px;align-self:flex-start}
+.tab .sm,.mobile-only{display:none}
+@media(max-width:860px){.split2{grid-template-columns:minmax(0,1fr)}}
+/* Handy */
+@media(max-width:720px){
+  html,body{overflow-x:hidden}
+  .top-in{padding:10px 12px 0;gap:10px}
+  .top .brand span{display:none}
+  #logout{margin-left:auto;padding:7px 12px;min-height:36px}
+  .tabs{order:3;flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -12px;padding:0 12px 10px}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex-shrink:0;white-space:nowrap;padding:9px 13px;background:var(--panel);border:1px solid var(--line)}
+  .tab.active{border-color:rgba(139,92,246,.45)}
+  .tab .lg{display:none}.tab .sm{display:inline}
+  .mobile-only{display:inline-flex}
+  main{padding:16px 12px calc(48px + env(safe-area-inset-bottom))}
+  h1{font-size:20px}.sub{font-size:13px;margin-bottom:14px}
+  .card{padding:14px;border-radius:12px;margin-bottom:12px}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .kpis.quota{grid-template-columns:minmax(0,1fr)}
+  .kpi{padding:12px}.kpi b{font-size:22px}
+  input[type=email],input[type=text],input[type=date],select,textarea{font-size:16px}
+  .btn{min-height:42px}
+  .pill{white-space:normal}
+  .kv{grid-template-columns:minmax(0,1fr);gap:2px}.kv b{margin-bottom:10px}
+  .split{gap:0}
+  .split.has-sel>.list,.split:not(.has-sel)>#detail{display:none}
+  .mods{grid-template-columns:minmax(0,1fr)}
+  .mod{padding:10px 12px}
+  .fld{max-width:none}
+  .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.actions .btn{width:100%;padding:9px 8px}
+  .msgs{max-height:58vh}.bubble{max-width:92%}
+  .tbl-wrap{overflow:visible}
+  table.stack,table.stack tbody,table.stack tr,table.stack td{display:block;width:100%}
+  table.stack thead{display:none}
+  table.stack tr{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:4px 12px;margin-bottom:8px}
+  table.stack td{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid rgba(42,42,68,.7);white-space:normal;text-align:right;min-height:36px}
+  table.stack td:last-child{border-bottom:0}
+  table.stack td::before{content:attr(data-label);color:var(--faint);font-size:12px;font-weight:600;text-align:left;flex-shrink:0}
+  table.stack td.t{display:block;text-align:left;font-size:15px;padding:9px 0}
+  table.stack td.t::before{display:none}
+  table.stack.compact tbody tr:nth-child(n+4){display:none}
+  .toast{bottom:calc(16px + env(safe-area-inset-bottom))}
+}
 </style></head>
 <body>
 <section class="login" id="login">
@@ -81,10 +126,10 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
     <div class="brand" style="margin:0"><div class="logo">L</div><div><b>CEO-Konsole</b><span>AutoLeitwerk</span></div></div>
     <nav class="tabs" id="tabs">
       <button class="tab active" data-tab="overview">Übersicht</button>
-      <button class="tab" data-tab="workshops">Werkstätten &amp; Funktionen</button>
+      <button class="tab" data-tab="workshops"><span class="lg">Werkstätten &amp; Funktionen</span><span class="sm">Werkstätten</span></button>
       <button class="tab" data-tab="support">Support <span class="n hidden" id="supN"></span></button>
-      <button class="tab" data-tab="usage">Verbrauch &amp; Limits</button>
-      <button class="tab" data-tab="dev">Entwickler-Tools</button>
+      <button class="tab" data-tab="usage"><span class="lg">Verbrauch &amp; Limits</span><span class="sm">Verbrauch</span></button>
+      <button class="tab" data-tab="dev"><span class="lg">Entwickler-Tools</span><span class="sm">Entwickler</span></button>
       <button class="tab" data-tab="settings">Einstellungen</button>
     </nav>
     <button class="btn" id="logout">Abmelden</button>
@@ -133,7 +178,14 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
   $('email').addEventListener('keydown', function(e){ if(e.key === 'Enter') $('sendCode').click(); });
   $('back').onclick = function(){ $('stepCode').classList.add('hidden'); $('stepMail').classList.remove('hidden'); $('loginMsg').textContent = ''; };
   $('logout').onclick = async function(){ try { await api('logout'); } catch(e) {} logoutLocal('Abgemeldet.'); };
-  $('tabs').onclick = function(e){ var b = e.target.closest('[data-tab]'); if(!b) return; state.tab = b.dataset.tab; document.querySelectorAll('.tab').forEach(function(t){ t.classList.toggle('active', t === b); }); load(); };
+  $('tabs').onclick = function(e){ var b = e.target.closest('[data-tab]'); if(!b) return; state.tab = b.dataset.tab; document.querySelectorAll('.tab').forEach(function(t){ t.classList.toggle('active', t === b); }); try { b.scrollIntoView({ inline:'center', block:'nearest', behavior:'smooth' }); } catch(err) {} window.scrollTo(0, 0); load(); };
+  // Tabelle, die auf dem Handy als Karten erscheint (Spaltenname steht dann vor jedem Wert)
+  function tbl(heads, rows, empty, cls){
+    if(!rows.length) return '<div class="empty">' + empty + '</div>';
+    return '<div class="tbl-wrap"><table class="stack' + (cls ? ' ' + cls : '') + '"><thead><tr>' + heads.map(function(h){ return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>'
+      + rows.map(function(r){ return '<tr>' + r.map(function(c, i){ return '<td' + (i === 0 ? ' class="t"' : '') + ' data-label="' + esc(heads[i] || '') + '">' + c + '</td>'; }).join('') + '</tr>'; }).join('')
+      + '</tbody></table></div>';
+  }
 
   function start(){ $('login').classList.add('hidden'); $('app').classList.remove('hidden'); load(); }
   async function load(){
@@ -161,9 +213,11 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
       + (o.settings.maintenance ? '<div class="card" style="border-color:var(--warn)"><b style="color:var(--warn)">Wartungsmodus ist AN</b> – Tablet und Kundenportal sind für alle Werkstätten gesperrt. <a href="#" data-go="settings">Ändern</a></div>' : '')
       + '<div class="grid kpis">' + k.map(function(x){ return '<div class="kpi"><b>' + esc(x[1]) + '</b><span>' + esc(x[0]) + '</span></div>'; }).join('') + '</div>'
       + '<div class="card"><div class="row"><h2 style="margin:0">Systemstatus</h2><span class="sp"></span>' + statusPill(o.status) + '</div><div class="msg">Letzte Prüfung: ' + dt(o.status.checked_at) + ' · Letztes Backup: ' + day(o.status.last_backup) + '</div></div><div id="quotaCard"></div><div id="urCard"></div>'
-      + '<div class="card"><h2>Werkstätten</h2><div class="tbl-wrap"><table><thead><tr><th>Werkstatt</th><th>Code</th><th>Status</th><th>Abo</th><th>Aktive Aufträge</th><th>Aufträge Monat</th><th>Umsatz Monat</th><th>Mitarbeiter</th><th>Termine 7 Tage</th><th>Tablet-Logins 7 Tage</th><th>Letzte Aktivität</th></tr></thead><tbody>'
-      + (o.workshops.length ? o.workshops.map(function(w){ return '<tr><td><b>' + esc(w.name) + '</b></td><td>' + esc(w.code) + '</td><td>' + (w.is_active ? '<span class="pill ok">Aktiv</span>' : '<span class="pill bad">Gesperrt</span>') + '</td><td>' + aboPill(w) + (w.trial_ends_at && w.subscription_status === 'trial' ? ' <small style="color:var(--faint)">bis ' + day(w.trial_ends_at) + '</small>' : '') + '</td><td>' + w.orders_active + '</td><td>' + w.orders_month + '</td><td>' + eur(w.revenue_month) + '</td><td>' + w.employees + '</td><td>' + w.appts_week + '</td><td>' + w.tablet_logins_7d + '</td><td>' + dt(w.last_activity) + '</td></tr>'; }).join('') : '<tr><td colspan="11" class="empty">Noch keine Werkstätten.</td></tr>')
-      + '</tbody></table></div></div>';
+      + '<div class="card"><h2>Werkstätten</h2>'
+      + tbl(['Werkstatt','Code','Status','Abo','Aktive Aufträge','Aufträge Monat','Umsatz Monat','Mitarbeiter','Termine 7 Tage','Tablet-Logins 7 Tage','Letzte Aktivität'],
+          o.workshops.map(function(w){ return ['<b>' + esc(w.name) + '</b>', esc(w.code), (w.is_active ? '<span class="pill ok">Aktiv</span>' : '<span class="pill bad">Gesperrt</span>'), aboPill(w) + (w.trial_ends_at && w.subscription_status === 'trial' ? ' <small style="color:var(--faint)">bis ' + day(w.trial_ends_at) + '</small>' : ''), w.orders_active, w.orders_month, eur(w.revenue_month), w.employees, w.appts_week, w.tablet_logins_7d, dt(w.last_activity)]; }),
+          'Noch keine Werkstätten.')
+      + '</div>';
     loadUptime('urCard');
     loadQuotaCard();
   }
@@ -184,7 +238,7 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
     var t = u.days[0], L = u.limits;
     var per = t.ai_calls ? t.neurons / t.ai_calls : 200;
     var left = Math.max(0, L.neurons.day - t.neurons);
-    return '<div class="grid kpis" style="margin-bottom:0">'
+    return '<div class="grid kpis quota" style="margin-bottom:0">'
       + bar('KI-Neuronen heute (geschätzt)', t.neurons, L.neurons.day, nf(t.ai_calls) + ' KI-Aufrufe · reicht noch für ca. ' + nf(left / per) + ' · Reset in ' + untilReset() + (t.ai_quota_hits ? '<br><span style="color:var(--bad)">Kontingent erschöpft seit ' + dt(t.ai_quota_first) + ' (' + t.ai_quota_hits + '× abgelehnt)</span>' : ''))
       + bar('Server-Anfragen heute', t.requests, L.requests.day, 'Tablet, Portal, Dashboard-Funktionen')
       + bar('E-Mails heute', t.emails, L.emails.day, 'Monat: ' + nf(u.month_emails) + ' / ' + nf(L.emails.month) + (t.emails_failed ? ' · <span style="color:var(--bad)">' + t.emails_failed + ' fehlgeschlagen</span>' : ''))
@@ -203,7 +257,7 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
       var agg = {};
       list.forEach(function(d){ Object.keys(d.workshops || {}).forEach(function(c){ var w = d.workshops[c], a = agg[c] || (agg[c] = { alex:0, scans:0, photos:0, emails:0 }); ['alex','scans','photos','emails'].forEach(function(k){ a[k] += Number(w[k]) || 0; }); }); });
       var codes = Object.keys(agg).sort(function(a, b){ return (agg[b].alex + agg[b].scans) - (agg[a].alex + agg[a].scans); });
-      return codes.length ? codes.map(function(c){ var a = agg[c]; return '<tr><td><b>' + esc(names[c] || c) + '</b> <span style="color:var(--faint)">' + esc(c) + '</span></td><td>' + nf(a.alex) + '</td><td>' + nf(a.scans) + '</td><td>' + nf(a.photos) + '</td><td>' + nf(a.emails) + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">Noch keine Nutzung.</td></tr>';
+      return tbl(['Werkstatt','ALEX','Scans','Fotos','Mails'], codes.map(function(c){ var a = agg[c]; return ['<b>' + esc(names[c] || c) + '</b> <span style="color:var(--faint)">' + esc(c) + '</span>', nf(a.alex), nf(a.scans), nf(a.photos), nf(a.emails)]; }), 'Noch keine Nutzung.');
     };
     var maxN = Math.max.apply(null, days.map(function(d){ return d.neurons; }).concat([u.limits.neurons.day]));
     $('view').innerHTML = '<h1>Verbrauch &amp; Limits</h1><div class="sub">Kostenlose Kontingente von Cloudflare und Resend. Gezählt vom eigenen Server (bis zu 5 Min. Verzögerung je Server-Instanz); KI-Neuronen sind aus den Token geschätzt.</div>'
@@ -212,11 +266,14 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
       + '<div style="position:absolute;left:0;right:0;bottom:' + (u.limits.neurons.day / maxN * 100).toFixed(1) + '%;border-top:1px dashed var(--bad)"><span style="position:absolute;right:0;top:-16px;font-size:11px;color:var(--bad)">Limit ' + nf(u.limits.neurons.day) + '</span></div>'
       + days.slice().reverse().map(function(d){ var h = d.neurons / maxN * 100; return '<div title="' + esc(day(d.day)) + ': ' + nf(d.neurons) + ' Neuronen" style="flex:1;height:' + Math.max(1, h).toFixed(1) + '%;background:' + (d.neurons > u.limits.neurons.day * 0.9 ? '#f87171' : '#8b5cf6') + ';border-radius:4px 4px 0 0;min-width:6px"></div>'; }).join('')
       + '</div><div style="display:flex;gap:6px;font-size:10.5px;color:var(--faint);margin-top:4px">' + days.slice().reverse().map(function(d){ return '<span style="flex:1;text-align:center;min-width:6px">' + esc(d.day.slice(8, 10)) + '</span>'; }).join('') + '</div></div>'
-      + '<div class="card"><h2>Tageswerte</h2><div class="tbl-wrap"><table><thead><tr><th>Tag</th><th>KI-Neuronen</th><th>KI-Aufrufe</th><th>ALEX-Fragen</th><th>Scans</th><th>KI-Fehler</th><th>Kontingent erschöpft</th><th>Server-Anfragen</th><th>E-Mails</th><th>Fotos</th></tr></thead><tbody>'
-      + days.map(function(d){ var al = 0, sc = 0; Object.keys(d.workshops || {}).forEach(function(c){ al += Number(d.workshops[c].alex) || 0; sc += Number(d.workshops[c].scans) || 0; }); return '<tr><td>' + day(d.day) + '</td><td>' + nf(d.neurons) + '</td><td>' + nf(d.ai_calls) + '</td><td>' + nf(al) + '</td><td>' + nf(sc) + '</td><td>' + nf(d.ai_errors) + '</td><td>' + (d.ai_quota_hits ? '<span class="pill bad">ab ' + dt(d.ai_quota_first).slice(-5) + '</span>' : '–') + '</td><td>' + nf(d.requests) + '</td><td>' + nf(d.emails) + (d.emails_failed ? ' <span style="color:var(--bad)">(' + d.emails_failed + ' ✗)</span>' : '') + '</td><td>' + nf(d.photos) + '</td></tr>'; }).join('')
-      + '</tbody></table></div></div>'
-      + '<div class="split" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><div class="card"><h2>Werkstätten heute</h2><div class="tbl-wrap"><table><thead><tr><th>Werkstatt</th><th>ALEX</th><th>Scans</th><th>Fotos</th><th>Mails</th></tr></thead><tbody>' + wsRows(u.days.slice(0, 1)) + '</tbody></table></div></div>'
-      + '<div class="card"><h2>Werkstätten letzte 30 Tage</h2><div class="tbl-wrap"><table><thead><tr><th>Werkstatt</th><th>ALEX</th><th>Scans</th><th>Fotos</th><th>Mails</th></tr></thead><tbody>' + wsRows(u.days) + '</tbody></table></div></div></div>'
+      + '<div class="card"><h2>Tageswerte</h2>'
+      + tbl(['Tag','KI-Neuronen','KI-Aufrufe','ALEX-Fragen','Scans','KI-Fehler','Kontingent erschöpft','Server-Anfragen','E-Mails','Fotos'],
+          days.map(function(d){ var al = 0, sc = 0; Object.keys(d.workshops || {}).forEach(function(c){ al += Number(d.workshops[c].alex) || 0; sc += Number(d.workshops[c].scans) || 0; }); return ['<b>' + day(d.day) + '</b>', nf(d.neurons), nf(d.ai_calls), nf(al), nf(sc), nf(d.ai_errors), (d.ai_quota_hits ? '<span class="pill bad">ab ' + dt(d.ai_quota_first).slice(-5) + '</span>' : '–'), nf(d.requests), nf(d.emails) + (d.emails_failed ? ' <span style="color:var(--bad)">(' + d.emails_failed + ' ✗)</span>' : ''), nf(d.photos)]; }),
+          'Noch keine Daten.', 'compact')
+      + (days.length > 3 ? '<button class="btn mobile-only" data-showall style="width:100%">Alle ' + days.length + ' Tage anzeigen</button>' : '')
+      + '</div>'
+      + '<div class="split2"><div class="card"><h2>Werkstätten heute</h2>' + wsRows(u.days.slice(0, 1)) + '</div>'
+      + '<div class="card"><h2>Werkstätten letzte 30 Tage</h2>' + wsRows(u.days) + '</div></div>'
       + '<div class="card"><h2>Was passiert bei Überschreitung?</h2><div class="kv"><span>KI (10.000 Neuronen/Tag)</span><b>ALEX antwortet mit dem lokalen Wissen, Reifenscan nur manuell – Reset 02:00 Uhr (Sommerzeit). Mit dem Workers-Paid-Plan (5 $/Monat) wird darüber hinaus pro Nutzung abgerechnet.</b><span>Server-Anfragen</span><b>Ab 100.000/Tag lehnt Cloudflare weitere Anfragen ab.</b><span>E-Mails</span><b>Resend Free: 100/Tag und 3.000/Monat – darüber werden Mails nicht zugestellt.</b><span>Speicher-Schreibvorgänge</span><b>Ab 1.000/Tag schlagen Foto-Uploads und Backups fehl.</b></div></div>';
   }
 
@@ -248,9 +305,9 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
     el.innerHTML = '<div class="card"><div class="row"><h2 style="margin:0">Externe Überwachung (UptimeRobot)</h2><span class="sp"></span>'
       + (r.monitors.length ? (downNow ? '<span class="pill bad">● ' + downNow + ' down</span>' : '<span class="pill ok">● Alle online</span>') : '<span class="pill warn">Keine Monitore</span>')
       + '<button class="btn" data-urrefresh="' + esc(id) + '" style="padding:6px 12px">Neu laden</button></div>'
-      + (r.monitors.length ? '<div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th>Monitor</th><th>Status</th><th>24 Std.</th><th>7 Tage</th><th>30 Tage</th><th>Ø Antwort</th><th>Antwortzeiten</th><th>Intervall</th></tr></thead><tbody>'
-        + r.monitors.map(function(m){ return '<tr><td><b>' + esc(m.name) + '</b><div style="font-size:11.5px;color:var(--faint);max-width:280px;overflow:hidden;text-overflow:ellipsis">' + esc(m.url) + '</div></td><td><span class="pill ' + (stCls[m.status] || '') + '">' + esc(m.status_label) + '</span></td><td><span class="pill ' + pctCls(m.uptime_1d) + '">' + pct(m.uptime_1d) + '</span></td><td><span class="pill ' + pctCls(m.uptime_7d) + '">' + pct(m.uptime_7d) + '</span></td><td><span class="pill ' + pctCls(m.uptime_30d) + '">' + pct(m.uptime_30d) + '</span></td><td>' + (m.avg_response_ms != null ? m.avg_response_ms + ' ms' : '–') + '</td><td>' + spark(m.response_times) + '</td><td>' + (m.interval_min ? m.interval_min + ' Min.' : '–') + '</td></tr>'; }).join('')
-        + '</tbody></table></div>' : '<div class="msg">Im UptimeRobot-Konto sind noch keine Monitore angelegt.</div>')
+      + (r.monitors.length ? '<div style="margin-top:10px">' + tbl(['Monitor','Status','24 Std.','7 Tage','30 Tage','Ø Antwort','Antwortzeiten','Intervall'],
+          r.monitors.map(function(m){ return ['<b>' + esc(m.name) + '</b><div style="font-size:11.5px;color:var(--faint);max-width:280px;overflow:hidden;text-overflow:ellipsis">' + esc(m.url) + '</div>', '<span class="pill ' + (stCls[m.status] || '') + '">' + esc(m.status_label) + '</span>', '<span class="pill ' + pctCls(m.uptime_1d) + '">' + pct(m.uptime_1d) + '</span>', '<span class="pill ' + pctCls(m.uptime_7d) + '">' + pct(m.uptime_7d) + '</span>', '<span class="pill ' + pctCls(m.uptime_30d) + '">' + pct(m.uptime_30d) + '</span>', (m.avg_response_ms != null ? m.avg_response_ms + ' ms' : '–'), spark(m.response_times), (m.interval_min ? m.interval_min + ' Min.' : '–')]; }), '') + '</div>'
+        : '<div class="msg">Im UptimeRobot-Konto sind noch keine Monitore angelegt.</div>')
       + '<div class="sec-t">Letzte Ausfälle</div>' + (logs.length ? logs.slice(0, 8).map(function(x){ return '<div style="font-size:13.5px;margin-top:6px"><span class="pill bad">Ausfall</span> <b>' + esc(x.m) + '</b> · ' + dt(x.l.at) + ' · ' + (x.l.duration_min ? x.l.duration_min + ' Min.' : 'läuft noch') + (x.l.reason ? ' · <span style="color:var(--muted)">' + esc(x.l.reason) + '</span>' : '') + '</div>'; }).join('') : '<div class="empty">Keine Ausfälle in den letzten Einträgen.</div>')
       + '<div class="msg">Stand ' + dt(r.fetched_at) + ' · Daten von UptimeRobot (max. 1× pro Minute abgefragt)</div></div>';
   }
@@ -265,8 +322,8 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
       + (o.workshops.length ? o.workshops.map(function(w){
         return '<div class="card"><div class="row"><div><h2 style="margin:0">' + esc(w.name) + '</h2><div class="msg" style="margin:2px 0 0">Code ' + esc(w.code) + ' · ' + w.employees + ' Mitarbeiter · letzte Aktivität ' + dt(w.last_activity) + '</div></div><span class="sp"></span>'
           + '<span class="pill ' + (w.is_active ? 'ok' : 'bad') + '">' + (w.is_active ? 'Aktiv' : 'Gesperrt') + '</span>' + sw('data-active="' + esc(w.id) + '"', w.is_active) + '</div>'
-          + '<div class="row" style="margin-top:12px"><div style="min-width:160px"><label>Abo-Status</label><select data-abo="' + esc(w.id) + '">' + [['trial','Testphase'],['active','Zahlend'],['expired','Abgelaufen']].map(function(x){ return '<option value="' + x[0] + '"' + (w.subscription_status === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>'
-          + '<div style="min-width:160px"><label>Testphase endet am</label><input type="date" data-trial="' + esc(w.id) + '" value="' + esc(w.trial_ends_at ? String(w.trial_ends_at).slice(0,10) : '') + '"></div></div>'
+          + '<div class="row" style="margin-top:12px"><div class="fld"><label>Abo-Status</label><select data-abo="' + esc(w.id) + '">' + [['trial','Testphase'],['active','Zahlend'],['expired','Abgelaufen']].map(function(x){ return '<option value="' + x[0] + '"' + (w.subscription_status === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>'
+          + '<div class="fld"><label>Testphase endet am</label><input type="date" data-trial="' + esc(w.id) + '" value="' + esc(w.trial_ends_at ? String(w.trial_ends_at).slice(0,10) : '') + '"></div></div>'
           + '<div class="sec-t">Server-Funktionen</div><div class="mods">' + o.modules.server.map(function(m){ return modRow(w, m); }).join('') + '</div>'
           + '<div class="sec-t">Dashboard-Module</div><div class="mods">' + o.modules.dashboard.map(function(m){ return modRow(w, m); }).join('') + '</div></div>';
       }).join('') : '<div class="card empty">Noch keine Werkstätten.</div>');
@@ -291,16 +348,17 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
       + (s.chats.length ? s.chats.map(function(c){ return '<div class="list-item' + (state.sel && state.sel.type==='chat' && state.sel.id===c.id ? ' active' : '') + '" data-chat="' + esc(c.id) + '"><div class="row">' + (c.unread ? '<span class="dot"></span>' : '') + '<b style="flex:1">' + esc(c.subject || 'Ohne Betreff') + '</b>' + stP(c.status) + '</div><p>' + esc(c.user_name || c.user_email || '–') + ' · ' + dt(c.last_message_at) + '</p><p>' + (c.last_sender === 'admin' ? 'Du: ' : '') + esc(c.last_message) + '</p></div>'; }).join('') : '<div class="empty">Keine Chats.</div>')
       + '<div class="sec-t">Weitere Anfragen (' + openT + ' offen)</div>'
       + (s.tickets.length ? s.tickets.map(function(t){ return '<div class="list-item' + (state.sel && state.sel.type==='ticket' && state.sel.id===t.id ? ' active' : '') + '" data-ticket="' + esc(t.id) + '"><div class="row"><b style="flex:1">' + esc(t.subject) + '</b>' + stP(t.status) + '</div><p>' + esc(t.name || t.email || '–') + (t.workshop_code ? ' · ' + esc(t.workshop_code) : '') + ' · ' + dt(t.created_at) + '</p><p>' + esc(t.source) + ': ' + esc(t.message) + '</p></div>'; }).join('') : '<div class="empty">Keine weiteren Anfragen. Neue Anfragen über das Support-Formular im Dashboard landen hier.</div>');
-    $('view').innerHTML = '<h1>Support</h1><div class="sub">Live-Chat-Anfragen und alle Anfragen aus dem Support-Formular. Antworten gehen sofort an den Nutzer (im Chat und per E-Mail).</div><div class="split"><div>' + items + '</div><div id="detail"><div class="card empty">Links eine Anfrage auswählen.</div></div></div>';
+    $('view').innerHTML = '<h1>Support</h1><div class="sub">Live-Chat-Anfragen und alle Anfragen aus dem Support-Formular. Antworten gehen sofort an den Nutzer (im Chat und per E-Mail).</div><div class="split' + (state.sel ? ' has-sel' : '') + '"><div class="list">' + items + '</div><div id="detail"><div class="card empty">Links eine Anfrage auswählen.</div></div></div>';
     if(state.sel) openSel();
   }
+  var BACK = '<button class="btn mobile-only" data-back style="margin-bottom:10px">← Alle Anfragen</button>';
   async function openSel(){
     var d = $('detail'); if(!d) return;
-    d.innerHTML = '<div class="card empty">Lädt…</div>';
+    d.innerHTML = BACK + '<div class="card empty">Lädt…</div>';
     try {
       if(state.sel.type === 'chat'){
         var r = await api('chat_get', { id: state.sel.id }), s = r.session;
-        d.innerHTML = '<div class="card"><div class="row"><div><h2 style="margin:0">' + esc(s.subject || 'Ohne Betreff') + '</h2><div class="msg" style="margin:2px 0 0">' + esc(s.user_name || '') + ' &lt;' + esc(s.user_email || '–') + '&gt;</div></div><span class="sp"></span><select id="chatSt" style="width:auto">' + [['offen','Offen'],['in_bearbeitung','In Bearbeitung'],['abgeschlossen','Abgeschlossen']].map(function(x){ return '<option value="' + x[0] + '"' + (s.status===x[0]?' selected':'') + '>' + x[1] + '</option>'; }).join('') + '</select></div>'
+        d.innerHTML = BACK + '<div class="card"><div class="row"><div><h2 style="margin:0">' + esc(s.subject || 'Ohne Betreff') + '</h2><div class="msg" style="margin:2px 0 0">' + esc(s.user_name || '') + ' &lt;' + esc(s.user_email || '–') + '&gt;</div></div><span class="sp"></span><select id="chatSt" style="width:auto">' + [['offen','Offen'],['in_bearbeitung','In Bearbeitung'],['abgeschlossen','Abgeschlossen']].map(function(x){ return '<option value="' + x[0] + '"' + (s.status===x[0]?' selected':'') + '>' + x[1] + '</option>'; }).join('') + '</select></div>'
           + '<div class="msgs" id="msgs">' + r.messages.map(function(m){ return '<div class="bubble ' + (m.sender === 'admin' ? 'admin' : '') + '">' + esc(m.content) + (m.attachments || []).map(function(a){ return '<br><a href="' + esc(a.url) + '" target="_blank" rel="noopener">📎 ' + esc(a.name || 'Anhang') + '</a>'; }).join('') + '<small>' + esc(m.sender === 'admin' ? (m.author_name || 'Support') : (m.author_name || s.user_name || 'Nutzer')) + ' · ' + dt(m.created_date) + '</small></div>'; }).join('') + '</div>'
           + '<textarea id="reply" placeholder="Antwort schreiben…"></textarea><div class="row" style="margin-top:8px"><span class="sp"></span><button class="btn primary" id="sendReply">Antwort senden</button></div></div>';
         var ms = $('msgs'); ms.scrollTop = ms.scrollHeight;
@@ -308,19 +366,23 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
         $('sendReply').onclick = async function(){ var c = $('reply').value.trim(); if(!c) return; this.disabled = true; try { await api('chat_reply', { id: s.id, content: c }); toast('Antwort gesendet'); refreshSupport(); } catch(e){ toast('Fehler: ' + e.message); this.disabled = false; } };
       } else {
         var t = (await api('ticket_get', { id: state.sel.id })).ticket;
-        d.innerHTML = '<div class="card"><div class="row"><div><h2 style="margin:0">' + esc(t.subject) + '</h2><div class="msg" style="margin:2px 0 0">' + esc(t.name || '') + ' &lt;' + esc(t.email || '–') + '&gt;' + (t.workshop_code ? ' · Werkstatt ' + esc(t.workshop_code) : '') + ' · ' + dt(t.created_at) + '</div></div><span class="sp"></span><select id="tSt" style="width:auto">' + [['offen','Offen'],['in_bearbeitung','In Bearbeitung'],['erledigt','Erledigt']].map(function(x){ return '<option value="' + x[0] + '"' + (t.status===x[0]?' selected':'') + '>' + x[1] + '</option>'; }).join('') + '</select></div>'
+        d.innerHTML = BACK + '<div class="card"><div class="row"><div><h2 style="margin:0">' + esc(t.subject) + '</h2><div class="msg" style="margin:2px 0 0">' + esc(t.name || '') + ' &lt;' + esc(t.email || '–') + '&gt;' + (t.workshop_code ? ' · Werkstatt ' + esc(t.workshop_code) : '') + ' · ' + dt(t.created_at) + '</div></div><span class="sp"></span><select id="tSt" style="width:auto">' + [['offen','Offen'],['in_bearbeitung','In Bearbeitung'],['erledigt','Erledigt']].map(function(x){ return '<option value="' + x[0] + '"' + (t.status===x[0]?' selected':'') + '>' + x[1] + '</option>'; }).join('') + '</select></div>'
           + '<div class="msgs"><div class="bubble">' + esc(t.message) + '<small>' + esc(t.source) + '</small></div>' + (t.replies || []).map(function(x){ return '<div class="bubble admin">' + esc(x.message) + '<small>Antwort per E-Mail · ' + dt(x.at) + '</small></div>'; }).join('') + '</div>'
           + (t.email ? '<textarea id="reply" placeholder="Antwort per E-Mail an ' + esc(t.email) + '…"></textarea><div class="row" style="margin-top:8px"><span class="sp"></span><button class="btn primary" id="sendReply">Antwort senden</button></div>' : '<div class="empty">Keine E-Mail-Adresse hinterlegt.</div>') + '</div>';
         $('tSt').onchange = async function(){ try { await api('ticket_status', { id: t.id, status: this.value }); toast('Status gespeichert'); refreshSupport(); } catch(e){ toast('Fehler: ' + e.message); } };
         var b = $('sendReply'); if(b) b.onclick = async function(){ var c = $('reply').value.trim(); if(!c) return; this.disabled = true; try { await api('ticket_reply', { id: t.id, message: c }); toast('Antwort gesendet'); refreshSupport(); } catch(e){ toast('Fehler: ' + e.message); this.disabled = false; } };
       }
-    } catch(e){ d.innerHTML = '<div class="card msg err">' + esc(e.message) + '</div>'; }
+    } catch(e){ d.innerHTML = BACK + '<div class="card msg err">' + esc(e.message) + '</div>'; }
   }
   async function refreshSupport(){ state.sup = await api('support_list'); renderSupport(); }
   document.addEventListener('click', function(e){
     var c = e.target.closest('[data-chat]'), t = e.target.closest('[data-ticket]'), go = e.target.closest('[data-go]');
-    if(c){ state.sel = { type:'chat', id: c.dataset.chat }; renderSupport(); }
-    else if(t){ state.sel = { type:'ticket', id: t.dataset.ticket }; renderSupport(); }
+    var all = e.target.closest('[data-showall]');
+    if(all){ var tb = all.parentNode.querySelector('table.compact'); if(tb) tb.classList.remove('compact'); all.remove(); return; }
+    var back = e.target.closest('[data-back]');
+    if(back){ state.sel = null; renderSupport(); return; }
+    if(c){ state.sel = { type:'chat', id: c.dataset.chat }; renderSupport(); if(window.innerWidth <= 720) window.scrollTo(0, 0); }
+    else if(t){ state.sel = { type:'ticket', id: t.dataset.ticket }; renderSupport(); if(window.innerWidth <= 720) window.scrollTo(0, 0); }
     else if(go){ e.preventDefault(); var b = document.querySelector('[data-tab="' + go.dataset.go + '"]'); if(b) b.click(); }
   });
 
@@ -330,9 +392,9 @@ pre{background:var(--panel2);border-radius:10px;padding:10px;font-size:12px;whit
     var yes = function(v){ return v ? '<span class="pill ok">ja</span>' : '<span class="pill bad">nein</span>'; };
     $('view').innerHTML = '<h1>Entwickler-Tools</h1><div class="sub">Server-Zustand, Prüfungen, Backups und Konfiguration. Stand ' + dt(d.time) + '</div>'
       + '<div class="card"><div class="row"><h2 style="margin:0">Status</h2><span class="sp"></span>' + statusPill(d.status) + '</div><div class="kv" style="margin-top:12px"><span>Letzte Prüfung</span><b>' + dt(d.status.checked_at) + '</b><span>Fehlprüfungen in Folge</span><b>' + esc(m.fail_count || 0) + '</b><span>Störung seit</span><b>' + (m.since ? dt(m.since) : '–') + '</b><span>Letztes Backup</span><b>' + (m.last_backup ? day(m.last_backup.day) + ' · ' + Math.round((m.last_backup.bytes||0)/1024) + ' KB' : '–') + '</b><span>Externe Prüfung</span><b><a href="/health" target="_blank">/health</a> · <a href="/status" target="_blank">/status</a></b></div>'
-      + '<div class="row" style="margin-top:14px"><button class="btn" data-dev="dev_run_checks">Prüfung jetzt ausführen</button><button class="btn" data-dev="dev_backup_now">Backup jetzt erstellen</button><button class="btn" data-dev="dev_test_mail">Test-Mail an mich</button><button class="btn" data-dev="dev_clear_cache">Server-Cache leeren</button><button class="btn" id="exportAll">Komplett-Export laden</button></div></div>'
+      + '<div class="row actions" style="margin-top:14px"><button class="btn" data-dev="dev_run_checks">Prüfung jetzt ausführen</button><button class="btn" data-dev="dev_backup_now">Backup jetzt erstellen</button><button class="btn" data-dev="dev_test_mail">Test-Mail an mich</button><button class="btn" data-dev="dev_clear_cache">Server-Cache leeren</button><button class="btn" id="exportAll">Komplett-Export laden</button></div></div>'
       + '<div id="urDev"></div><div class="card"><h2>Konfiguration</h2><div class="kv"><span>Datenbank (Base44)</span><b>' + yes(c.base44) + ' ' + esc(c.app_id || '') + '</b><span>KI (Workers AI)</span><b>' + yes(c.ki) + '</b><span>Speicher (KV)</span><b>' + yes(c.speicher) + '</b><span>E-Mail-Versand</span><b>' + yes(c.email) + ' ' + esc(c.mail_from) + '</b><span>Admin-Schlüssel</span><b>' + yes(c.admin_key) + '</b><span>UptimeRobot verbunden</span><b>' + yes(c.uptimerobot) + '</b><span>Support-Adresse</span><b>' + esc(c.support_email) + '</b><span>CEO-Adresse</span><b>' + esc(c.ceo_email) + '</b><span>Erlaubte Seiten</span><b>' + esc(c.allowed_origins || 'alle') + '</b><span>CEO-Sitzungen</span><b>' + esc(c.ceo_sessions) + ' <button class="btn danger" data-dev="dev_logout_all" style="padding:4px 10px;margin-left:8px">Alle anderen abmelden</button></b></div></div>'
-      + '<div class="card"><h2>Backups (letzte 14 Tage)</h2>' + (d.backups.length ? '<div class="tbl-wrap"><table><thead><tr><th>Tag</th><th>Größe</th><th>Datensätze</th><th>Zustand</th><th></th></tr></thead><tbody>' + d.backups.map(function(b){ return '<tr><td>' + day(b.name.slice(0,10)) + '</td><td>' + Math.round((b.bytes||0)/1024) + ' KB</td><td>' + esc(b.records == null ? '–' : b.records) + '</td><td>' + (b.failed && b.failed.length ? '<span class="pill warn">unvollständig</span>' : '<span class="pill ok">ok</span>') + '</td><td><button class="btn" data-bk="' + esc(b.name) + '" style="padding:5px 10px">Laden</button></td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">Noch keine Backups.</div>') + '</div>'
+      + '<div class="card"><h2>Backups (letzte 14 Tage)</h2>' + tbl(['Tag','Größe','Datensätze','Zustand',''], d.backups.map(function(b){ return ['<b>' + day(b.name.slice(0,10)) + '</b>', Math.round((b.bytes||0)/1024) + ' KB', esc(b.records == null ? '–' : b.records), (b.failed && b.failed.length ? '<span class="pill warn">unvollständig</span>' : '<span class="pill ok">ok</span>'), '<button class="btn" data-bk="' + esc(b.name) + '" style="padding:5px 10px">Laden</button>']; }), 'Noch keine Backups.') + '</div>'
       + '<div class="card"><h2>Letzte Server-Fehler</h2><div class="msg" style="margin-top:0">Nur seit dem letzten Neustart dieser Server-Instanz.</div>' + (d.errors.length ? d.errors.map(function(x){ return '<div style="margin-top:10px"><b style="font-size:13px">' + dt(x.at) + ' · ' + esc(x.where) + '</b><pre>' + esc(x.error) + '</pre></div>'; }).join('') : '<div class="empty">Keine Fehler.</div>') + '</div>';
     $('exportAll').onclick = function(){ download('dev_export', {}, this); };
     loadUptime('urDev');
