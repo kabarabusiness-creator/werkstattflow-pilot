@@ -88,7 +88,7 @@ export class Pdf {
       const c = add(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
       kids.push(add(`<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 ${A4.w} ${A4.h}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >> >> /Contents ${c} 0 R >>`));
     }
-    objs[catalog - 1] = `<< /Type /Catalog /Pages ${pagesObj} 0 R >>`;
+    objs[catalog - 1] = `<< /Type /Catalog /Pages ${pagesObj} 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`;
     objs[pagesObj - 1] = `<< /Type /Pages /Kids [${kids.map(k => k + ' 0 R').join(' ')}] /Count ${kids.length} >>`;
     const d = this.info.date ? new Date(this.info.date) : new Date(0);
     const pdfDate = 'D:' + d.toISOString().replace(/[-:T]/g, '').slice(0, 14) + 'Z';
