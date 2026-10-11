@@ -646,5 +646,80 @@ await t('CEO-Konsole: Login nur mit Code an CEO-Adresse, Funktionen sperren, Sup
   await ceo({ action: 'logout' }, tok);
   assert.equal((await ceo({ action: 'overview' }, tok)).status, 401);
 });
+await t('Rechnungen GoBD: Server-Nummer, Archiv mit Prüfwert, Storno, Journal, Protokoll, Rechte', async () => {
+  const fn = async (name, body, tok = 'USER-AL-T1-xxxxxxxxxxxxxxxx') => {
+    const res = await worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx);
+    await Promise.all(pending.splice(0));
+    return { status: res.status, data: await res.json().catch(() => ({})) };
+  };
+  db.Order.push({ id: 'o13', order_number: '2003', email: 'kunde3@example.com', workshop_code: 'AL-T1', customer_name: 'Kunde Drei', license_plate: 'MIL-K 3', vehicle_brand: 'Audi', vehicle_model: 'A4', vin: 'WAUZZZ8K9BA000001', mileage: 64800, status: 'abholbereit' },
+    { id: 'o14', workshop_code: 'AL-T1', customer_name: 'Kunde Vier', license_plate: 'MIL-K 4', vehicle_brand: 'VW', vehicle_model: 'Polo', status: 'abgeschlossen', invoice_number: 'RE-2026-007', invoice_date: '2026-09-30', total_amount: 119, payment_status: 'bezahlt' });
+  db.InvoiceItem = (db.InvoiceItem || []).concat([{ id: 'ii4', order_id: 'o14', workshop_code: 'AL-T1', description: 'Ölwechsel', quantity: 1, unit_price: 100 }]);
+  const items = [{ description: 'Inspektion nach Herstellervorgabe inkl. Ölwechsel, Luft- und Innenraumfilter, Bremsflüssigkeit prüfen', item_type: 'leistung', quantity: 1, unit_price: 289.9 }, { description: 'Motoröl 5W-30 „Longlife“', item_type: 'material', quantity: 4.5, unit_price: 14.2 }];
+  // Firmendaten unvollständig (Steuernummer fehlt) → abgelehnt
+  let r = await fn('invoiceIssue', { order_id: 'o13', items, billing: { street: 'Hauptstr. 5', zip: '63776', city: 'Mömbris' } });
+  assert.equal(r.status, 400); assert.match(r.data.message, /Steuernummer/);
+  db.WorkshopProfile[0].steuernummer = '204/123/45678'; db.WorkshopProfile[0].bank_iban = 'DE02 1203 0000 0000 2020 51'; db.WorkshopProfile[0].bank_name = 'Testbank';
+  // ab 250 € brutto ohne Adresse → abgelehnt
+  r = await fn('invoiceIssue', { order_id: 'o13', items, billing: {} });
+  assert.equal(r.status, 400); assert.match(r.data.message, /250/);
+  // fremde Werkstatt / ohne Login
+  assert.equal((await fn('invoiceIssue', { order_id: 'o2', items })).status, 403);
+  assert.equal((await fn('invoiceIssue', { order_id: 'o13', items }, null)).status, 401);
+  // Ausstellen: höchste Nummer im Jahr ist die Alt-Rechnung RE-2026-007 → RE-2026-008
+  r = await fn('invoiceIssue', { order_id: 'o13', items, billing: { street: 'Hauptstr. 5', zip: '63776', city: 'Mömbris' }, service_date: '2026-10-09', payment_method: 'ueberweisung', due_days: 14 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const yr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date()).slice(0, 4);
+  const num = r.data.invoice.number;
+  assert.equal(num, yr === '2026' ? 'RE-2026-008' : `RE-${yr}-001`);
+  assert.equal(r.data.invoice.net, 353.8); assert.equal(r.data.invoice.vat, 67.22); assert.equal(r.data.invoice.gross, 421.02);
+  const o13 = db.Order.find(o => o.id === 'o13');
+  assert.equal(o13.invoice_number, num); assert.equal(o13.invoice_locked, true); assert.equal(o13.total_amount, 421.02); assert.equal(o13.payment_due_date.length, 10);
+  assert.equal(db.InvoiceItem.filter(i => i.order_id === 'o13').length, 2);
+  // Archiv: JSON, PDF, XML mit Prüfwert
+  for (const ext of ['json', 'pdf', 'xml']) assert.ok(kv.has(`_inv/AL-T1/${num}.${ext}`), ext);
+  // zweimal ausstellen → gleiche Rechnung, keine neue Nummer
+  r = await fn('invoiceIssue', { order_id: 'o13', items });
+  assert.equal(r.data.already, true); assert.equal(r.data.invoice.number, num);
+  // Dokumente abrufen + Echtheit
+  let d = await fn('invoiceDocument', { number: num, format: 'pdf' });
+  assert.equal(d.data.verified, true);
+  const pdfBytes = Buffer.from(d.data.data_base64, 'base64');
+  assert.equal(pdfBytes.slice(0, 8).toString(), '%PDF-1.4');
+  if (process.env.PDF_OUT) (await import('node:fs')).writeFileSync(process.env.PDF_OUT + '/rechnung.pdf', pdfBytes);
+  d = await fn('invoiceDocument', { number: num, format: 'xml' });
+  const xml = Buffer.from(d.data.data_base64, 'base64').toString();
+  assert.match(xml, /<cbc:ID>RE-\d{4}-\d{3}<\/cbc:ID>/); assert.match(xml, /<cbc:PayableAmount currencyID="EUR">421.02</); assert.match(xml, /<cbc:ID>FC<\/cbc:ID>/); assert.match(xml, /DE02120300000000202051/);
+  d = await fn('invoiceDocument', { number: num, format: 'json' }); assert.equal(d.data.verified, true);
+  // Manipulation im Archiv wird erkannt
+  const key = `_inv/AL-T1/${num}.xml`; const orig = kv.get(key); kv.set(key, { v: new TextEncoder().encode(xml.replace('421.02', '1.00')), m: orig.m });
+  assert.equal((await fn('invoiceDocument', { number: num, format: 'xml', log: false })).data.verified, false); kv.set(key, orig);
+  // fremde Werkstatt kann Dokument nicht abrufen
+  assert.equal((await fn('invoiceDocument', { number: num, workshop_code: 'AL-T2' })).status, 403);
+  // Zahlungsstatus wird protokolliert
+  assert.equal((await fn('invoiceSetPayment', { order_id: 'o13', payment_status: 'bezahlt' })).status, 200);
+  assert.equal((await fn('invoiceSetPayment', { order_id: 'o13', payment_status: 'quatsch' })).status, 400);
+  // Storno ohne Grund → abgelehnt; mit Grund → eigene Nummer, negative Beträge
+  assert.equal((await fn('invoiceCancel', { order_id: 'o13', reason: '' })).status, 400);
+  r = await fn('invoiceCancel', { order_id: 'o13', reason: 'Falsche Ölmenge berechnet' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const st = r.data.storno; assert.equal(st.type, 'storno'); assert.equal(st.gross, -421.02); assert.equal(st.cancels, num); assert.notEqual(st.number, num);
+  if (process.env.PDF_OUT) (await import('node:fs')).writeFileSync(process.env.PDF_OUT + '/storno.pdf', Buffer.from((await fn('invoiceDocument', { number: st.number, format: 'pdf' })).data.data_base64, 'base64'));
+  assert.equal(o13.invoice_number, ''); assert.equal(o13.invoice_locked, false); assert.equal(o13.invoice_history.at(-1).storno_number, st.number);
+  assert.equal((await fn('invoiceCancel', { order_id: 'o13', number: num, reason: 'nochmal' })).status, 409);
+  // neue korrigierte Rechnung bekommt die nächste Nummer
+  r = await fn('invoiceIssue', { order_id: 'o13', items: [{ description: 'Inspektion', quantity: 1, unit_price: 289.9 }], billing: { street: 'Hauptstr. 5', zip: '63776', city: 'Mömbris' } });
+  const n3 = r.data.invoice.number; assert.ok(n3 > st.number, n3 + ' > ' + st.number);
+  // Alt-Rechnung nachträglich festschreiben (Nummer bleibt)
+  let j = await fn('invoiceJournal', {});
+  assert.deepEqual(j.data.not_archived.map(x => x.number), ['RE-2026-007']);
+  r = await fn('invoiceIssue', { order_id: 'o14' }); // 119 € brutto → Kleinbetragsrechnung, Adresse nicht nötig
+  assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.invoice.number, 'RE-2026-007'); assert.equal(r.data.invoice.legacy, true); assert.equal(r.data.invoice.payment_status, 'bezahlt');
+  j = await fn('invoiceJournal', {});
+  assert.equal(j.data.entries.length, 4); assert.equal(j.data.not_archived.length, 0); assert.equal(j.data.entries.find(e => e.number === num).status, 'storniert');
+  // Protokoll
+  const log = (await fn('invoiceLog', {})).data.events.map(e => e.event);
+  for (const ev of ['ausgestellt', 'storniert', 'zahlungsstatus', 'abgerufen']) assert.ok(log.includes(ev), ev);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

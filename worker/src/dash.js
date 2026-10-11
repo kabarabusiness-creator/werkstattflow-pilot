@@ -12,6 +12,7 @@
  * nie öffentlich abrufbar, nach der Auswertung gelöscht. KI: Cloudflare Workers AI.
  */
 import { count as countUsage } from './usage.js';
+import { handleInvoice, INVOICE_FUNCTIONS } from './invoices.js';
 import { tireScanImages, registrationScan, capacityDays } from './ai.js';
 
 const TOKEN_TTL_MIN = 30;
@@ -122,6 +123,13 @@ export async function handleFunction(name, body, c) {
     return { token, expires_at: expires };
   }
   const readJson = (s, d) => { try { return s ? (typeof s === 'string' ? JSON.parse(s) : s) : d; } catch { return d; } };
+
+  /* ---- Rechnungen (GoBD: Server vergibt Nummern, Archiv, Storno, Protokoll) ---- */
+  if (INVOICE_FUNCTIONS.has(name)) {
+    const user = await authUser();
+    rateLimit('inv:' + user.id, 300, 3600_000);
+    return handleInvoice(name, body, { db, env, user, HttpError });
+  }
 
   /* ---- Mit Login ---- */
   if (name === 'sendSupportTicket') {
