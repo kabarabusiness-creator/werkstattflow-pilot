@@ -386,7 +386,13 @@ export async function handleInvoice(name, body, c) {
       if (legacy) items = cleanItems(await db.list('InvoiceItem', { order_id: order.id }, { limit: 500 }));
       else items = cleanItems(body.items);
       if (!items.length) throw new HttpError(400, 'no_items', { message: 'Bitte mindestens eine Position mit Bezeichnung, Menge und Preis eingeben.' });
-      const kleinunternehmer = !!profile.kleinunternehmer;
+      let kleinunternehmer = !!profile.kleinunternehmer;
+      if (legacy && Number(order.total_amount) > 0) {
+        // Alt-Rechnung: Steuer so übernehmen, wie sie damals berechnet wurde (Betrag am Auftrag), nicht nach heutigen Firmendaten
+        const net = computeTotals(items, true).totals.net;
+        if (Math.abs(Number(order.total_amount) - net) < 0.02) kleinunternehmer = true;
+        else if (Math.abs(Number(order.total_amount) - r2(net * (1 + VAT_RATE))) < 0.02) kleinunternehmer = false;
+      }
       const { lines, totals } = computeTotals(items, kleinunternehmer);
       if (totals.gross <= 0) throw new HttpError(400, 'amount', { message: 'Der Rechnungsbetrag muss größer als 0 € sein.' });
       const billing = legacy ? { street: order.billing_street, zip: order.billing_zip, city: order.billing_city } : (body.billing || {});

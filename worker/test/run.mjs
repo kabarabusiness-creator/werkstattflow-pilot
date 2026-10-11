@@ -713,8 +713,10 @@ await t('Rechnungen GoBD: Server-Nummer, Archiv mit Prüfwert, Storno, Journal, 
   // Alt-Rechnung nachträglich festschreiben (Nummer bleibt)
   let j = await fn('invoiceJournal', {});
   assert.deepEqual(j.data.not_archived.map(x => x.number), ['RE-2026-007']);
+  db.WorkshopProfile[0].kleinunternehmer = true; // heute Kleinunternehmer – die Alt-Rechnung hatte aber 19 % USt (119 €)
   r = await fn('invoiceIssue', { order_id: 'o14' }); // 119 € brutto → Kleinbetragsrechnung, Adresse nicht nötig
-  assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.invoice.number, 'RE-2026-007'); assert.equal(r.data.invoice.legacy, true); assert.equal(r.data.invoice.payment_status, 'bezahlt');
+  assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.invoice.number, 'RE-2026-007'); assert.equal(r.data.invoice.legacy, true); assert.equal(r.data.invoice.payment_status, 'bezahlt'); assert.equal(r.data.invoice.gross, 119); assert.equal(r.data.invoice.vat, 19);
+  db.WorkshopProfile[0].kleinunternehmer = false;
   j = await fn('invoiceJournal', {});
   assert.equal(j.data.entries.length, 4); assert.equal(j.data.not_archived.length, 0); assert.equal(j.data.entries.find(e => e.number === num).status, 'storniert');
   // ZIP-Export des Jahres (Betriebsprüfung)
