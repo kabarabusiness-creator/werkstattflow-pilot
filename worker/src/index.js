@@ -228,7 +228,8 @@ async function getTabletData(db, sess) {
       return svc && svc.category ? { ...t, category: svc.category } : t;
     }),
     employees: mine(by.Employee).filter(e => e.is_active !== false).map(stripEmployee),
-    worktimes: mine(by.WorkTime).slice(0, 300),
+    // auch Timer ohne Werkstatt-Code (z. B. im Dashboard gestartet), sofern sie zu einem eigenen Auftrag gehören
+    worktimes: by.WorkTime.filter(w => w.workshop_code === code || (!w.workshop_code && orderIds.has(w.order_id))).slice(0, 300),
     parts: [],
     lifts: mine(by.Lift),
     appointments: mine(by.Appointment),
