@@ -717,6 +717,33 @@ await t('Rechnungen GoBD: Server-Nummer, Archiv mit Prüfwert, Storno, Journal, 
   assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.invoice.number, 'RE-2026-007'); assert.equal(r.data.invoice.legacy, true); assert.equal(r.data.invoice.payment_status, 'bezahlt');
   j = await fn('invoiceJournal', {});
   assert.equal(j.data.entries.length, 4); assert.equal(j.data.not_archived.length, 0); assert.equal(j.data.entries.find(e => e.number === num).status, 'storniert');
+  // ZIP-Export des Jahres (Betriebsprüfung)
+  const yr2 = j.data.entries[0].invoice_date.slice(0, 4);
+  let zr = await worker.fetch(new Request('https://api.test/fn/invoiceExport', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx', Origin: 'https://kabarabusiness-creator.github.io' }, body: JSON.stringify({ year: yr2 }) }), env, ctx);
+  await Promise.all(pending.splice(0));
+  assert.equal(zr.status, 200); assert.equal(zr.headers.get('Content-Type'), 'application/zip'); assert.match(zr.headers.get('Content-Disposition'), /Rechnungsarchiv_AL-T1_\d{4}\.zip/);
+  assert.equal(zr.headers.get('Access-Control-Allow-Origin'), 'https://kabarabusiness-creator.github.io');
+  const zipBuf = Buffer.from(await zr.arrayBuffer());
+  assert.equal(zipBuf.readUInt32LE(0), 0x04034b50);
+  for (const nm of [`Rechnungen-PDF/${num}.pdf`, `XRechnung/${st.number}_Storno.xml`, 'Pruefwerte.sha256', 'LIESMICH.txt']) assert.ok(zipBuf.includes(Buffer.from(nm)), nm);
+  if (process.env.PDF_OUT) (await import('node:fs')).writeFileSync(process.env.PDF_OUT + '/archiv.zip', zipBuf);
+  // Zweitarchiv R2: Nachtrag aller Belege, danach nur neu anlegen (nie überschreiben)
+  const r2 = new Map();
+  env.INVOICE_ARCHIVE = {
+    async put(k, v, o) { if (o && o.onlyIf && o.onlyIf.get('If-None-Match') === '*' && r2.has(k)) return null; r2.set(k, { v: new Uint8Array(typeof v === 'string' ? new TextEncoder().encode(v) : v), m: o }); return { key: k }; },
+    async head(k) { return r2.has(k) ? { key: k } : null; },
+  };
+  const { syncInvoiceMirror } = await import('../src/invoices.js');
+  const sy = await syncInvoiceMirror(env);
+  assert.ok(sy.copied >= 12, JSON.stringify(sy));
+  assert.ok(r2.has(`AL-T1/${num.slice(3, 7)}/${num}.pdf`), [...r2.keys()].slice(0, 5).join(','));
+  assert.ok([...r2.keys()].some(k => k.startsWith('protokoll/AL-T1/')));
+  assert.equal((await syncInvoiceMirror(env)).copied, 0);
+  // neue Rechnung wird sofort gespiegelt
+  db.Order.push({ id: 'o15', workshop_code: 'AL-T1', customer_name: 'Kunde Fünf', license_plate: 'K 5', vehicle_brand: 'BMW', vehicle_model: '1er', status: 'abgeschlossen' });
+  r = await fn('invoiceIssue', { order_id: 'o15', items: [{ description: 'Reifenwechsel', quantity: 1, unit_price: 40 }] });
+  assert.ok(r2.has(`AL-T1/${r.data.invoice.number.slice(3, 7)}/${r.data.invoice.number}.xml`));
+  delete env.INVOICE_ARCHIVE;
   // Protokoll
   const log = (await fn('invoiceLog', {})).data.events.map(e => e.event);
   for (const ev of ['ausgestellt', 'storniert', 'zahlungsstatus', 'abgerufen']) assert.ok(log.includes(ev), ev);

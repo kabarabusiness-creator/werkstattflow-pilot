@@ -9,6 +9,7 @@
  */
 import { Pdf, A4, textWidth, wrapText } from './pdf.js';
 import { count as countUsage } from './usage.js';
+import { makeZip } from './zip.js';
 
 export const INV_PREFIX = '_inv/';
 export const INVLOG_PREFIX = '_invlog/';
@@ -239,12 +240,15 @@ async function putOnce(env, key, value, meta) {
   if (await env.PHOTOS.get(key, { type: 'arrayBuffer' })) throw new Error('archive_exists:' + key);
   await env.PHOTOS.put(key, value, { metadata: meta });
   countUsage('kv_writes');
+  await mirrorToR2(env, key, value, meta);
 }
 export async function logEvent(env, code, event, user, detail) {
   const at = new Date().toISOString();
   const rnd = [...crypto.getRandomValues(new Uint8Array(4))].map(b => b.toString(16).padStart(2, '0')).join('');
-  await env.PHOTOS.put(`${INVLOG_PREFIX}${code}/${at}_${rnd}`, JSON.stringify({ at, event, by: user ? { id: user.id, name: user.name, email: user.email } : null, ...detail }));
+  const key = `${INVLOG_PREFIX}${code}/${at}_${rnd}`, value = JSON.stringify({ at, event, by: user ? { id: user.id, name: user.name, email: user.email } : null, ...detail });
+  await env.PHOTOS.put(key, value);
   countUsage('kv_writes');
+  if (event !== 'abgerufen') await mirrorToR2(env, key, value, { contentType: 'application/json' });
 }
 async function readLog(env, code, number) {
   const out = []; let cursor;
@@ -270,6 +274,41 @@ function nextNumber(orders, index, year) {
 function sellerSnapshot(p) {
   const keys = ['company_name', 'address_street', 'address_zip', 'address_city', 'phone', 'email', 'contact_name', 'steuernummer', 'ust_id', 'bank_name', 'bank_iban', 'bank_bic'];
   return Object.fromEntries(keys.map(k => [k, str(p[k])]));
+}
+
+/* ---------- Zweitarchiv in Cloudflare R2 (mit Bucket-Sperre: niemand kann löschen oder überschreiben) ---------- */
+const r2Key = kvKey => kvKey.startsWith(INV_PREFIX) ? kvKey.slice(INV_PREFIX.length).replace(/^([^/]+)\/(RE-(\d{4})-[^/]+)$/, '$1/$3/$2') : 'protokoll/' + kvKey.slice(INVLOG_PREFIX.length) + '.json';
+export async function mirrorToR2(env, kvKey, value, meta) {
+  if (!env.INVOICE_ARCHIVE) return false;
+  try {
+    const r = await env.INVOICE_ARCHIVE.put(r2Key(kvKey), value, {
+      onlyIf: new Headers({ 'If-None-Match': '*' }), // nur neu anlegen, nie überschreiben
+      httpMetadata: { contentType: (meta && meta.contentType) || 'application/octet-stream' },
+      customMetadata: meta && meta.sha256 ? { sha256: meta.sha256 } : {},
+    });
+    return r !== null;
+  } catch (e) { console.log('r2_mirror', kvKey, String(e)); return false; }
+}
+// Nachtlauf: alles, was im Archiv (KV) liegt, aber noch nicht in R2, nachtragen
+export async function syncInvoiceMirror(env, max = 400) {
+  if (!env.INVOICE_ARCHIVE || !env.PHOTOS) return { configured: !!env.INVOICE_ARCHIVE, copied: 0 };
+  let copied = 0, checked = 0;
+  for (const prefix of [INV_PREFIX, INVLOG_PREFIX]) {
+    let cursor;
+    do {
+      const r = await env.PHOTOS.list({ prefix, cursor, limit: 1000 });
+      for (const k of r.keys) {
+        if (k.name.endsWith('/_index')) continue;
+        checked++;
+        if (await env.INVOICE_ARCHIVE.head(r2Key(k.name))) continue;
+        const obj = await env.PHOTOS.getWithMetadata(k.name, { type: 'arrayBuffer' });
+        if (obj && obj.value && await mirrorToR2(env, k.name, obj.value, obj.metadata || { contentType: 'application/json' })) copied++;
+        if (copied >= max) return { configured: true, copied, checked, incomplete: true };
+      }
+      cursor = r.list_complete ? null : r.cursor;
+    } while (cursor);
+  }
+  return { configured: true, copied, checked };
 }
 
 async function archiveDoc(env, code, raw) {
@@ -489,7 +528,44 @@ export async function handleInvoice(name, body, c) {
     };
   }
 
+  /* Komplettes Archiv eines Jahres als ZIP (Betriebsprüfung, Steuerberater, Kündigung) */
+  if (name === 'invoiceExport') {
+    const code = await codeFor(body.workshop_code);
+    const year = /^\d{4}$/.test(String(body.year)) ? String(body.year) : berlinDay().slice(0, 4);
+    const index = (await readIndex(env, code)).filter(e => String(e.invoice_date || '').startsWith(year)).sort((a, b) => String(a.number).localeCompare(String(b.number)));
+    if (!index.length) throw new HttpError(404, 'empty', { message: `Keine Rechnungen in ${year}.` });
+    const files = [], sums = [];
+    for (const e of index) {
+      for (const [ext, dir] of [['pdf', 'Rechnungen-PDF'], ['xml', 'XRechnung'], ['json', 'Rechnungsdaten']]) {
+        const obj = await env.PHOTOS.getWithMetadata(docKey(code, e.number, ext), { type: 'arrayBuffer' });
+        if (!obj || !obj.value) continue;
+        const data = new Uint8Array(obj.value);
+        const name = `${dir}/${e.number}${e.type === 'storno' ? '_Storno' : ''}.${ext}`;
+        files.push({ name, data, date: new Date(e.issued_at || Date.now()) });
+        sums.push(`${await sha256(data)}  ${name}`);
+      }
+    }
+    const q = v => { const t = String(v == null ? '' : v); return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const de = v => (Number(v) || 0).toFixed(2).replace('.', ',');
+    const journal = [['Rechnungsnummer', 'Art', 'Rechnungsdatum', 'Leistungsdatum', 'Kunde', 'Kennzeichen', 'Netto', 'USt', 'Brutto', 'Zahlungsart', 'Zahlungsstatus', 'Status', 'Storno zu', 'Storniert durch', 'Ausgestellt am', 'Ausgestellt von', 'Prüfwert Rechnungsdaten (SHA-256)'].join(';'),
+      ...index.map(e => [e.number, e.type === 'storno' ? 'Storno' : 'Rechnung', deDate(e.invoice_date), deDate(e.service_date), e.customer, e.plate, de(e.net), de(e.vat), de(e.gross), PAY_LABEL[e.payment_method] || e.payment_method, e.payment_status || '', e.status, e.cancels || '', e.cancelled_by || '', e.issued_at, e.issued_by || '', e.sha_record].map(q).join(';'))].join('\r\n');
+    const log = (await readLog(env, code, '')).filter(ev => String(ev.at).startsWith(year)).reverse();
+    const logCsv = [['Zeitpunkt (UTC)', 'Aktion', 'Rechnungsnummer', 'Bezug', 'Details', 'Person', 'E-Mail'].join(';'),
+      ...log.map(ev => [ev.at, ev.event, ev.number || '', ev.cancels || '', [ev.from && ev.to ? `${ev.from} → ${ev.to}` : '', ev.reason || '', ev.format || '', ev.gross != null ? de(ev.gross) + ' €' : ''].filter(Boolean).join(' · '), ev.by && ev.by.name || '', ev.by && ev.by.email || ''].map(q).join(';'))].join('\r\n');
+    const bom = '\ufeff';
+    const readme = `Rechnungsarchiv ${code} – Jahr ${year}\r\nErstellt am ${new Date().toISOString()} mit AutoLeitwerk\r\n\r\n`
+      + `Inhalt:\r\n- Rechnungen-PDF: alle Rechnungen und Stornorechnungen als Original-PDF\r\n- XRechnung: dieselben Belege als E-Rechnung (XRechnung 3.0, UBL)\r\n- Rechnungsdaten: maschinenlesbare Originaldaten je Beleg (JSON) mit Prüfwerten\r\n`
+      + `- Rechnungsausgangsbuch_${year}.csv: alle Belege des Jahres, fortlaufend nummeriert\r\n- Protokoll_${year}.csv: Ausstellung, Storno, Zahlungsstatus, Abrufe mit Zeit und Person\r\n- Pruefwerte.sha256: SHA-256 jeder Datei (prüfbar z. B. mit \"sha256sum -c Pruefwerte.sha256\")\r\n\r\n`
+      + `Die Belege wurden beim Ausstellen festgeschrieben und unverändert archiviert. Korrekturen erfolgen ausschließlich per Stornorechnung.\r\n`;
+    files.push({ name: `Rechnungsausgangsbuch_${year}.csv`, data: bom + journal }, { name: `Protokoll_${year}.csv`, data: bom + logCsv });
+    for (const f of files.slice(-2)) sums.push(`${await sha256(typeof f.data === 'string' ? new TextEncoder().encode(f.data) : f.data)}  ${f.name}`);
+    files.push({ name: 'Pruefwerte.sha256', data: sums.join('\n') + '\n' }, { name: 'LIESMICH.txt', data: readme });
+    await logEvent(env, code, 'export', who, { year, count: index.length });
+    const zip = makeZip(files);
+    return new Response(zip, { headers: { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="Rechnungsarchiv_${code}_${year}.zip"`, 'Cache-Control': 'no-store' } });
+  }
+
   throw new HttpError(404, 'unknown_function');
 }
 
-export const INVOICE_FUNCTIONS = new Set(['invoiceIssue', 'invoiceCancel', 'invoiceSetPayment', 'invoiceJournal', 'invoiceLog', 'invoiceDocument']);
+export const INVOICE_FUNCTIONS = new Set(['invoiceExport', 'invoiceIssue', 'invoiceCancel', 'invoiceSetPayment', 'invoiceJournal', 'invoiceLog', 'invoiceDocument']);

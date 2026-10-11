@@ -18,6 +18,7 @@
 
 import { alexAsk, tireScan } from './ai.js';
 import { handleFunction } from './dash.js';
+import { syncInvoiceMirror } from './invoices.js';
 import { handleCeo, readSettings, parseModules, logError, storeTicket } from './ceo.js';
 import { count as countUsage, maybeFlush } from './usage.js';
 
@@ -1034,6 +1035,8 @@ function json(data, status, cors) {
 export default {
   async scheduled(event, env, ctx) {
     if (event.cron === '30 1 * * *') {
+      // Rechnungsarchiv: fehlende Belege in das gesperrte Zweitarchiv (R2) nachtragen
+      ctx.waitUntil(syncInvoiceMirror(env).then(r => console.log('invoice_mirror', JSON.stringify(r))).catch(e => console.log('invoice_mirror_failed', String(e))));
       ctx.waitUntil(runBackup(env).catch(async e => {
         console.log('backup_failed', String(e));
         await sendMail(env, null, { to: SUPPORT_TO(env), subject: '⚠️ AutoLeitwerk: tägliches Backup fehlgeschlagen', html: mailHtml({ title: 'Backup fehlgeschlagen', intro: esc(String(e && e.message || e)) }) }).catch(() => {});
@@ -1124,6 +1127,7 @@ async function handleFetch(request, env, ctx) {
       if (path.startsWith('/fn/') && request.method === 'POST') {
         const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia }, ctx });
         invalidate('Order');
+        if (r instanceof Response) { const hd = new Headers(r.headers); for (const [k, v] of Object.entries(cors)) hd.set(k, v); hd.set('Access-Control-Expose-Headers', 'Content-Disposition'); return new Response(r.body, { status: r.status, headers: hd }); }
         return json(r, 200, cors);
       }
       if (path === '/admin' && request.method === 'GET') {
