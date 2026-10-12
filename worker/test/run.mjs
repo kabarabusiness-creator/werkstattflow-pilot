@@ -27,7 +27,7 @@ const calls = [];
 const mails = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url); const method = init.method || 'GET';
-  if (u.host.endsWith('github.io') || u.host === 'autoleitwerk.base44.app') return new Response('<html></html>', { status: globalThis.SITE_STATUS || 200 });
+  if (u.host.endsWith('github.io') || u.host === 'autoleitwerk.base44.app' || u.host === 'autoleitwerk.global') return new Response('<html></html>', { status: globalThis.SITE_STATUS || 200 });
   if (u.host === 'api.uptimerobot.com') { globalThis.UR_CALLS = (globalThis.UR_CALLS || 0) + 1; const f = new URLSearchParams(init.body); assert.equal(f.get('api_key'), 'ur-test'); return new Response(JSON.stringify(globalThis.UR_RESPONSE), { status: 200 }); }
   if (u.host === 'api.resend.com') { assert.equal(init.headers.Authorization, 'Bearer RE_TEST'); mails.push(JSON.parse(init.body)); return new Response('{"id":"m1"}', { status: 200 }); }
   if (u.pathname.endsWith('/entities/User/me')) {
