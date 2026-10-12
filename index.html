@@ -1116,6 +1116,7 @@
   .dg-code.pending{background:rgba(245,158,11,.14);color:#f59e0b;} .dg-code.permanent{background:rgba(139,92,246,.16);color:#a78bfa;}
   .dg-desc{flex:1;min-width:0;} .dg-desc b{display:block;font-size:13px;} .dg-desc span{font-size:11px;color:var(--text-faint);}
   .dg-remark{width:100%;box-sizing:border-box;border-radius:10px;padding:8px 10px;background:var(--panel-2);border:1px solid var(--border,#26264a);color:inherit;font:inherit;font-size:13px;resize:vertical;}
+  .dg-share{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--text-faint);} .dg-share input{width:18px;height:18px;accent-color:#8b5cf6;}
   .dg-hist{display:flex;flex-direction:column;gap:4px;font-size:12px;} .dg-hist>b{font-size:12.5px;margin-bottom:2px;}
   .dg-hist-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border,#26264a);color:var(--text-faint);} .dg-hist-row span:last-child{color:var(--text,#e8e8f5);text-align:right;}
   .dg-simtag{font-style:normal;font-size:10.5px;padding:1px 6px;border-radius:6px;background:rgba(245,158,11,.15);color:#f59e0b;}
@@ -5575,6 +5576,7 @@ async function diagClear(){
   if(!res.some(l=>/^44/.test(l.replace(/\s/g,'')))){ diag.busy=''; diag.error='Fehlerspeicher konnte nicht gelöscht werden (Zündung an, Motor aus?).'; rerenderDiagPanel(); return; }
   diag.busy='';
   await diagSave({ cleared:true, codes: before });
+  r.remark=''; r.share=false;
   await diagRead();
 }
 async function diagSave(extra){
@@ -5585,7 +5587,7 @@ async function diagSave(extra){
   diag.busy='save'; rerenderDiagPanel();
   const res = await tabletRequest('diagnosis_save', {
     order_id:o.id, codes, vin:r.vin, live:r.live, simulated: !!(diag.conn && diag.conn.sim), cleared: !!(extra && extra.cleared),
-    adapter: diag.conn ? diag.conn.name : '', protocol: diag.protocol, remark: r.remark,
+    adapter: diag.conn ? diag.conn.name : '', protocol: diag.protocol, remark: r.remark, share: !!r.share && !(extra && extra.cleared),
   }, 20000);
   diag.busy='';
   if(res.ok){
@@ -5618,7 +5620,7 @@ function renderDiagLive(L){
     + cell('Kühlmittel', f(L.coolant_c), '°C', L.coolant_c>110)
     + cell('Bordspannung', f(L.voltage,1), 'V', L.voltage!==undefined && (L.voltage<11.8 || L.voltage>15))
     + cell('Motorlast', f(L.load_pct), '%')
-    + cell('Motorkontrollleuchte', L.mil===undefined?'–':L.mil?'AN':'aus', '', L.mil);
+    + cell('Motorleuchte', L.mil===undefined?'–':L.mil?'AN':'aus', '', L.mil);
 }
 function renderDiagPanel(o){
   if(!o) return '';
@@ -5657,7 +5659,8 @@ function renderDiagPanel(o){
           <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
         </div>`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`}
       <textarea id="diagRemark" class="dg-remark" rows="2" placeholder="Bemerkung (optional), z. B. Ursache gefunden, Teil bestellt…">${escHtml(r.remark||'')}</textarea>
-      ${r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert</div>` : `<div class="alex-draft-actions"><button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button></div>`}
+      ${sim ? '' : `<label class="dg-share"><input type="checkbox" id="diagShare" ${r.share?'checked':''} ${r.saved?'disabled':''}> Im Kundenportal anzeigen (Fehlercodes mit Beschreibung, ohne Bemerkung)</label>`}
+      ${r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert${r.share && !sim ? ' – im Kundenportal sichtbar' : ''}</div>` : `<div class="alex-draft-actions"><button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button></div>`}
       <div class="alex-hint">${sim ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>
     </div>`;
   }
@@ -5690,7 +5693,7 @@ function handleDiagClick(e){
   return false;
 }
 document.addEventListener('input', (e)=>{ if(e.target && e.target.id==='diagRemark'){ const o = getSelectedOrder(); if(o) diagRes(o).remark = e.target.value; } });
-document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='diagRemark'){ const o = getSelectedOrder(); if(o){ const r = diagRes(o); if(r.saved){ r.saved = false; rerenderDiagPanel(); } } } });
+document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='diagShare'){ const o = getSelectedOrder(); if(o) diagRes(o).share = e.target.checked; return; } if(e.target && e.target.id==='diagRemark'){ const o = getSelectedOrder(); if(o){ const r = diagRes(o); if(r.saved){ r.saved = false; rerenderDiagPanel(); } } } });
 
 /* ---------- Reifenscan (eigener Server, Cloudflare Workers AI, tabletAction tire_scan) ---------- */
 const TIRE_SLOTS = [

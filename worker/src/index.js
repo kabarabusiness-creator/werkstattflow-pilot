@@ -405,7 +405,7 @@ function cleanDiagnosis(b) {
   const live = {};
   if (b.live && typeof b.live === 'object') for (const k of DIAG_LIVE_KEYS) { const n = Number(b.live[k]); if (b.live[k] !== null && b.live[k] !== '' && Number.isFinite(n) && Math.abs(n) < 1e6) live[k] = Math.round(n * 10) / 10; }
   if (b.live && typeof b.live.mil === 'boolean') live.mil = b.live.mil;
-  return { codes, vin, live, simulated: !!b.simulated, cleared: !!b.cleared, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
+  return { codes, vin, live, simulated: !!b.simulated, cleared: !!b.cleared, share: !!b.share && !b.simulated, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
 }
 const DIAG_TYPE_LABEL = { stored: 'gespeichert', pending: 'sporadisch/ausstehend', permanent: 'permanent' };
 function diagnosisNote(d, name) {
@@ -704,9 +704,14 @@ async function portalApi(db, body, env, ctx, origin) {
     const appts = [...new Map([...apptsByOrder, ...apptsByToken].map(a => [a.id, a])).values()]
       .sort((a, b) => String(a.appointment_date + a.time_slot).localeCompare(String(b.appointment_date + b.time_slot)));
     const prof = profiles.find(p => p.workshop_code === code) || {};
+    // Fahrzeugdiagnose nur, wenn die Werkstatt sie ausdrücklich fürs Portal freigegeben hat (nie Simulation, nie interne Bemerkung)
+    const diagList = env.PHOTOS ? await env.PHOTOS.get(diagKey(code, order.id), { type: 'json' }).catch(() => null) : null;
+    const shared = Array.isArray(diagList) ? diagList.find(d => d && d.share && !d.simulated) : null;
+    const diagnosis = shared ? { saved_at: shared.saved_at, cleared: !!shared.cleared, codes: (shared.codes || []).map(c => ({ code: c.code, type: c.type, desc: c.desc })), mil: shared.live ? shared.live.mil : undefined } : null;
     const { customer_token, billing_street, billing_zip, billing_city, ...pubOrder } = order;
     return {
       order: pubOrder,
+      diagnosis,
       approvals,
       media: media.filter(m => m.media_type === 'foto' || !m.media_type).map(m => ({ id: m.id, file_url: m.file_url, caption: m.caption, created_date: m.created_date })),
       appointments: appts.map(({ customer_token: _t, owner_user_id, ...a }) => a),

@@ -248,6 +248,13 @@ await t('OBD-Diagnose: Befund speichern, FIN übernehmen, Liste laden', async ()
   const list = (await call('/tabletAction', { action: 'diagnosis_list', order_id: 'o1' }, token)).data.items;
   assert.equal(list.length, 3); assert.equal(list[0].cleared, true); assert.equal(list[2].simulated, true);
   assert.equal((await call('/tabletAction', { action: 'diagnosis_list', order_id: 'o2' }, token)).status, 404);
+  // Kundenportal: nur freigegebene, echte Diagnose; keine Bemerkung
+  assert.equal((await call('/portalApi', { token: 'tok-aaaaaa' })).data.diagnosis, null);
+  await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', simulated: true, share: true, codes: [{ code: 'P0300' }] }, token);
+  assert.equal((await call('/portalApi', { token: 'tok-aaaaaa' })).data.diagnosis, null);
+  await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', share: true, remark: 'intern', codes: [{ code: 'P0301', desc: 'Zündaussetzer Zylinder 1' }] }, token);
+  const pd = (await call('/portalApi', { token: 'tok-aaaaaa' })).data.diagnosis;
+  assert.equal(pd.codes[0].code, 'P0301'); assert.equal(pd.remark, undefined); assert.equal(JSON.stringify(pd).includes('intern'), false);
 });
 await t('Qualitätskontrolle: Haken sofort am Auftrag gespeichert, wer/wann bleibt stabil', async () => {
   let r = await call('/tabletAction', { action: 'qc_save', order_id: 'o1', qc: [{ label: 'Ölstand geprüft', checked: true }, { label: 'Probefahrt durchgeführt', checked: false }] }, token);
