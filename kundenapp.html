@@ -3,21 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f4f4f7">
+<script>
+/* Hell-/Dunkelmodus wie in der Tablet-App: 'auto' folgt dem Gerät, sonst 'light'/'dark' (localStorage) */
+(function(){
+  var KEY = 'autoleitwerk.theme', root = document.documentElement, mq = null;
+  try{ mq = window.matchMedia('(prefers-color-scheme: dark)'); }catch(e){}
+  function pref(){ var v = null; try{ v = localStorage.getItem(KEY); }catch(e){} return (v==='light'||v==='dark') ? v : 'auto'; }
+  function resolve(p){ return p==='auto' ? ((mq && mq.matches) ? 'dark' : 'light') : p; }
+  function apply(){
+    var p = pref(), t = resolve(p);
+    root.setAttribute('data-theme', t); root.setAttribute('data-theme-pref', p);
+    var m = document.querySelector('meta[name="theme-color"]'); if(m) m.setAttribute('content', t==='dark' ? '#0d0d16' : '#f4f4f7');
+    try{ window.dispatchEvent(new CustomEvent('al-themechange', { detail:{ pref:p, theme:t } })); }catch(e){}
+    return t;
+  }
+  function set(p){ if(p!=='light' && p!=='dark') p = 'auto'; try{ if(p==='auto') localStorage.removeItem(KEY); else localStorage.setItem(KEY, p); }catch(e){} return apply(); }
+  if(mq){ var on = function(){ if(pref()==='auto') apply(); }; try{ mq.addEventListener('change', on); }catch(e){ try{ mq.addListener(on); }catch(_){} } }
+  window.alTheme = { pref:pref, current:function(){ return resolve(pref()); }, set:set, apply:apply };
+  apply();
+})();
+</script>
 <title>AutoLeitwerk – Mein Fahrzeug</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgeG1sbnM6YzJwYT0iaHR0cDovL2MycGEub3JnL21hbmlmZXN0Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM4YjVjZjYiPjwvc3RvcD48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNjMDI2ZDMiPjwvc3RvcD48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHJ4PSIxNCIgZmlsbD0iIzBhMGExMSI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDkuNiA5LjYpIHNjYWxlKC43KSI+PHBvbHlnb24gcG9pbnRzPSIyNCw4IDM2LDggMjcsNDQgNTYsNDQgNTMsNTYgMTIsNTYiIGZpbGw9InVybCgjZykiPjwvcG9seWdvbj48cG9seWdvbiBwb2ludHM9IjQxLDggNTMsOCA1MCwyMCAzOCwyMCIgZmlsbD0iI2ZmZmZmZiI+PC9wb2x5Z29uPjwvZz48L3N2Zz4=">
 <style>
+  /* Hell (Standard) – Textfarben mind. WCAG AA */
   :root{
     --bg:#f4f4f7; --panel:#ffffff; --panel2:#f7f6fb; --border:#e6e5f0;
-    --accent:#8b5cf6; --accent2:#7c3aed; --text:#1a1a2e; --text-faint:#8a8aa8;
-    --green:#22c55e; --greenbg:#e8f9ee; --amber:#f59e0b; --amberbg:#fef6e7;
-    --red:#f2495c; --redbg:#fdeaec; --blue:#3b82f6; --bluebg:#eaf1fd;
+    --accent:#7c3aed; --accent2:#6d28d9; --text:#1a1a2e; --text-faint:#62627f;
+    --green:#147238; --greenbg:#e8f9ee; --amber:#a14a08; --amberbg:#fef6e7;
+    --red:#c41c1c; --redbg:#fdeaec; --blue:#1d4ed8; --bluebg:#eaf1fd;
+    --accent-solid:#7c3aed;
+    color-scheme:light;
   }
-  @media (prefers-color-scheme: dark) {
-    :root{
+  /* Dunkel: per Auswahl (data-theme) oder automatisch nach Gerät */
+  :root[data-theme="dark"]{
       --bg:#0d0d16; --panel:#161625; --panel2:#1c1c30; --border:#2a2a45;
       --accent:#a78bfa; --accent2:#c4b5fd; --text:#f0f0f5; --text-faint:#8a8aa8;
       --green:#4ade80; --greenbg:rgba(34,197,94,.16); --amber:#fbbf24; --amberbg:rgba(245,158,11,.16);
       --red:#f87171; --redbg:rgba(242,73,92,.16); --blue:#60a5fa; --bluebg:rgba(59,130,246,.16);
+      --accent-solid:#7c3aed;
+      color-scheme:dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]){
+      --bg:#0d0d16; --panel:#161625; --panel2:#1c1c30; --border:#2a2a45;
+      --accent:#a78bfa; --accent2:#c4b5fd; --text:#f0f0f5; --text-faint:#8a8aa8;
+      --green:#4ade80; --greenbg:rgba(34,197,94,.16); --amber:#fbbf24; --amberbg:rgba(245,158,11,.16);
+      --red:#f87171; --redbg:rgba(242,73,92,.16); --blue:#60a5fa; --bluebg:rgba(59,130,246,.16);
+      --accent-solid:#7c3aed;
+      color-scheme:dark;
     }
   }
   *{box-sizing:border-box;}
@@ -51,7 +87,7 @@
   .step-dot{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
     font-size:11px;font-weight:700;flex-shrink:0;}
   .step-dot.done{background:var(--green);color:#fff;}
-  .step-dot.current{background:var(--accent);color:#fff;}
+  .step-dot.current{background:var(--accent-solid);color:#fff;}
   .step-dot.pending{background:var(--panel2);color:var(--text-faint);border:1px solid var(--border);}
   .step-name{font-size:13px;}
   .step-item.pending .step-name{color:var(--text-faint);}
@@ -73,7 +109,7 @@
   .btn-row{display:flex;gap:8px;margin-top:4px;}
   .card-hint{font-size:12.5px;color:var(--text-faint);margin:-4px 0 12px;line-height:1.4;}
   .btn{flex:1;border:none;border-radius:10px;padding:11px 8px;font-size:13.5px;font-weight:600;cursor:pointer;}
-  .btn.primary{background:var(--accent);color:#fff;}
+  .btn.primary{background:var(--accent-solid);color:#fff;}
   .btn.outline{background:transparent;border:1px solid var(--border);color:var(--text);}
   .btn:disabled{opacity:.5;cursor:default;}
   .doc-item{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:12px;margin-bottom:10px;
@@ -117,13 +153,13 @@
   .service-opt .so-price{font-size:12.5px;color:var(--text-faint);white-space:nowrap;}
   .date-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;}
   .date-chip{flex-shrink:0;width:56px;text-align:center;padding:10px 4px;border:1.5px solid var(--border);border-radius:11px;cursor:pointer;}
-  .date-chip.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .date-chip.active{background:var(--accent-solid);border-color:var(--accent-solid);color:#fff;}
   .date-chip .dc-day{font-size:10px;text-transform:uppercase;opacity:.7;}
   .date-chip .dc-num{font-size:16px;font-weight:700;margin:2px 0;}
   .date-chip .dc-mon{font-size:10px;opacity:.7;}
   .time-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;}
   .time-chip{padding:10px 4px;border:1.5px solid var(--border);border-radius:9px;text-align:center;font-size:13px;cursor:pointer;}
-  .time-chip.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+  .time-chip.active{background:var(--accent-solid);border-color:var(--accent-solid);color:#fff;font-weight:600;}
   .channel-row{display:flex;gap:8px;margin-bottom:16px;}
   .channel-chip{flex:1;padding:10px 6px;border:1.5px solid var(--border);border-radius:9px;text-align:center;font-size:12.5px;cursor:pointer;}
   .channel-chip.active{border-color:var(--accent);color:var(--accent2);background:var(--bluebg);font-weight:600;}
@@ -141,7 +177,7 @@
   .demo-note{font-size:10.5px;color:var(--text-faint);margin-top:8px;}
   .chat-list{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding:4px 2px;margin-bottom:10px;}
   .chat-bubble{max-width:78%;padding:9px 12px;border-radius:14px;font-size:13.5px;line-height:1.45;}
-  .chat-bubble.kunde{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px;}
+  .chat-bubble.kunde{align-self:flex-end;background:var(--accent-solid);color:#fff;border-bottom-right-radius:4px;}
   .chat-bubble.werkstatt{align-self:flex-start;background:var(--panel2);color:var(--text);border-bottom-left-radius:4px;}
   .chat-meta{font-size:10px;opacity:.7;margin-top:3px;}
   .chat-att{display:block;margin-top:6px;}
@@ -158,6 +194,12 @@
   .chat-note{font-size:11.5px;color:var(--text-faint);margin-top:8px;text-align:center;}
   .legal-links{text-align:center;font-size:12px;color:var(--text-faint);padding:18px 16px 28px;}
   .legal-links a{color:var(--text-faint);text-decoration:none;}
+  .theme-quick{margin-left:auto;width:34px;height:34px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex-shrink:0;}
+  .theme-quick svg{width:17px;height:17px;}
+  .theme-pick{display:inline-flex;gap:2px;margin-top:10px;padding:2px;border-radius:9px;border:1px solid var(--border);background:var(--panel);}
+  .theme-pick button{border:none;background:transparent;color:var(--text-faint);font:inherit;font-size:12px;padding:5px 10px;border-radius:7px;cursor:pointer;}
+  .theme-pick button.active{background:var(--panel2);color:var(--accent2);font-weight:700;box-shadow:0 0 0 1px var(--accent) inset;}
+  .theme-quick:focus-visible,.theme-pick button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 </style>
 </head>
 <body>
@@ -174,7 +216,9 @@
 </div>
 
 <div id="appScreen" class="wrap" style="display:none;"></div>
-<footer class="legal-links"><a href="impressum.html">Impressum</a> · <a href="datenschutz.html">Datenschutz</a></footer>
+<footer class="legal-links"><a href="impressum.html">Impressum</a> · <a href="datenschutz.html">Datenschutz</a>
+  <div><div class="theme-pick" id="themePick" role="radiogroup" aria-label="Darstellung"><button type="button" role="radio" data-theme-choice="auto">Automatisch</button><button type="button" role="radio" data-theme-choice="light">Hell</button><button type="button" role="radio" data-theme-choice="dark">Dunkel</button></div></div>
+</footer>
 
 <script>
 const API_WORKER = 'https://werkstattflow-pilot.werkstattflow.workers.dev';   // eigener Server, z. B. 'https://autoleitwerk-api.<konto>.workers.dev' – leer = Base44-Funktionen
@@ -313,6 +357,7 @@ function render(){
     <div class="topbar">
       <img src="${LOGO_SRC}" alt="AutoLeitwerk">
       <div><div class="tb-title">AutoLeitwerk</div><div class="tb-sub">Kundenportal</div></div>
+      <button type="button" class="theme-quick" id="themeQuickBtn"></button>
     </div>
     <div class="content">
       ${state.view==='dashboard' ? renderDashboardView() : renderServiceView()}
@@ -610,8 +655,8 @@ function renderDiagnose(){
   if(!d) return '';
   const when = d.saved_at ? new Date(d.saved_at).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + ' Uhr' : '';
   const typ = { stored:'gespeichert', pending:'sporadisch', permanent:'permanent' };
-  const rows = (d.codes||[]).map(c=>`<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border,rgba(255,255,255,.08));">
-      <span style="font-family:ui-monospace,Menlo,monospace;font-weight:800;padding:3px 7px;border-radius:7px;background:rgba(239,68,68,.12);color:#f87171;flex-shrink:0;">${escK(c.code)}</span>
+  const rows = (d.codes||[]).map(c=>`<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border);">
+      <span style="font-family:ui-monospace,Menlo,monospace;font-weight:800;padding:3px 7px;border-radius:7px;background:var(--redbg);color:var(--red);flex-shrink:0;">${escK(c.code)}</span>
       <div><div style="font-weight:600;font-size:14px;">${escK(c.desc||'')}</div><div style="font-size:12px;opacity:.65;">${typ[c.type]||''}</div></div></div>`).join('');
   return `
     <div class="card">
@@ -907,6 +952,25 @@ async function cancelAppt(id){
   try{ await callPortal('cancel', { appointment_id: id }); await reload(); }
   catch(e){ alert('Fehler: ' + e.message); }
 }
+
+/* ---------- Hell-/Dunkelmodus (nur Darstellung) ---------- */
+const THEME_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const THEME_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+function renderThemeControls(){
+  const dark = document.documentElement.getAttribute('data-theme')==='dark';
+  const q = document.getElementById('themeQuickBtn');
+  if(q){ q.innerHTML = dark ? THEME_SUN : THEME_MOON; const t = dark ? 'Helle Darstellung' : 'Dunkle Darstellung'; q.title = t; q.setAttribute('aria-label', t); }
+  const p = window.alTheme ? window.alTheme.pref() : 'auto';
+  document.querySelectorAll('[data-theme-choice]').forEach(b=>{ const on = b.getAttribute('data-theme-choice')===p; b.classList.toggle('active', on); b.setAttribute('aria-checked', on?'true':'false'); });
+}
+window.addEventListener('al-themechange', renderThemeControls);
+document.addEventListener('click', e=>{
+  const ch = e.target.closest && e.target.closest('[data-theme-choice]');
+  if(ch){ if(window.alTheme) window.alTheme.set(ch.getAttribute('data-theme-choice')); return; }
+  if(e.target.closest && e.target.closest('#themeQuickBtn') && window.alTheme) window.alTheme.set(document.documentElement.getAttribute('data-theme')==='dark' ? 'light' : 'dark');
+});
+new MutationObserver(()=>{ const q = document.getElementById('themeQuickBtn'); if(q && !q.innerHTML) renderThemeControls(); }).observe(document.getElementById('appScreen'), { childList:true });
+renderThemeControls();
 </script>
 </body>
 </html>
