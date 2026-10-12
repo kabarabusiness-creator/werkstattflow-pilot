@@ -1098,6 +1098,8 @@
   .alex-done{display:flex;align-items:center;gap:6px;margin-top:10px;font-weight:700;color:#22c55e;font-size:12.5px;} .alex-done svg{width:14px;height:14px;}
   .alex-muted{margin-top:10px;font-size:11.5px;color:var(--text-faint);} .alex-hint{margin-top:8px;font-size:10.5px;color:var(--text-faint);}
   .ts-wrap{display:flex;flex-direction:column;gap:12px;}
+  .dg-view{max-width:980px;display:flex;flex-direction:column;gap:14px;}
+  .dg-pick{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:12px 14px;border-radius:12px;background:var(--panel,#191932);border:1px solid var(--border,#26264a);} .dg-pick label{font-weight:700;font-size:13px;} .dg-pick select{flex:1;min-width:220px;padding:10px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--border,#26264a);color:inherit;font:inherit;font-size:14px;} .dg-pick-sub{width:100%;font-size:12px;color:var(--text-faint);}
   .dg-connect,.dg-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
   .dg-steps{font-size:12.5px;color:var(--text-faint);line-height:1.5;} .dg-steps b{color:var(--text,#e8e8f5);}
   .dg-conn{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--panel-2);border:1px solid rgba(34,197,94,.35);}
@@ -1399,6 +1401,7 @@
     <div class="sheet">
       <div class="sheet-handle"></div>
       <div class="sheet-item" data-mainview="dashboard"><span class="sheet-ic"></span> Dashboard</div>
+      <div class="sheet-item" data-mainview="diagnose"><span class="sheet-ic"></span> Diagnose</div>
       <div class="sheet-item" data-mainview="dokumente"><span class="sheet-ic"></span> Dokumente</div>
       <div class="sheet-item" data-mainview="einstellungen"><span class="sheet-ic"></span> Einstellungen</div>
       <div class="sheet-item" id="sheetSwitchUser"><span class="sheet-ic">⇄</span> Mitarbeiter wechseln</div>
@@ -2102,6 +2105,7 @@ const iconDownload = svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><
 const iconInbox = svg('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>');
 const iconFilter = svg('<line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="var(--bg)"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="16" cy="12" r="2" fill="var(--bg)"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="11" cy="18" r="2" fill="var(--bg)"/>');
 const iconTire = svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2"/><line x1="12" y1="3" x2="12" y2="6.5"/><line x1="12" y1="17.5" x2="12" y2="21"/><line x1="3" y1="12" x2="6.5" y2="12"/><line x1="17.5" y1="12" x2="21" y2="12"/>');
+const iconObd = svg('<rect x="3" y="7" width="18" height="10" rx="2"/><circle cx="7.5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16.5" cy="12" r="1"/><line x1="7" y1="7" x2="7" y2="4"/><line x1="17" y1="7" x2="17" y2="4"/>');
 const iconSearch = svg('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>');
 const iconWarn = svg('<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>');
 const iconEuro = svg('<path d="M14 4a8 8 0 1 0 0 16"/><line x1="5" y1="10" x2="14" y2="10"/><line x1="5" y1="14" x2="12" y2="14"/>');
@@ -2194,6 +2198,7 @@ function renderChrome(){
     {ic:iconMail, label:'Nachrichten', badge:String(messages.filter(m=>m.unread).length)||null, badgeClass:'blue', view:'nachrichten'},
     {ic:iconDoc, label:'Dokumente', view:'dokumente'},
     {ic:iconTire, label:'Reifenlager', view:'reifenlager'},
+    {ic:iconObd, label:'Diagnose', view:'diagnose'},
     {ic:iconShield, label:'Team', view:'benutzer', roles:['admin']},
     {ic:iconGrid, label:'Team-Auslastung', view:'auslastung', roles:['meister','serviceberater','admin']},
     {ic:iconSupport, label:'Support', view:'support'},
@@ -2232,14 +2237,14 @@ function renderChrome(){
     {ic:iconMore, label:'Mehr', mehr:true},
   ];
   document.getElementById('bottomNav').innerHTML = bnItems.map(n=>`
-    <div class="bn-item ${n.view&&state.mainView===n.view?'active':''} ${n.mehr&&['dokumente','einstellungen','dashboard','benutzer'].includes(state.mainView)?'active':''}" ${n.mehr?'data-mehr="1"':`data-mainview="${n.view}"`}>${n.ic}<span>${n.label}</span>${n.badge&&n.badge!=='0'?`<span class="bn-badge">${n.badge}</span>`:''}</div>
+    <div class="bn-item ${n.view&&state.mainView===n.view?'active':''} ${n.mehr&&['dokumente','einstellungen','dashboard','benutzer','diagnose'].includes(state.mainView)?'active':''}" ${n.mehr?'data-mehr="1"':`data-mainview="${n.view}"`}>${n.ic}<span>${n.label}</span>${n.badge&&n.badge!=='0'?`<span class="bn-badge">${n.badge}</span>`:''}</div>
   `).join('');
 
   document.getElementById('sheetLogout').querySelector('.sheet-ic').innerHTML = iconLogout;
   const sheetDocs = document.querySelector('#mehrOverlay .sheet-item[data-mainview="dokumente"]');
   if(sheetDocs) sheetDocs.style.display = PILOT_HIDE_DEMO ? 'none' : '';
   document.getElementById('mehrOverlay').querySelectorAll('.sheet-item .sheet-ic').forEach((el,i)=>{
-    const icons = [iconDashboard, iconFolder, iconGear];
+    const icons = [iconDashboard, iconObd, iconFolder, iconGear];
     if(icons[i]) el.innerHTML = icons[i];
   });
 }
@@ -2295,6 +2300,7 @@ const HELP_TEXTS = {
   termine:{ t:'Termine.', d:'Fahrzeugannahmen und Übergaben für heute und morgen.', li:['Online-Buchungen der Kunden erscheinen hier automatisch.'] },
   benutzer:{ t:'Team.', d:'Alle aktiven Mitarbeiter dieser Werkstatt.', li:['Mitarbeiter anlegen, Rollen und PINs ändern geht im AutoLeitwerk-Dashboard.'] },
   auslastung:{ t:'Team-Auslastung.', d:'Verplante Zeit je Mitarbeiter, berechnet aus der geschätzten Dauer offener Aufgaben (8-Stunden-Tag).', li:['Über 100 % heißt: mehr Arbeit verplant, als an einem Tag schaffbar ist.'] },
+  diagnose:{ t:'Fehlerspeicher auslesen.', d:'Mit einem Bluetooth-OBD-Adapter liest du Fehlercodes, FIN und Messwerte direkt aus dem Fahrzeug.', li:['Auftrag wählen, Adapter einstecken, Zündung an','„Fahrzeug verbinden“ – auf dem iPad in der App Bluefy öffnen','Ergebnis am Auftrag speichern, optional fürs Kundenportal freigeben'] },
   reifenlager:{ t:'Eingelagerte Reifen.', d:'Hier findest du jeden eingelagerten Reifensatz mit Lagerplatz.', li:['Kunde, Kennzeichen oder Größe ins Suchfeld tippen','„Prüfen“ zeigt Sätze mit zu wenig Profil','Nach dem Messen Profil und Lagerplatz direkt aktualisieren'] },
   support:{ t:'Hilfe.', d:'ALEX beantwortet Technikfragen sofort, bei Problemen mit der App erreichst du uns per E-Mail oder Telefon.' },
   einstellungen:{ t:'Einstellungen.', d:'Dein Profil und die App-Einstellungen auf diesem Tablet.', li:['„Erklärungen wieder anzeigen“ blendet alle Hilfe-Boxen erneut ein.'] },
@@ -2361,6 +2367,7 @@ function endSession(keepWorkshopCode){
 }
 
 function setMainView(view){
+  if(view!=='diagnose' && diag && diag.liveOn) diagStopLive();
   state.mainView = view;
   renderChrome();
   renderHelpBar();
@@ -2500,6 +2507,7 @@ function renderOtherView(view){
   if(view==='nachrichten') return renderNachrichtenView(ov);
   if(view==='dokumente') return renderDokumenteView(ov);
   if(view==='reifenlager') return renderReifenlagerView(ov);
+  if(view==='diagnose') return renderDiagnoseView(ov);
   if(view==='benutzer') return renderBenutzerView(ov);
   if(view==='auslastung') return renderAuslastungView(ov);
   if(view==='support') return renderSupportView(ov);
@@ -3545,6 +3553,7 @@ function renderDetail(){
       <div class="dh-right">
         ${PILOT_HIDE_DEMO ? '' : `<div class="btn">${iconMsg} Nachricht</div>`}
         <div class="btn" id="askAlexOrderBtn">${iconBot} ALEX fragen</div>
+        <div class="btn" id="diagOrderBtn">${iconObd} Diagnose</div>
         ${o.hasPortal && alexCanWrite() ? `<div class="btn" id="sendPortalBtn" title="${o.email ? 'Link an '+escHtml(o.email)+' senden' : 'Keine E-Mail-Adresse hinterlegt'}">${iconMail} Portal-Link senden</div>` : ''}
         <div class="btn" id="vehicleDetailsBtn">${iconCar} Fahrzeugdetails</div>
         <div class="btn primary" id="closeOrderBtn">${iconCheck} Auftrag abschließen ${iconChevDown}</div>
@@ -3596,7 +3605,6 @@ function renderDetail(){
         <div class="tab ${state.detailTab==='aufgaben'?'active':''}" data-dtab="aufgaben">${iconTasks} Aufgaben</div>
         <div class="tab ${state.detailTab==='checkliste'?'active':''}" data-dtab="checkliste">${iconCheckSquare} Checkliste</div>
         <div class="tab ${state.detailTab==='reifen'?'active':''}" data-dtab="reifen">${iconTire} Reifenscan</div>
-        <div class="tab ${state.detailTab==='diagnose'?'active':''}" data-dtab="diagnose">${iconObd} Diagnose</div>
         ${PILOT_HIDE_DEMO ? '' : `<div class="tab ${state.detailTab==='teile'?'active':''}" data-dtab="teile">${iconBox} Teile &amp; Material</div>
         <div class="tab ${state.detailTab==='dokumente'?'active':''}" data-dtab="dokumente">${iconFolder} Dokumente</div>
         <div class="tab ${state.detailTab==='verlauf'?'active':''}" data-dtab="verlauf">${iconHistory} Verlauf</div>`}
@@ -3611,8 +3619,6 @@ function renderDetail(){
 function renderTabPanel(){
   const o = getSelectedOrder();
   const el = document.getElementById('tabPanel');
-  if(state.detailTab!=='diagnose' && diag.liveOn) diagStopLive();
-  if(state.detailTab==='diagnose'){ el.innerHTML = renderDiagPanel(o); loadDiagHistory(o); return; }
   if(state.detailTab==='reifen'){ el.innerHTML = renderTireScanPanel(o); return; }
   if(state.detailTab==='aufgaben'){
     const done = o.tasks.filter(t=>t.status==='done').length;
@@ -5284,6 +5290,7 @@ function handleAlexClick(e){
   if(chip){ aiAsk(chip.dataset.alexChip); return true; }
   if(e.target.closest('#alexCtxClear')){ alexCtxCleared = true; alexCtxOrderId = null; renderAiPanel(); return true; }
   if(e.target.closest('#askAlexOrderBtn')){ openAlexPanel(state.selectedOrderId); return true; }
+  if(e.target.closest('#diagOrderBtn')){ diag.orderId = state.selectedOrderId; setMainView('diagnose'); return true; }
   const op = e.target.closest('[data-alex-open]');
   if(op){ state.selectedOrderId = op.dataset.alexOpen; state.detailTab='aufgaben'; document.getElementById('aiPanel').style.display='none'; setMainView('auftraege'); return true; }
   const ex = e.target.closest('[data-alex-exec]');
@@ -5305,7 +5312,6 @@ async function sendPortalLink(){
 }
 
 /* ---------- OBD-Diagnose (ELM327 über Bluetooth LE, Web Bluetooth – iPad: Bluefy-Browser; mit Simulationsmodus) ---------- */
-const iconObd = svg('<rect x="3" y="7" width="18" height="10" rx="2"/><circle cx="7.5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16.5" cy="12" r="1"/><line x1="7" y1="7" x2="7" y2="4"/><line x1="17" y1="7" x2="17" y2="4"/>');
 // Bekannte Funkmodul-Dienste von ELM327-BLE-Adaptern (OBDLink CX / Veepeak BLE+: FFF0, HM-10-Klone: FFE0, Vgate: E781…)
 const OBD_BLE_SERVICES = [0xfff0, 0xffe0, 0x18f0, 'e7810a71-73ae-499d-8c15-faa9aef0c3f2', '6e400001-b5a3-f393-e0a9-e50e24dcca9e'];
 const DTC_TEXT = {
@@ -5497,15 +5503,16 @@ class ElmSim {
 }
 
 /* --- Zustand & Ablauf --- */
-const diag = { conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, results:{}, history:{}, liveOn:false, liveTimer:null, confirmClear:false };
-function diagRes(o){ return diag.results[o.id] || (diag.results[o.id] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false }); }
+var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, results:{}, history:{}, liveOn:false, liveTimer:null, confirmClear:false };
+function diagOrder(){ return diag.orderId ? orders.find(o=>o.id===diag.orderId) || null : null; }
+function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false }); }
 function diagOnDisconnect(){
   if(!diag.conn || diag.conn.sim) return;
   diagStopLive(); diag.conn = null; diag.error = 'Verbindung zum Adapter getrennt.'; rerenderDiagPanel();
 }
-function diagVinFor(o){ const v = String(o.vin||'').toUpperCase(); return /^[A-HJ-NPR-Z0-9]{17}$/.test(v) ? v : 'WVWZZZAUZLW000123'; }
+function diagVinFor(o){ const v = String((o && o.vin)||'').toUpperCase(); return /^[A-HJ-NPR-Z0-9]{17}$/.test(v) ? v : 'WVWZZZAUZLW000123'; }
 async function diagConnect(sim){
-  const o = getSelectedOrder(); if(!o || diag.connecting) return;
+  const o = diagOrder(); if(diag.connecting) return;
   diag.error=''; diag.connecting=true; rerenderDiagPanel();
   try{
     let conn;
@@ -5534,7 +5541,7 @@ async function diagConnect(sim){
 }
 function diagDisconnect(){ diagStopLive(); if(diag.conn) diag.conn.disconnect(); diag.conn=null; diag.confirmClear=false; rerenderDiagPanel(); }
 async function diagRead(){
-  const o = getSelectedOrder(); if(!o || !diag.conn || diag.busy) return;
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
   const r = diagRes(o); diag.busy='read'; diag.error=''; diag.confirmClear=false; rerenderDiagPanel();
   try{
     const st = parsePid(await diag.conn.send('0101', 6000), '01');
@@ -5555,7 +5562,7 @@ async function diagRead(){
   diag.busy=''; rerenderDiagPanel();
 }
 async function diagLiveTick(){
-  const o = getSelectedOrder(); if(!o || !diag.conn || !diag.liveOn) return;
+  const o = diagOrder(); if(!diag.conn || !diag.liveOn) return;
   const r = diagRes(o);
   try{
     const rpm = parsePid(await diag.conn.send('010C'), '0C'); if(rpm!==null) r.live.rpm = Math.round(rpm);
@@ -5569,18 +5576,18 @@ async function diagLiveTick(){
 function diagStopLive(){ diag.liveOn=false; clearTimeout(diag.liveTimer); }
 function diagToggleLive(){ if(diag.liveOn){ diagStopLive(); rerenderDiagPanel(); return; } if(!diag.conn) return; diag.liveOn=true; rerenderDiagPanel(); diagLiveTick(); }
 async function diagClear(){
-  const o = getSelectedOrder(); if(!o || !diag.conn || diag.busy) return;
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
   const r = diagRes(o); diag.busy='clear'; diag.confirmClear=false; diagStopLive(); rerenderDiagPanel();
   const before = r.codes || [];
   const res = elmClean(await diag.conn.send('04', 10000));
   if(!res.some(l=>/^44/.test(l.replace(/\s/g,'')))){ diag.busy=''; diag.error='Fehlerspeicher konnte nicht gelöscht werden (Zündung an, Motor aus?).'; rerenderDiagPanel(); return; }
   diag.busy='';
-  await diagSave({ cleared:true, codes: before });
+  if(o) await diagSave({ cleared:true, codes: before });
   r.remark=''; r.share=false;
   await diagRead();
 }
 async function diagSave(extra){
-  const o = getSelectedOrder(); if(!o) return;
+  const o = diagOrder(); if(!o){ diag.error='Bitte oben einen Auftrag wählen, um die Diagnose zu speichern.'; rerenderDiagPanel(); return; }
   const r = diagRes(o);
   const box = document.getElementById('diagRemark'); if(box) r.remark = box.value;
   const codes = (extra && extra.codes) || r.codes || [];
@@ -5606,10 +5613,10 @@ async function loadDiagHistory(o){
   if(r.ok){ diag.history[o.id] = r.data.items || []; rerenderDiagPanel(); }
 }
 function diagAskAlex(code){
-  const o = getSelectedOrder(); if(!o) return;
+  const o = diagOrder();
   const r = diagRes(o); const c = (r.codes||[]).find(x=>x.code===code);
-  openAlexPanel(o.id);
-  aiAsk(`Fehlercode ${code}${c ? ` (${c.desc}, ${DTC_TYPE_LABEL[c.type]})` : ''} bei ${o.vehicle||'diesem Fahrzeug'}${o.motor && o.motor!=='–' ? ', '+o.motor : ''}: Was sind die häufigsten Ursachen und in welcher Reihenfolge sollte ich prüfen?`);
+  openAlexPanel(o ? o.id : null);
+  aiAsk(`Fehlercode ${code}${c ? ` (${c.desc}, ${DTC_TYPE_LABEL[c.type]})` : ''} bei ${(o && o.vehicle)||'diesem Fahrzeug'}${o && o.motor && o.motor!=='–' ? ', '+o.motor : ''}: Was sind die häufigsten Ursachen und in welcher Reihenfolge sollte ich prüfen?`);
 }
 
 /* --- Darstellung --- */
@@ -5623,11 +5630,10 @@ function renderDiagLive(L){
     + cell('Motorleuchte', L.mil===undefined?'–':L.mil?'AN':'aus', '', L.mil);
 }
 function renderDiagPanel(o){
-  if(!o) return '';
   const r = diagRes(o);
   const c = diag.conn;
   const noBt = diag.error==='nobt';
-  const hist = diag.history[o.id] || [];
+  const hist = o ? (diag.history[o.id] || []) : [];
   let body = '';
   if(!c){
     body = `<div class="dg-connect">
@@ -5652,15 +5658,15 @@ function renderDiagPanel(o){
   if(r.codes){
     const sim = c && c.sim;
     result = `<div class="dg-result">
-      <div class="dg-head"><b>Fehlerspeicher</b><span>${r.readAt ? 'gelesen ' + escHtml(fmtSavedAt(r.readAt)) : ''}${r.vin ? ` · FIN ${escHtml(r.vin)}${o.vin && o.vin!=='–' && o.vin.toUpperCase()!==r.vin ? ' <em class="dg-mis">weicht vom Auftrag ab</em>' : ''}` : ''}</span></div>
+      <div class="dg-head"><b>Fehlerspeicher</b><span>${r.readAt ? 'gelesen ' + escHtml(fmtSavedAt(r.readAt)) : ''}${r.vin ? ` · FIN ${escHtml(r.vin)}${o && o.vin && o.vin!=='–' && o.vin.toUpperCase()!==r.vin ? ' <em class="dg-mis">weicht vom Auftrag ab</em>' : ''}` : ''}</span></div>
       ${r.codes.length ? `<div class="dg-table">${r.codes.map(x=>`<div class="dg-row">
           <span class="dg-code ${x.type}">${x.code}</span>
           <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${DTC_TYPE_LABEL[x.type]}</span></div>
           <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
         </div>`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`}
       <textarea id="diagRemark" class="dg-remark" rows="2" placeholder="Bemerkung (optional), z. B. Ursache gefunden, Teil bestellt…">${escHtml(r.remark||'')}</textarea>
-      ${sim ? '' : `<label class="dg-share"><input type="checkbox" id="diagShare" ${r.share?'checked':''} ${r.saved?'disabled':''}> Im Kundenportal anzeigen (Fehlercodes mit Beschreibung, ohne Bemerkung)</label>`}
-      ${r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert${r.share && !sim ? ' – im Kundenportal sichtbar' : ''}</div>` : `<div class="alex-draft-actions"><button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button></div>`}
+      ${sim || !o ? '' : `<label class="dg-share"><input type="checkbox" id="diagShare" ${r.share?'checked':''} ${r.saved?'disabled':''}> Im Kundenportal anzeigen (Fehlercodes mit Beschreibung, ohne Bemerkung)</label>`}
+      ${!o ? `<div class="alex-muted">Zum Speichern oben einen Auftrag wählen.</div>` : r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert${r.share && !sim ? ' – im Kundenportal sichtbar' : ''}</div>` : `<div class="alex-draft-actions"><button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button></div>`}
       <div class="alex-hint">${sim ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>
     </div>`;
   }
@@ -5669,7 +5675,6 @@ function renderDiagPanel(o){
       <span>${h.cleared ? 'Fehlerspeicher gelöscht' : h.codes.length ? h.codes.map(x=>x.code).join(', ') : 'keine Fehlercodes'}</span>
     </div>`).join('')}</div>` : '';
   return `<div class="ts-wrap">
-    <div class="ts-intro">${iconObd}<div><b>OBD-Diagnose</b><span>Fehlerspeicher und Messwerte über einen Bluetooth-Adapter auslesen und am Auftrag speichern.</span></div></div>
     ${body}
     ${diag.error && !noBt ? `<div class="alex-warn">${iconWarn} ${escHtml(diag.error)}</div>` : ''}
     ${live}
@@ -5677,7 +5682,26 @@ function renderDiagPanel(o){
     ${histHtml}
   </div>`;
 }
-function rerenderDiagPanel(){ if(state.detailTab==='diagnose'){ const el = document.getElementById('tabPanel'); if(el) el.innerHTML = renderDiagPanel(getSelectedOrder()); } }
+function rerenderDiagPanel(){ if(state.mainView!=='diagnose') return; const el = document.getElementById('diagPanel'); if(el) el.innerHTML = renderDiagPanel(diagOrder()); }
+function renderDiagnoseView(ov){
+  if(diag.orderId && !orders.some(o=>o.id===diag.orderId)) diag.orderId = null;
+  const open = orders.filter(o=>o.status!=='erledigt');
+  const o = diagOrder();
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Fahrzeugdiagnose</h1><div class="sub">Fehlerspeicher und Messwerte über einen Bluetooth-OBD-Adapter auslesen</div></div></div>
+    <div class="dg-view">
+      <div class="dg-pick">
+        <label for="diagOrderSel">Auftrag</label>
+        <select id="diagOrderSel">
+          <option value="">– ohne Auftrag (nur ansehen) –</option>
+          ${open.map(x=>`<option value="${escHtml(x.id)}" ${x.id===diag.orderId?'selected':''}>#${escHtml(String(x.orderNumber))} · ${escHtml(x.vehicle||'Fahrzeug')} · ${escHtml(x.plate)}</option>`).join('')}
+        </select>
+        ${o ? `<div class="dg-pick-sub">${escHtml(o.customer)}${o.vin && o.vin!=='–' ? ' · FIN ' + escHtml(o.vin) : ''}</div>` : ''}
+      </div>
+      <div id="diagPanel">${renderDiagPanel(o)}</div>
+    </div>`;
+  if(o) loadDiagHistory(o);
+}
 function handleDiagClick(e){
   const t = e.target;
   if(t.closest('#diagConnectBtn')){ diagConnect(false); return true; }
@@ -5692,8 +5716,8 @@ function handleDiagClick(e){
   const a = t.closest('[data-diagalex]'); if(a){ diagAskAlex(a.dataset.diagalex); return true; }
   return false;
 }
-document.addEventListener('input', (e)=>{ if(e.target && e.target.id==='diagRemark'){ const o = getSelectedOrder(); if(o) diagRes(o).remark = e.target.value; } });
-document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='diagShare'){ const o = getSelectedOrder(); if(o) diagRes(o).share = e.target.checked; return; } if(e.target && e.target.id==='diagRemark'){ const o = getSelectedOrder(); if(o){ const r = diagRes(o); if(r.saved){ r.saved = false; rerenderDiagPanel(); } } } });
+document.addEventListener('input', (e)=>{ if(e.target && e.target.id==='diagRemark') diagRes(diagOrder()).remark = e.target.value; });
+document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='diagOrderSel'){ diagStopLive(); diag.orderId = e.target.value || null; diag.error=''; renderDiagnoseView(document.getElementById('otherView')); return; } if(e.target && e.target.id==='diagShare'){ diagRes(diagOrder()).share = e.target.checked; return; } if(e.target && e.target.id==='diagRemark'){ const r = diagRes(diagOrder()); if(r.saved){ r.saved = false; rerenderDiagPanel(); } } });
 
 /* ---------- Reifenscan (eigener Server, Cloudflare Workers AI, tabletAction tire_scan) ---------- */
 const TIRE_SLOTS = [
