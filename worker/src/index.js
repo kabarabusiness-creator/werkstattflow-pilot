@@ -862,7 +862,7 @@ async function mailReviewRequest(env, db, order) {
 }
 
 /* ---------------- Nachrichten & Live-Chat ---------------- */
-const DASHBOARD_URL = 'https://autoleitwerk.global';
+const DASHBOARD_URL = 'https://autoleitwerk.base44.app';
 const SUPPORT_TO = env => env.SUPPORT_EMAIL || 'info@autoleitwerk.de';
 const notifyThrottle = new Map();
 // höchstens eine Benachrichtigung pro Gesprächsrichtung in `ms` (verhindert Mail-Flut bei vielen kurzen Nachrichten)
@@ -934,7 +934,7 @@ const FAIL_THRESHOLD = 2; // erst nach 2 Fehlprüfungen in Folge (30 Min.) alarm
 const SITE_CHECKS = [
   ['Tablet-App', 'https://kabarabusiness-creator.github.io/werkstattflow-pilot/index.html'],
   ['Kundenportal', 'https://kabarabusiness-creator.github.io/werkstattflow-pilot/kundenapp.html'],
-  ['Dashboard', 'https://autoleitwerk.global/'],
+  ['Dashboard', 'https://autoleitwerk.base44.app/'],
 ];
 async function readMonitor(env) {
   try { return (await env.PHOTOS.get(MONITOR_KEY, { type: 'json' })) || {}; } catch { return {}; }
