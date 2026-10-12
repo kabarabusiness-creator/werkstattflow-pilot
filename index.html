@@ -1098,6 +1098,28 @@
   .alex-done{display:flex;align-items:center;gap:6px;margin-top:10px;font-weight:700;color:#22c55e;font-size:12.5px;} .alex-done svg{width:14px;height:14px;}
   .alex-muted{margin-top:10px;font-size:11.5px;color:var(--text-faint);} .alex-hint{margin-top:8px;font-size:10.5px;color:var(--text-faint);}
   .ts-wrap{display:flex;flex-direction:column;gap:12px;}
+  .dg-connect,.dg-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+  .dg-steps{font-size:12.5px;color:var(--text-faint);line-height:1.5;} .dg-steps b{color:var(--text,#e8e8f5);}
+  .dg-conn{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--panel-2);border:1px solid rgba(34,197,94,.35);}
+  .dg-conn.sim{border-color:rgba(245,158,11,.45);} .dg-conn>div{flex:1;min-width:0;} .dg-conn b{display:block;font-size:13.5px;} .dg-conn span{font-size:11.5px;color:var(--text-faint);}
+  .dg-dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.18);flex-shrink:0;} .dg-conn.sim .dg-dot{background:#f59e0b;box-shadow:0 0 0 4px rgba(245,158,11,.18);}
+  .dg-confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12.5px;color:#f87171;}
+  .dg-live{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;}
+  .dg-live-c{padding:10px;border-radius:10px;background:var(--panel-2);border:1px solid var(--border,#26264a);display:flex;flex-direction:column;gap:2px;}
+  .dg-live-c span{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.4px;} .dg-live-c b{font-size:20px;font-variant-numeric:tabular-nums;} .dg-live-c i{font-style:normal;font-size:11px;color:var(--text-faint);}
+  .dg-live-c.warn{border-color:rgba(239,68,68,.5);} .dg-live-c.warn b{color:#f87171;}
+  .dg-result{display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:12px;background:var(--panel,#191932);border:1px solid var(--border,#26264a);}
+  .dg-head{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;} .dg-head span{font-size:12px;color:var(--text-faint);} .dg-mis{color:#f87171;font-style:normal;font-weight:700;}
+  .dg-table{display:flex;flex-direction:column;gap:6px;}
+  .dg-row{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:10px;background:var(--panel-2);}
+  .dg-code{font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:15px;padding:4px 8px;border-radius:8px;background:rgba(239,68,68,.14);color:#f87171;min-width:66px;text-align:center;}
+  .dg-code.pending{background:rgba(245,158,11,.14);color:#f59e0b;} .dg-code.permanent{background:rgba(139,92,246,.16);color:#a78bfa;}
+  .dg-desc{flex:1;min-width:0;} .dg-desc b{display:block;font-size:13px;} .dg-desc span{font-size:11px;color:var(--text-faint);}
+  .dg-remark{width:100%;box-sizing:border-box;border-radius:10px;padding:8px 10px;background:var(--panel-2);border:1px solid var(--border,#26264a);color:inherit;font:inherit;font-size:13px;resize:vertical;}
+  .dg-hist{display:flex;flex-direction:column;gap:4px;font-size:12px;} .dg-hist>b{font-size:12.5px;margin-bottom:2px;}
+  .dg-hist-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border,#26264a);color:var(--text-faint);} .dg-hist-row span:last-child{color:var(--text,#e8e8f5);text-align:right;}
+  .dg-simtag{font-style:normal;font-size:10.5px;padding:1px 6px;border-radius:6px;background:rgba(245,158,11,.15);color:#f59e0b;}
+  @media (max-width:760px){ .dg-live{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-row{flex-wrap:wrap;} }
   .ts-intro{display:flex;gap:10px;align-items:flex-start;} .ts-intro svg{width:22px;height:22px;flex-shrink:0;color:var(--accent,#8b5cf6);} .ts-intro b{display:block;} .ts-intro span{font-size:12.5px;color:var(--text-faint);}
   .ts-slots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
   .ts-slot{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:var(--panel-2);border:1px dashed var(--border,#26264a);}
@@ -3573,6 +3595,7 @@ function renderDetail(){
         <div class="tab ${state.detailTab==='aufgaben'?'active':''}" data-dtab="aufgaben">${iconTasks} Aufgaben</div>
         <div class="tab ${state.detailTab==='checkliste'?'active':''}" data-dtab="checkliste">${iconCheckSquare} Checkliste</div>
         <div class="tab ${state.detailTab==='reifen'?'active':''}" data-dtab="reifen">${iconTire} Reifenscan</div>
+        <div class="tab ${state.detailTab==='diagnose'?'active':''}" data-dtab="diagnose">${iconObd} Diagnose</div>
         ${PILOT_HIDE_DEMO ? '' : `<div class="tab ${state.detailTab==='teile'?'active':''}" data-dtab="teile">${iconBox} Teile &amp; Material</div>
         <div class="tab ${state.detailTab==='dokumente'?'active':''}" data-dtab="dokumente">${iconFolder} Dokumente</div>
         <div class="tab ${state.detailTab==='verlauf'?'active':''}" data-dtab="verlauf">${iconHistory} Verlauf</div>`}
@@ -3587,6 +3610,8 @@ function renderDetail(){
 function renderTabPanel(){
   const o = getSelectedOrder();
   const el = document.getElementById('tabPanel');
+  if(state.detailTab!=='diagnose' && diag.liveOn) diagStopLive();
+  if(state.detailTab==='diagnose'){ el.innerHTML = renderDiagPanel(o); loadDiagHistory(o); return; }
   if(state.detailTab==='reifen'){ el.innerHTML = renderTireScanPanel(o); return; }
   if(state.detailTab==='aufgaben'){
     const done = o.tasks.filter(t=>t.status==='done').length;
@@ -4269,6 +4294,7 @@ document.addEventListener('click', (e)=>{
   if(e.target.closest('#sendPortalBtn')){ sendPortalLink(); return; }
   if(handleAlexClick(e)) return;
   if(handleTireScanClick(e)) return;
+  if(handleDiagClick(e)) return;
 
   /* --- schnellnotiz --- */
   if(e.target.closest('#noteFabBtn')){
@@ -5276,6 +5302,395 @@ async function sendPortalLink(){
   if(r.ok) showUpdateToast(`Portal-Link gesendet an ${r.data.sent_to || o.email}`);
   else showUpdateToast({ no_email:'Keine E-Mail-Adresse beim Kunden hinterlegt.', no_portal:'Für diesen Auftrag gibt es noch keinen Portal-Zugang.', forbidden:'Nur Admin und Serviceberater können den Link senden.' }[r.data && r.data.error] || (r.missing ? 'E-Mail-Versand ist noch nicht eingerichtet.' : `Link nicht gesendet (${r.reason}).`));
 }
+
+/* ---------- OBD-Diagnose (ELM327 über Bluetooth LE, Web Bluetooth – iPad: Bluefy-Browser; mit Simulationsmodus) ---------- */
+const iconObd = svg('<rect x="3" y="7" width="18" height="10" rx="2"/><circle cx="7.5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16.5" cy="12" r="1"/><line x1="7" y1="7" x2="7" y2="4"/><line x1="17" y1="7" x2="17" y2="4"/>');
+// Bekannte Funkmodul-Dienste von ELM327-BLE-Adaptern (OBDLink CX / Veepeak BLE+: FFF0, HM-10-Klone: FFE0, Vgate: E781…)
+const OBD_BLE_SERVICES = [0xfff0, 0xffe0, 0x18f0, 'e7810a71-73ae-499d-8c15-faa9aef0c3f2', '6e400001-b5a3-f393-e0a9-e50e24dcca9e'];
+const DTC_TEXT = {
+  P0010:'Nockenwellenverstellung Einlass Bank 1 – Stromkreis', P0011:'Nockenwellenverstellung Einlass Bank 1 – Verstellung zu weit früh',
+  P0016:'Kurbelwelle/Nockenwelle Bank 1 – Lage unplausibel', P0030:'Lambdasonde vor Kat (Bank 1) – Heizung Stromkreis',
+  P0087:'Kraftstoffdruck (Rail) zu niedrig', P0088:'Kraftstoffdruck (Rail) zu hoch', P0093:'Kraftstoffsystem – großes Leck erkannt',
+  P0100:'Luftmassenmesser – Stromkreis', P0101:'Luftmassenmesser – Messbereich/Funktion', P0102:'Luftmassenmesser – Signal zu niedrig',
+  P0106:'Saugrohrdrucksensor – Messbereich/Funktion', P0110:'Ansauglufttemperatursensor – Stromkreis',
+  P0113:'Ansauglufttemperatursensor – Signal zu hoch', P0115:'Kühlmitteltemperatursensor – Stromkreis',
+  P0117:'Kühlmitteltemperatursensor – Signal zu niedrig', P0118:'Kühlmitteltemperatursensor – Signal zu hoch',
+  P0120:'Drosselklappen-/Pedalsensor A – Stromkreis', P0121:'Drosselklappensensor A – Messbereich/Funktion',
+  P0128:'Kühlmitteltemperatur unter Regeltemperatur (Thermostat)', P0130:'Lambdasonde vor Kat (Bank 1) – Stromkreis',
+  P0133:'Lambdasonde vor Kat (Bank 1) – Reaktion zu langsam', P0135:'Lambdasonde vor Kat (Bank 1) – Heizung',
+  P0136:'Lambdasonde nach Kat (Bank 1) – Stromkreis', P0141:'Lambdasonde nach Kat (Bank 1) – Heizung',
+  P0171:'Gemisch zu mager (Bank 1)', P0172:'Gemisch zu fett (Bank 1)', P0174:'Gemisch zu mager (Bank 2)', P0175:'Gemisch zu fett (Bank 2)',
+  P0190:'Kraftstoffdrucksensor (Rail) – Stromkreis', P0201:'Einspritzventil Zylinder 1 – Stromkreis',
+  P0234:'Ladedruck zu hoch (Overboost)', P0299:'Ladedruck zu niedrig (Underboost)',
+  P0300:'Zündaussetzer – mehrere/zufällige Zylinder', P0301:'Zündaussetzer Zylinder 1', P0302:'Zündaussetzer Zylinder 2',
+  P0303:'Zündaussetzer Zylinder 3', P0304:'Zündaussetzer Zylinder 4', P0305:'Zündaussetzer Zylinder 5', P0306:'Zündaussetzer Zylinder 6',
+  P0325:'Klopfsensor 1 – Stromkreis', P0335:'Kurbelwellensensor – Stromkreis', P0340:'Nockenwellensensor – Stromkreis',
+  P0351:'Zündspule A – Stromkreis', P0380:'Glühkerzen – Stromkreis', P0400:'Abgasrückführung (AGR) – Durchfluss',
+  P0401:'AGR – Durchfluss zu gering', P0402:'AGR – Durchfluss zu hoch', P0403:'AGR-Ventil – Stromkreis',
+  P0410:'Sekundärluftsystem', P0420:'Katalysator (Bank 1) – Wirkungsgrad unter Grenzwert', P0430:'Katalysator (Bank 2) – Wirkungsgrad unter Grenzwert',
+  P0440:'Tankentlüftung (EVAP) – Fehlfunktion', P0441:'Tankentlüftung – Durchfluss fehlerhaft', P0442:'Tankentlüftung – kleines Leck',
+  P0455:'Tankentlüftung – großes Leck', P0456:'Tankentlüftung – sehr kleines Leck', P0480:'Kühlerlüfter 1 – Ansteuerung',
+  P0500:'Geschwindigkeitssensor Fahrzeug', P0505:'Leerlaufregelung – Fehlfunktion', P0506:'Leerlaufdrehzahl zu niedrig', P0507:'Leerlaufdrehzahl zu hoch',
+  P0520:'Öldrucksensor/-schalter – Stromkreis', P0562:'Bordspannung zu niedrig', P0563:'Bordspannung zu hoch',
+  P0571:'Bremslichtschalter – Stromkreis', P0600:'Datenbus-Verbindung Steuergerät', P0606:'Motorsteuergerät – Prozessorfehler',
+  P0615:'Anlasserrelais – Stromkreis', P0700:'Getriebesteuerung – Fehler gespeichert (Getriebe-SG auslesen)',
+  P0715:'Getriebe-Eingangsdrehzahlsensor', P0741:'Wandlerkupplung – Funktion/hängt offen',
+  P2002:'Dieselpartikelfilter (Bank 1) – Wirkungsgrad unter Grenzwert', P2004:'Saugrohrklappen – hängen offen',
+  P2135:'Drosselklappen-/Pedalsensor A/B – Signale unplausibel', P2187:'Gemisch im Leerlauf zu mager (Bank 1)',
+  P2279:'Ansaugsystem – Falschluft', P2463:'Dieselpartikelfilter – Rußbeladung zu hoch',
+  P242F:'Dieselpartikelfilter – Ascheablagerung zu hoch', P20EE:'SCR-Katalysator (Bank 1) – Wirkungsgrad unter Grenzwert',
+  U0001:'CAN-Bus (High-Speed) – Kommunikation', U0073:'Steuergeräte-Datenbus A – aus', U0100:'Keine Kommunikation mit Motorsteuergerät',
+  U0101:'Keine Kommunikation mit Getriebesteuergerät', U0121:'Keine Kommunikation mit ABS-Steuergerät',
+  U0140:'Keine Kommunikation mit Bordnetzsteuergerät', U0155:'Keine Kommunikation mit Kombiinstrument',
+  C0035:'Raddrehzahlsensor vorne links', C0040:'Raddrehzahlsensor vorne rechts', C0045:'Raddrehzahlsensor hinten links', C0050:'Raddrehzahlsensor hinten rechts',
+  B0001:'Fahrer-Frontairbag – Zündkreis',
+};
+function dtcDescription(code){
+  if(DTC_TEXT[code]) return DTC_TEXT[code];
+  const L = code[0], d = code[1], grp = code[2];
+  if(d==='1' || d==='3' && L!=='P') return `Herstellerspezifischer Code (${L==='P'?'Antrieb':L==='C'?'Fahrwerk':L==='B'?'Karosserie':'Netzwerk'}) – Herstellerdaten nötig`;
+  if(L==='P'){
+    if(d==='2' || d==='3') return 'Antrieb – erweiterter generischer Code (Herstellerdaten prüfen)';
+    return ({ '0':'Kraftstoff-/Luftzumessung, Abgasrückführung', '1':'Kraftstoff-/Luftzumessung', '2':'Kraftstoff-/Luftzumessung (Einspritzung)', '3':'Zündung/Zündaussetzer', '4':'Abgasnachbehandlung', '5':'Geschwindigkeit, Leerlauf, Eingangssignale', '6':'Steuergerät/Ausgänge', '7':'Getriebe', '8':'Getriebe', '9':'Getriebe', 'A':'Hybrid-/Elektroantrieb', 'B':'Hybrid-/Elektroantrieb', 'C':'Hybrid-/Elektroantrieb' })[grp] || 'Antrieb';
+  }
+  return L==='C' ? 'Fahrwerk (ABS/ESP/Lenkung)' : L==='B' ? 'Karosserie (Airbag, Komfort, Klima)' : 'Netzwerk/Kommunikation zwischen Steuergeräten';
+}
+const DTC_TYPE_LABEL = { stored:'gespeichert', pending:'sporadisch', permanent:'permanent' };
+
+/* --- Antwort-Parser (gleich für echten Adapter und Simulation) --- */
+function elmClean(raw){
+  return String(raw||'').replace(/>/g,'').split(/[\r\n]+/).map(l=>l.trim()).filter(l=>l && !/^(SEARCHING\.*|BUS INIT:?.*|STOPPED|OK)$/i.test(l));
+}
+function elmNoData(lines){ return lines.some(l=>/NO DATA|UNABLE TO CONNECT|CAN ERROR|BUS ERROR|^\?$|ERROR/i.test(l)); }
+// Mehrteilige CAN-Antworten ("014" / "0: 49 02 01 …" / "1: …") zu einem Datenblock zusammenfügen; sonst eine Nachricht pro Zeile
+function elmMessages(lines){
+  const multi = lines.some(l=>/^[0-9A-F]\s*:/i.test(l));
+  if(!multi) return lines.map(l=>l.replace(/[^0-9A-F]/gi,'').toUpperCase()).filter(Boolean);
+  return [lines.filter(l=>!/^[0-9A-F]{3}$/i.test(l)).map(l=>l.replace(/^[0-9A-F]\s*:/i,'').replace(/[^0-9A-F]/gi,'')).join('').toUpperCase()];
+}
+function decodeDtc(b1, b2){
+  if(!b1 && !b2) return null;
+  return 'PCBU'[b1>>6] + ((b1>>4)&3) + (b1&15).toString(16).toUpperCase() + b2.toString(16).toUpperCase().padStart(2,'0');
+}
+function parseDtcs(raw, mode, isCan){
+  const lines = elmClean(raw);
+  if(elmNoData(lines)) return [];
+  const out = new Set();
+  for(const msg of elmMessages(lines)){
+    let i = msg.indexOf(mode); if(i<0) continue;
+    let hex = msg.slice(i+2);
+    const bytes = (hex.match(/../g)||[]).map(h=>parseInt(h,16));
+    let start = 0, n = Math.floor(bytes.length/2);
+    // CAN: erstes Byte = Anzahl Codes; ältere Protokolle: immer 3 Codes je Zeile ohne Anzahl
+    const looksCan = bytes[0]*2 <= bytes.length-1 && (bytes.length % 2 === 1 || bytes.length !== 6); // Altprotokolle liefern immer genau 6 Datenbytes
+    if(isCan===true || (isCan!==false && looksCan)){ n = Math.min(bytes[0], Math.floor((bytes.length-1)/2)); start = 1; }
+    for(let k=0;k<n;k++){ const c = decodeDtc(bytes[start+2*k], bytes[start+2*k+1]); if(c) out.add(c); }
+  }
+  return [...out];
+}
+function parseVin(raw){
+  const lines = elmClean(raw);
+  if(elmNoData(lines)) return '';
+  const msg = elmMessages(lines).join('');
+  const i = msg.indexOf('4902'); if(i<0) return '';
+  const ascii = (msg.slice(i+4).match(/../g)||[]).map(h=>String.fromCharCode(parseInt(h,16))).join('').replace(/[^A-HJ-NPR-Z0-9]/g,'');
+  return ascii.length>=17 ? ascii.slice(-17) : '';
+}
+function parsePid(raw, pid){
+  const lines = elmClean(raw);
+  if(elmNoData(lines)) return null;
+  for(const msg of elmMessages(lines)){
+    const i = msg.indexOf('41'+pid); if(i<0) continue;
+    const b = (msg.slice(i+4).match(/../g)||[]).map(h=>parseInt(h,16));
+    if(!b.length) continue;
+    switch(pid){
+      case '01': return { mil: !!(b[0]&0x80), dtc_count: b[0]&0x7f };
+      case '0C': return b.length>1 ? (b[0]*256+b[1])/4 : null;
+      case '05': case '0F': return b[0]-40;
+      case '04': case '2F': return Math.round(b[0]*1000/255)/10;
+      case '0D': return b[0];
+      case '21': case '31': return b.length>1 ? b[0]*256+b[1] : null;
+    }
+  }
+  return null;
+}
+
+/* --- Verbindung: echter Adapter über Web Bluetooth --- */
+class ElmBle {
+  constructor(){ this.buf=''; this.waiter=null; this.queue=Promise.resolve(); this.name=''; }
+  async connect(){
+    const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices: OBD_BLE_SERVICES });
+    this.device = dev; this.name = dev.name || 'OBD-Adapter';
+    dev.addEventListener('gattserverdisconnected', ()=>diagOnDisconnect());
+    const server = await dev.gatt.connect();
+    let rx=null, tx=null;
+    for(const uuid of OBD_BLE_SERVICES){
+      let svc; try{ svc = await server.getPrimaryService(uuid); }catch(_){ continue; }
+      const chars = await svc.getCharacteristics();
+      const n = chars.find(c=>c.properties.notify||c.properties.indicate);
+      const w = chars.find(c=>c.properties.write||c.properties.writeWithoutResponse);
+      if(n && w){ rx=n; tx=w; break; }
+    }
+    if(!rx || !tx){ try{ server.disconnect(); }catch(_){} throw new Error('Adapter erkannt, aber kein OBD-Datenkanal gefunden. Bitte einen ELM327-kompatiblen BLE-Adapter verwenden (z. B. OBDLink CX, Veepeak OBDCheck BLE+).'); }
+    this.tx = tx;
+    await rx.startNotifications();
+    const dec = new TextDecoder();
+    rx.addEventListener('characteristicvaluechanged', ev=>{
+      this.buf += dec.decode(ev.target.value);
+      if(this.waiter && this.buf.includes('>')){ const w=this.waiter; this.waiter=null; w(this.buf); }
+    });
+  }
+  send(cmd, timeoutMs){
+    const run = async ()=>{
+      this.buf = '';
+      const p = new Promise((resolve)=>{
+        const t = setTimeout(()=>{ this.waiter=null; resolve(this.buf + '\nTIMEOUT'); }, timeoutMs || 5000);
+        this.waiter = (b)=>{ clearTimeout(t); resolve(b); };
+      });
+      const data = new TextEncoder().encode(cmd + '\r');
+      for(let i=0;i<data.length;i+=20){
+        const chunk = data.slice(i,i+20);
+        if(this.tx.properties.writeWithoutResponse && this.tx.writeValueWithoutResponse) await this.tx.writeValueWithoutResponse(chunk);
+        else await this.tx.writeValue(chunk);
+      }
+      return p;
+    };
+    const r = this.queue.then(run, run); this.queue = r.catch(()=>{}); return r;
+  }
+  disconnect(){ try{ this.device && this.device.gatt.connected && this.device.gatt.disconnect(); }catch(_){} }
+}
+/* --- Simulation: antwortet wie ein ELM327 an einem CAN-Fahrzeug --- */
+class ElmSim {
+  constructor(vin){ this.name='Simulation'; this.sim=true; this.codes=['0420','0171']; this.pending=['C100']; this.mil=true; this.t0=Date.now(); this.vin=vin; }
+  async connect(){ await new Promise(r=>setTimeout(r,600)); }
+  async send(cmd){
+    await new Promise(r=>setTimeout(r, 60 + Math.random()*90));
+    const c = cmd.toUpperCase().replace(/\s/g,''); const h = (n,l)=>Math.max(0,Math.round(n)).toString(16).toUpperCase().padStart(l,'0');
+    const sec = (Date.now()-this.t0)/1000;
+    if(c==='ATZ') return 'ELM327 v1.5\r\r>';
+    if(c==='ATRV') return (this.cranked ? (14.0+Math.sin(sec)*0.15) : 12.6).toFixed(1)+'V\r\r>';
+    if(c==='ATDPN') return 'A6\r\r>';
+    if(c==='ATDP') return 'AUTO, ISO 15765-4 (CAN 11/500)\r\r>';
+    if(c.startsWith('AT')) return 'OK\r\r>';
+    if(c==='0100') return '4100BE3FA813\r\r>';
+    if(c==='0101') return '4101'+h((this.mil?0x80:0)+this.codes.length,2)+'076500\r\r>';
+    if(c==='03') return '43'+h(this.codes.length,2)+this.codes.join('')+'\r\r>';
+    if(c==='07') return '47'+h(this.pending.length,2)+this.pending.join('')+'\r\r>';
+    if(c==='0A') return '4A00\r\r>';
+    if(c==='04'){ this.codes=[]; this.pending=[]; this.mil=false; return '44\r\r>'; }
+    if(c==='0902'){
+      const hex = '01' + [...this.vin].map(ch=>h(ch.charCodeAt(0),2)).join('');
+      const all = '4902' + hex; const parts = []; parts.push('0:'+all.slice(0,12)); let rest = all.slice(12), i=1;
+      while(rest.length){ parts.push(((i++)%16).toString(16).toUpperCase()+':'+rest.slice(0,14)); rest = rest.slice(14); }
+      return '014\r' + parts.join('\r') + '\r\r>';
+    }
+    this.cranked = true;
+    if(c==='010C') return '410C'+h((780+Math.sin(sec*1.7)*35+Math.random()*20)*4,4)+'\r\r>';
+    if(c==='0105') return '4105'+h(Math.min(90, 62+sec*0.6)+40,2)+'\r\r>';
+    if(c==='0104') return '4104'+h((19+Math.random()*4)*2.55,2)+'\r\r>';
+    if(c==='010D') return '410D00\r\r>';
+    if(c==='0121') return '4121'+h(this.mil?412:0,4)+'\r\r>';
+    return 'NO DATA\r\r>';
+  }
+  disconnect(){}
+}
+
+/* --- Zustand & Ablauf --- */
+const diag = { conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, results:{}, history:{}, liveOn:false, liveTimer:null, confirmClear:false };
+function diagRes(o){ return diag.results[o.id] || (diag.results[o.id] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false }); }
+function diagOnDisconnect(){
+  if(!diag.conn || diag.conn.sim) return;
+  diagStopLive(); diag.conn = null; diag.error = 'Verbindung zum Adapter getrennt.'; rerenderDiagPanel();
+}
+function diagVinFor(o){ const v = String(o.vin||'').toUpperCase(); return /^[A-HJ-NPR-Z0-9]{17}$/.test(v) ? v : 'WVWZZZAUZLW000123'; }
+async function diagConnect(sim){
+  const o = getSelectedOrder(); if(!o || diag.connecting) return;
+  diag.error=''; diag.connecting=true; rerenderDiagPanel();
+  try{
+    let conn;
+    if(sim) conn = new ElmSim(diagVinFor(o));
+    else {
+      if(!navigator.bluetooth) throw new Error('nobt');
+      conn = new ElmBle();
+    }
+    await conn.connect();
+    for(const c of ['ATZ','ATE0','ATL0','ATS0','ATH0','ATAT1','ATSP0']) await conn.send(c, c==='ATZ'?3000:2000);
+    const probe = elmClean(await conn.send('0100', 12000));
+    if(elmNoData(probe) || probe.some(l=>/TIMEOUT/.test(l))){ conn.disconnect(); throw new Error('Adapter verbunden, aber keine Antwort vom Fahrzeug. Zündung einschalten und erneut verbinden.'); }
+    const dpn = elmClean(await conn.send('ATDPN')).join('').replace(/^A/,'');
+    diag.isCan = /^[6-9AB]$/i.test(dpn) ? true : /^[1-5]$/.test(dpn) ? false : null;
+    diag.protocol = elmClean(await conn.send('ATDP')).join(' ').replace(/^AUTO,\s*/,'');
+    diag.conn = conn;
+    showUpdateToast(sim ? 'Simulation gestartet' : `Verbunden mit ${conn.name}`);
+  }catch(err){
+    const m = String(err && err.message || err);
+    diag.error = m==='nobt' ? 'nobt'
+      : /cancel|chosen|User/i.test(m) ? ''
+      : /pair|bond|auth|security/i.test(m) ? 'Kopplung fehlgeschlagen. Adapter kurz ab- und wieder einstecken und innerhalb von 5 Minuten verbinden.'
+      : m;
+  }
+  diag.connecting=false; rerenderDiagPanel();
+}
+function diagDisconnect(){ diagStopLive(); if(diag.conn) diag.conn.disconnect(); diag.conn=null; diag.confirmClear=false; rerenderDiagPanel(); }
+async function diagRead(){
+  const o = getSelectedOrder(); if(!o || !diag.conn || diag.busy) return;
+  const r = diagRes(o); diag.busy='read'; diag.error=''; diag.confirmClear=false; rerenderDiagPanel();
+  try{
+    const st = parsePid(await diag.conn.send('0101', 6000), '01');
+    const stored = parseDtcs(await diag.conn.send('03', 8000), '43', diag.isCan);
+    const pending = parseDtcs(await diag.conn.send('07', 8000), '47', diag.isCan);
+    const perm = parseDtcs(await diag.conn.send('0A', 8000), '4A', diag.isCan);
+    const codes = [];
+    stored.forEach(c=>codes.push({ code:c, type:'stored' }));
+    pending.filter(c=>!stored.includes(c)).forEach(c=>codes.push({ code:c, type:'pending' }));
+    perm.filter(c=>!stored.includes(c) && !pending.includes(c)).forEach(c=>codes.push({ code:c, type:'permanent' }));
+    codes.forEach(c=>c.desc = dtcDescription(c.code));
+    r.codes = codes; r.cleared=false; r.saved=false; r.readAt = new Date().toISOString();
+    r.vin = parseVin(await diag.conn.send('0902', 8000)) || r.vin;
+    r.live = { ...r.live, ...(st||{}) };
+    const v = parseFloat(elmClean(await diag.conn.send('ATRV')).join('')); if(Number.isFinite(v)) r.live.voltage = v;
+    const dm = parsePid(await diag.conn.send('0121'), '21'); if(dm!==null) r.live.distance_mil_km = dm;
+  }catch(err){ diag.error = 'Auslesen fehlgeschlagen: ' + (err && err.message || err); }
+  diag.busy=''; rerenderDiagPanel();
+}
+async function diagLiveTick(){
+  const o = getSelectedOrder(); if(!o || !diag.conn || !diag.liveOn) return;
+  const r = diagRes(o);
+  try{
+    const rpm = parsePid(await diag.conn.send('010C'), '0C'); if(rpm!==null) r.live.rpm = Math.round(rpm);
+    const ct = parsePid(await diag.conn.send('0105'), '05'); if(ct!==null) r.live.coolant_c = ct;
+    const ld = parsePid(await diag.conn.send('0104'), '04'); if(ld!==null) r.live.load_pct = ld;
+    const v = parseFloat(elmClean(await diag.conn.send('ATRV')).join('')); if(Number.isFinite(v)) r.live.voltage = v;
+  }catch(_){}
+  const box = document.getElementById('diagLive'); if(box) box.innerHTML = renderDiagLive(r.live);
+  if(diag.liveOn) diag.liveTimer = setTimeout(diagLiveTick, 700);
+}
+function diagStopLive(){ diag.liveOn=false; clearTimeout(diag.liveTimer); }
+function diagToggleLive(){ if(diag.liveOn){ diagStopLive(); rerenderDiagPanel(); return; } if(!diag.conn) return; diag.liveOn=true; rerenderDiagPanel(); diagLiveTick(); }
+async function diagClear(){
+  const o = getSelectedOrder(); if(!o || !diag.conn || diag.busy) return;
+  const r = diagRes(o); diag.busy='clear'; diag.confirmClear=false; diagStopLive(); rerenderDiagPanel();
+  const before = r.codes || [];
+  const res = elmClean(await diag.conn.send('04', 10000));
+  if(!res.some(l=>/^44/.test(l.replace(/\s/g,'')))){ diag.busy=''; diag.error='Fehlerspeicher konnte nicht gelöscht werden (Zündung an, Motor aus?).'; rerenderDiagPanel(); return; }
+  diag.busy='';
+  await diagSave({ cleared:true, codes: before });
+  await diagRead();
+}
+async function diagSave(extra){
+  const o = getSelectedOrder(); if(!o) return;
+  const r = diagRes(o);
+  const box = document.getElementById('diagRemark'); if(box) r.remark = box.value;
+  const codes = (extra && extra.codes) || r.codes || [];
+  diag.busy='save'; rerenderDiagPanel();
+  const res = await tabletRequest('diagnosis_save', {
+    order_id:o.id, codes, vin:r.vin, live:r.live, simulated: !!(diag.conn && diag.conn.sim), cleared: !!(extra && extra.cleared),
+    adapter: diag.conn ? diag.conn.name : '', protocol: diag.protocol, remark: r.remark,
+  }, 20000);
+  diag.busy='';
+  if(res.ok){
+    if(!(extra && extra.cleared)) r.saved = true;
+    const d = res.data;
+    (diag.history[o.id] = diag.history[o.id] || []).unshift(d.entry);
+    if(d.vin_set){ o.vin = d.entry.vin; }
+    showUpdateToast(extra && extra.cleared ? 'Löschen am Auftrag protokolliert' : d.vin_mismatch ? `Gespeichert – Achtung: FIN weicht vom Auftrag ab (${d.vin_mismatch})` : d.vin_set ? 'Diagnose gespeichert, FIN am Auftrag ergänzt' : 'Diagnose am Auftrag gespeichert');
+  } else diag.error = 'Speichern fehlgeschlagen: ' + res.reason;
+  rerenderDiagPanel();
+}
+async function loadDiagHistory(o){
+  if(!o || diag.history[o.id]) return;
+  diag.history[o.id] = [];
+  const r = await tabletRequest('diagnosis_list', { order_id:o.id }, 15000);
+  if(r.ok){ diag.history[o.id] = r.data.items || []; rerenderDiagPanel(); }
+}
+function diagAskAlex(code){
+  const o = getSelectedOrder(); if(!o) return;
+  const r = diagRes(o); const c = (r.codes||[]).find(x=>x.code===code);
+  openAlexPanel(o.id);
+  aiAsk(`Fehlercode ${code}${c ? ` (${c.desc}, ${DTC_TYPE_LABEL[c.type]})` : ''} bei ${o.vehicle||'diesem Fahrzeug'}${o.motor && o.motor!=='–' ? ', '+o.motor : ''}: Was sind die häufigsten Ursachen und in welcher Reihenfolge sollte ich prüfen?`);
+}
+
+/* --- Darstellung --- */
+function renderDiagLive(L){
+  const f = (v,d=0)=> v===undefined||v===null ? '–' : Number(v).toLocaleString('de-DE',{maximumFractionDigits:d});
+  const cell = (lbl,val,unit,warn)=>`<div class="dg-live-c ${warn?'warn':''}"><span>${lbl}</span><b>${val}</b><i>${unit}</i></div>`;
+  return cell('Drehzahl', f(L.rpm), '1/min')
+    + cell('Kühlmittel', f(L.coolant_c), '°C', L.coolant_c>110)
+    + cell('Bordspannung', f(L.voltage,1), 'V', L.voltage!==undefined && (L.voltage<11.8 || L.voltage>15))
+    + cell('Motorlast', f(L.load_pct), '%')
+    + cell('Motorkontrollleuchte', L.mil===undefined?'–':L.mil?'AN':'aus', '', L.mil);
+}
+function renderDiagPanel(o){
+  if(!o) return '';
+  const r = diagRes(o);
+  const c = diag.conn;
+  const noBt = diag.error==='nobt';
+  const hist = diag.history[o.id] || [];
+  let body = '';
+  if(!c){
+    body = `<div class="dg-connect">
+      <button class="btn primary" id="diagConnectBtn" ${diag.connecting?'disabled':''}>${iconObd} ${diag.connecting?'Verbinde…':'Fahrzeug verbinden'}</button>
+      <button class="btn" id="diagSimBtn" ${diag.connecting?'disabled':''}>Simulation starten</button>
+    </div>
+    <div class="dg-steps"><b>So geht's:</b> Adapter in die OBD-Buchse (meist unter dem Lenkrad) stecken · Zündung an · „Fahrzeug verbinden“ tippen und den Adapter in der Liste wählen.</div>
+    ${noBt ? `<div class="alex-warn">${iconWarn} <span>Dieser Browser kann kein Bluetooth. Auf dem iPad das Tablet in der kostenlosen App <b>„Bluefy – Web BLE Browser“</b> öffnen (gleiche Adresse, gleiche Anmeldung). Die Simulation funktioniert auch hier.</span></div>` : ''}`;
+  } else {
+    const busy = diag.busy;
+    body = `<div class="dg-conn ${c.sim?'sim':''}"><span class="dg-dot"></span><div><b>${escHtml(c.sim ? 'Simulationsmodus' : c.name)}</b><span>${escHtml(c.sim ? 'Keine echten Fahrzeugdaten – nur zum Üben und Vorführen' : (diag.protocol || 'verbunden'))}</span></div><button class="btn" id="diagDisconnectBtn">Trennen</button></div>
+    <div class="dg-actions">
+      <button class="btn primary" id="diagReadBtn" ${busy?'disabled':''}>${busy==='read'?'Lese Fehlerspeicher…':'Fehlerspeicher lesen'}</button>
+      <button class="btn ${diag.liveOn?'primary':''}" id="diagLiveBtn" ${busy==='clear'?'disabled':''}>${diag.liveOn?'Live-Daten stoppen':'Live-Daten'}</button>
+      ${r.codes && r.codes.length ? (diag.confirmClear
+        ? `<span class="dg-confirm">Fehlerspeicher im Fahrzeug löschen? Motor aus, Zündung an. <button class="btn danger" id="diagClearYes">Ja, löschen</button><button class="btn" id="diagClearNo">Abbrechen</button></span>`
+        : `<button class="btn" id="diagClearBtn" ${busy?'disabled':''}>Codes löschen</button>`) : ''}
+    </div>`;
+  }
+  const live = (diag.liveOn || Object.keys(r.live).length) ? `<div class="dg-live" id="diagLive">${renderDiagLive(r.live)}</div>` : '';
+  let result = '';
+  if(r.codes){
+    const sim = c && c.sim;
+    result = `<div class="dg-result">
+      <div class="dg-head"><b>Fehlerspeicher</b><span>${r.readAt ? 'gelesen ' + escHtml(fmtSavedAt(r.readAt)) : ''}${r.vin ? ` · FIN ${escHtml(r.vin)}${o.vin && o.vin!=='–' && o.vin.toUpperCase()!==r.vin ? ' <em class="dg-mis">weicht vom Auftrag ab</em>' : ''}` : ''}</span></div>
+      ${r.codes.length ? `<div class="dg-table">${r.codes.map(x=>`<div class="dg-row">
+          <span class="dg-code ${x.type}">${x.code}</span>
+          <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${DTC_TYPE_LABEL[x.type]}</span></div>
+          <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
+        </div>`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`}
+      <textarea id="diagRemark" class="dg-remark" rows="2" placeholder="Bemerkung (optional), z. B. Ursache gefunden, Teil bestellt…">${escHtml(r.remark||'')}</textarea>
+      ${r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert</div>` : `<div class="alex-draft-actions"><button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button></div>`}
+      <div class="alex-hint">${sim ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>
+    </div>`;
+  }
+  const histHtml = hist.length ? `<div class="dg-hist"><b>Gespeicherte Diagnosen</b>${hist.slice(0,8).map(h=>`<div class="dg-hist-row">
+      <span>${escHtml(fmtSavedAt(h.saved_at))}${h.saved_by?' – '+escHtml(h.saved_by):''}${h.simulated?' <em class="dg-simtag">Simulation</em>':''}</span>
+      <span>${h.cleared ? 'Fehlerspeicher gelöscht' : h.codes.length ? h.codes.map(x=>x.code).join(', ') : 'keine Fehlercodes'}</span>
+    </div>`).join('')}</div>` : '';
+  return `<div class="ts-wrap">
+    <div class="ts-intro">${iconObd}<div><b>OBD-Diagnose</b><span>Fehlerspeicher und Messwerte über einen Bluetooth-Adapter auslesen und am Auftrag speichern.</span></div></div>
+    ${body}
+    ${diag.error && !noBt ? `<div class="alex-warn">${iconWarn} ${escHtml(diag.error)}</div>` : ''}
+    ${live}
+    ${result}
+    ${histHtml}
+  </div>`;
+}
+function rerenderDiagPanel(){ if(state.detailTab==='diagnose'){ const el = document.getElementById('tabPanel'); if(el) el.innerHTML = renderDiagPanel(getSelectedOrder()); } }
+function handleDiagClick(e){
+  const t = e.target;
+  if(t.closest('#diagConnectBtn')){ diagConnect(false); return true; }
+  if(t.closest('#diagSimBtn')){ diagConnect(true); return true; }
+  if(t.closest('#diagDisconnectBtn')){ diagDisconnect(); return true; }
+  if(t.closest('#diagReadBtn')){ diagStopLive(); diagRead(); return true; }
+  if(t.closest('#diagLiveBtn')){ diagToggleLive(); return true; }
+  if(t.closest('#diagClearBtn')){ diag.confirmClear=true; rerenderDiagPanel(); return true; }
+  if(t.closest('#diagClearNo')){ diag.confirmClear=false; rerenderDiagPanel(); return true; }
+  if(t.closest('#diagClearYes')){ diagClear(); return true; }
+  if(t.closest('#diagSaveBtn')){ diagSave(); return true; }
+  const a = t.closest('[data-diagalex]'); if(a){ diagAskAlex(a.dataset.diagalex); return true; }
+  return false;
+}
+document.addEventListener('input', (e)=>{ if(e.target && e.target.id==='diagRemark'){ const o = getSelectedOrder(); if(o) diagRes(o).remark = e.target.value; } });
+document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='diagRemark'){ const o = getSelectedOrder(); if(o){ const r = diagRes(o); if(r.saved){ r.saved = false; rerenderDiagPanel(); } } } });
 
 /* ---------- Reifenscan (eigener Server, Cloudflare Workers AI, tabletAction tire_scan) ---------- */
 const TIRE_SLOTS = [

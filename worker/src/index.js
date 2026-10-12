@@ -385,6 +385,49 @@ async function loadSavedTireScan(db, env, code, orderId) {
   return { result: note ? parseTireNote(note.content) : null, photos, saved_at: note ? new Date(utcMs(note.created_date)).toISOString() : null, saved_by: note ? (note.author_name || '') : '', from_note: !!note };
 }
 
+/* ---- OBD-Diagnose (Tablet liest Fehlerspeicher über ELM327-Adapter; Server speichert nur den Befund) ---- */
+const diagKey = (code, orderId) => `_diag/${code}/${orderId}`;
+const DIAG_LIVE_KEYS = ['rpm', 'coolant_c', 'voltage', 'speed_kmh', 'load_pct', 'intake_c', 'fuel_pct', 'dtc_count', 'distance_mil_km', 'distance_clear_km'];
+function cleanDiagnosis(b) {
+  const str = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
+  if (!Array.isArray(b.codes) || b.codes.length > 60) throw new HttpError(400, 'params');
+  const seen = new Set();
+  const codes = [];
+  for (const c of b.codes) {
+    const id = str(c && c.code, 5).toUpperCase();
+    const type = ['stored', 'pending', 'permanent'].includes(c && c.type) ? c.type : 'stored';
+    if (!/^[PCBU][0-3][0-9A-F]{3}$/.test(id) || seen.has(id + type)) continue;
+    seen.add(id + type);
+    codes.push({ code: id, type, desc: str(c.desc, 200) });
+  }
+  const vinRaw = str(b.vin, 20).toUpperCase();
+  const vin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) ? vinRaw : '';
+  const live = {};
+  if (b.live && typeof b.live === 'object') for (const k of DIAG_LIVE_KEYS) { const n = Number(b.live[k]); if (b.live[k] !== null && b.live[k] !== '' && Number.isFinite(n) && Math.abs(n) < 1e6) live[k] = Math.round(n * 10) / 10; }
+  if (b.live && typeof b.live.mil === 'boolean') live.mil = b.live.mil;
+  return { codes, vin, live, simulated: !!b.simulated, cleared: !!b.cleared, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
+}
+const DIAG_TYPE_LABEL = { stored: 'gespeichert', pending: 'sporadisch/ausstehend', permanent: 'permanent' };
+function diagnosisNote(d, name) {
+  const lines = [`OBD-Diagnose (${d.simulated ? 'SIMULATION – keine echten Fahrzeugdaten' : 'Fahrzeug ausgelesen'}) – ${name}`];
+  if (d.vin) lines.push(`FIN laut Steuergerät: ${d.vin}`);
+  if (d.adapter || d.protocol) lines.push(`Adapter: ${[d.adapter, d.protocol].filter(Boolean).join(', ')}`);
+  if (d.cleared) lines.push(d.codes.length ? 'Fehlerspeicher wurde gelöscht. Vorher ausgelesen:' : 'Fehlerspeicher wurde gelöscht.');
+  else if (!d.codes.length) lines.push('Fehlerspeicher: keine Fehlercodes.');
+  d.codes.forEach(c => lines.push(`${c.code} (${DIAG_TYPE_LABEL[c.type]})${c.desc ? ': ' + c.desc : ''}`));
+  const L = d.live, f = (v, u) => String(v).replace('.', ',') + u, parts = [];
+  if (L.mil !== undefined) parts.push(`MIL ${L.mil ? 'an' : 'aus'}`);
+  if (L.rpm !== undefined) parts.push(`Drehzahl ${f(L.rpm, ' 1/min')}`);
+  if (L.coolant_c !== undefined) parts.push(`Kühlmittel ${f(L.coolant_c, ' °C')}`);
+  if (L.voltage !== undefined) parts.push(`Bordspannung ${f(L.voltage, ' V')}`);
+  if (L.load_pct !== undefined) parts.push(`Last ${f(L.load_pct, ' %')}`);
+  if (L.distance_mil_km !== undefined) parts.push(`seit MIL ${f(L.distance_mil_km, ' km')}`);
+  if (parts.length) lines.push('Messwerte: ' + parts.join(', '));
+  if (d.remark) lines.push('Bemerkung Mechaniker: ' + d.remark.split(/\n+/).join('; '));
+  lines.push('Generische OBD-Beschreibung – Herstellerdaten und Prüfung durch Mechaniker erforderlich.');
+  return lines.join('\n');
+}
+
 async function tabletAction(db, sess, body, env, origin, ctx) {
   const action = body.action;
   const code = sess.workshop_code;
@@ -423,6 +466,32 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     countUsage('kv_writes');
     await env.PHOTOS.put(tireKey(code, order.id), JSON.stringify({ result: JSON.parse(raw), photos, saved_at: nowIso(), saved_by: emp.name }));
     return { ok: true, stored: true };
+  }
+
+  if (action === 'diagnosis_save') {
+    rateLimit('diag:' + sess.employee_id, 60, 3600_000);
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    const d = cleanDiagnosis(body);
+    await db.create('InternalNote', { order_id: order.id, content: diagnosisNote(d, emp.name), author_name: emp.name, author_role: ['admin', 'serviceberater', 'mechaniker'].includes(emp.role) ? emp.role : 'mechaniker', workshop_code: code });
+    invalidate('InternalNote');
+    let vin_set = false, vin_mismatch = null;
+    if (d.vin && !d.simulated) {
+      const cur = String(order.vin || '').trim().toUpperCase();
+      if (!cur || cur === '–') { await db.update('Order', order.id, { vin: d.vin }); invalidate('Order'); vin_set = true; }
+      else if (cur !== d.vin) vin_mismatch = cur;
+    }
+    const entry = { ...d, saved_at: nowIso(), saved_by: emp.name };
+    if (env.PHOTOS) {
+      const prev = await env.PHOTOS.get(diagKey(code, order.id), { type: 'json' }).catch(() => null);
+      countUsage('kv_writes');
+      await env.PHOTOS.put(diagKey(code, order.id), JSON.stringify([entry, ...(Array.isArray(prev) ? prev : [])].slice(0, 20)));
+    }
+    return { ok: true, entry, vin_set, vin_mismatch };
+  }
+  if (action === 'diagnosis_list') {
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    const list = env.PHOTOS ? await env.PHOTOS.get(diagKey(code, order.id), { type: 'json' }).catch(() => null) : null;
+    return { ok: true, items: Array.isArray(list) ? list : [] };
   }
 
   /* ---- Support aus dem Tablet: Ticket direkt an info@ (ohne Mailprogramm) + Live-Chat wie im Dashboard ---- */

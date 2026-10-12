@@ -228,6 +228,27 @@ await t('Reifenscan: gespeicherten Befund wieder laden (Notiz-Fallback + struktu
   s = (await call('/tabletAction', { action: 'tire_scan_get', order_id: 'o1' }, token)).data.saved;
   assert.equal(s.result.brand.value, 'Michelin'); assert.equal(s.photos.flanke, up.file_url); assert.equal(s.photos.felge, undefined);
 });
+await t('OBD-Diagnose: Befund speichern, FIN übernehmen, Liste laden', async () => {
+  assert.equal((await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o2', codes: [] }, token)).status, 404);
+  assert.equal((await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', codes: 'x' }, token)).status, 400);
+  // Simulation: FIN wird NICHT übernommen
+  let r = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', simulated: true, vin: 'WVWZZZ1KZAW000001', codes: [{ code: 'p0420', type: 'stored', desc: 'Katalysator' }, { code: 'XYZ', type: 'stored' }, { code: 'U0100', type: 'pending' }], live: { rpm: 812.25, coolant_c: 88, mil: true, evil: 5 } }, token)).data;
+  assert.equal(r.ok, true); assert.equal(r.vin_set, false);
+  assert.deepEqual(r.entry.codes.map(c => c.code), ['P0420', 'U0100']);
+  assert.equal(r.entry.live.rpm, 812.3); assert.equal(r.entry.live.evil, undefined); assert.equal(r.entry.live.mil, true);
+  const note = db.InternalNote.filter(n => n.order_id === 'o1').pop();
+  assert.match(note.content, /^OBD-Diagnose \(SIMULATION/); assert.match(note.content, /P0420 \(gespeichert\): Katalysator/); assert.match(note.content, /U0100 \(sporadisch/);
+  assert.equal(db.Order.find(o => o.id === 'o1').vin, undefined);
+  // echtes Auslesen: leere FIN wird übernommen, abweichende gemeldet
+  r = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', vin: 'WVWZZZ1KZAW000001', codes: [], adapter: 'OBDLink CX' }, token)).data;
+  assert.equal(r.vin_set, true); assert.equal(db.Order.find(o => o.id === 'o1').vin, 'WVWZZZ1KZAW000001');
+  r = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', vin: 'WVWZZZ1KZAW000002', codes: [], cleared: true }, token)).data;
+  assert.equal(r.vin_set, false); assert.equal(r.vin_mismatch, 'WVWZZZ1KZAW000001');
+  assert.match(db.InternalNote.filter(n => n.order_id === 'o1').pop().content, /Fehlerspeicher wurde gelöscht/);
+  const list = (await call('/tabletAction', { action: 'diagnosis_list', order_id: 'o1' }, token)).data.items;
+  assert.equal(list.length, 3); assert.equal(list[0].cleared, true); assert.equal(list[2].simulated, true);
+  assert.equal((await call('/tabletAction', { action: 'diagnosis_list', order_id: 'o2' }, token)).status, 404);
+});
 await t('Qualitätskontrolle: Haken sofort am Auftrag gespeichert, wer/wann bleibt stabil', async () => {
   let r = await call('/tabletAction', { action: 'qc_save', order_id: 'o1', qc: [{ label: 'Ölstand geprüft', checked: true }, { label: 'Probefahrt durchgeführt', checked: false }] }, token);
   assert.equal(r.data.ok, true);
