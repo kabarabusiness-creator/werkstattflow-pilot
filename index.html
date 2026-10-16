@@ -1151,13 +1151,28 @@
   .offline-banner.online{background:var(--success);}
 
   /* ki-assistent */
+  /* ALEX-Avatar (Live-Version: Ring im Markenverlauf, Headset, blinzelnde Augen, Puls beim Sprechen) */
+  .alex-av{position:relative;flex:none;border-radius:50%;display:inline-block;vertical-align:middle;}
+  .alex-av .av-ring{position:absolute;inset:0;border-radius:50%;padding:max(2px,calc(var(--s)*.045));box-sizing:border-box;background:conic-gradient(from 210deg,#8b5cf6,#c026d3,#22c55e,#8b5cf6);box-shadow:0 calc(var(--s)*.08) calc(var(--s)*.24) rgba(76,29,149,.22);}
+  .alex-av.no-ring .av-ring{padding:0;background:none;}
+  .alex-av .av-disc{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 34% 24%,#2c1d52 0%,#14141b 58%,#0a0a11 100%);display:flex;align-items:center;justify-content:center;}
+  .alex-av svg{width:74%!important;height:74%!important;display:block;}
+  .alex-av .av-eye{transform-box:fill-box;transform-origin:center;}
+  .alex-av.live .av-eye{animation:alexBlink 3.4s infinite;}
+  .alex-av.live .av-ring{animation:alexGlow 3.14s ease-in-out infinite;}
+  .alex-av.speak::before,.alex-av.speak::after{content:"";position:absolute;inset:0;border-radius:50%;border:max(2px,calc(var(--s)*.02)) solid rgba(34,197,94,.55);animation:alexPulse .83s linear infinite;pointer-events:none;}
+  .alex-av.speak::after{animation-delay:-.415s;}
+  @keyframes alexBlink{0%,94.6%,100%{transform:scaleY(1)}97.3%{transform:scaleY(.1)}}
+  @keyframes alexPulse{from{transform:scale(1);opacity:1}to{transform:scale(1.32);opacity:0}}
+  @keyframes alexGlow{0%,100%{box-shadow:0 calc(var(--s)*.08) calc(var(--s)*.24) rgba(76,29,149,.22),0 0 0 rgba(34,197,94,0)}50%{box-shadow:0 calc(var(--s)*.08) calc(var(--s)*.24) rgba(76,29,149,.22),0 0 calc(var(--s)*.35) rgba(34,197,94,.45)}}
+  @media (prefers-reduced-motion:reduce){.alex-av .av-eye,.alex-av .av-ring,.alex-av::before,.alex-av::after{animation:none!important}}
   .ai-fab{
-    position:absolute;bottom:80px;right:22px;width:52px;height:52px;border-radius:50%;background:var(--accent-grad);
+    position:absolute;bottom:80px;right:22px;width:56px;height:56px;border-radius:50%;background:transparent;padding:0;
     border:none;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:55;
-    box-shadow:0 8px 24px rgba(139,92,246,.45);transition:transform .15s;
+    transition:transform .15s;
   }
   .ai-fab:hover{transform:scale(1.06);}
-  .ai-fab svg{width:24px;height:24px;}
+  .ai-fab > span{display:flex;}
   .ai-panel{
     position:absolute;bottom:142px;right:22px;width:340px;height:440px;background:var(--panel);border:1px solid var(--border-soft);
     border-radius:18px;z-index:56;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 50px var(--shadow-pop);
@@ -2238,6 +2253,12 @@ const iconLift = svg('<path d="M5 21V8l7-5 7 5v13"/><line x1="5" y1="14" x2="19"
 const iconTargetSearch = svg('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><circle cx="11" cy="11" r="2.5"/>');
 const iconDrawer = svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="10" y1="16" x2="14" y2="16"/>');
 const iconTrend = svg('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>');
+function alexAvatar(size, o){
+  o = o || {};
+  const cls = ['alex-av', o.live===false ? '' : 'live', o.speak ? 'speak' : '', o.ring===false ? 'no-ring' : ''].filter(Boolean).join(' ');
+  return `<span class="${cls}" style="--s:${size}px;width:${size}px;height:${size}px" aria-hidden="true"><span class="av-ring"><span class="av-disc"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13a9 9 0 0 1 18 0" stroke="#4ade80" stroke-width="1.7"/><rect x="2.4" y="11.4" width="3.6" height="6.2" rx="1.6" fill="#22c55e"/><rect x="18" y="11.4" width="3.6" height="6.2" rx="1.6" fill="#22c55e"/><path d="M20 17.6v.6a3.6 3.6 0 0 1-3.6 3.6H13.6" stroke="#4ade80" stroke-width="1.5"/><circle cx="13" cy="21.8" r="1.1" fill="#4ade80"/><g transform="skewX(-10)"><rect class="av-eye" x="10.6" y="10.4" width="1.9" height="4.8" rx=".95" fill="#fff"/><rect class="av-eye" x="15.2" y="10.4" width="1.9" height="4.8" rx=".95" fill="#fff"/></g></svg></span></span></span>`;
+}
+function alexFabSpeak(on){ const a = document.querySelector('#aiFabIcon .alex-av'); if(a) a.classList.toggle('speak', !!on); }
 const iconBot = svg('<rect x="4" y="8" width="16" height="12" rx="3"/><circle cx="9" cy="14" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="14" r="1.3" fill="currentColor" stroke="none"/><path d="M12 8V5"/><circle cx="12" cy="3.5" r="1.5"/><path d="M2 13v3M22 13v3"/>');
 const iconUserBadge = svg('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/>');
 const iconShield = svg('<path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5z"/><path d="M9 12l2 2 4-4"/>');
@@ -3342,7 +3363,7 @@ function renderSupportView(ov){
         <div><div class="sc-title">E-Mail</div><div class="sc-sub">${SUPPORT_EMAIL}</div><div class="sc-meta">AutoLeitwerk-Support</div></div>
       </a>` : ''}
       <div class="support-contact-card" id="openAiFromSupport" style="cursor:pointer;">
-        <div class="sc-ic">${iconBot}</div>
+        <div class="sc-ic" style="background:none">${alexAvatar(38)}</div>
         <div><div class="sc-title">ALEX</div><div class="sc-sub">AutoLeitwerk Expert eXchange – Sofort-Hilfe im Chat</div><div class="sc-meta">Rund um die Uhr</div></div>
       </div>
     </div>
@@ -3662,7 +3683,7 @@ function renderDetail(){
       </div>
       <div class="dh-right">
         ${PILOT_HIDE_DEMO ? '' : `<div class="btn">${iconMsg} Nachricht</div>`}
-        <div class="btn" id="askAlexOrderBtn">${iconBot} ALEX fragen</div>
+        <div class="btn" id="askAlexOrderBtn">${alexAvatar(20, { live:false, ring:false })} ALEX fragen</div>
         <div class="btn" id="diagOrderBtn">${iconObd} Diagnose</div>
         ${o.hasPortal && alexCanWrite() ? `<div class="btn" id="sendPortalBtn" title="${o.email ? 'Link an '+escHtml(o.email)+' senden' : 'Keine E-Mail-Adresse hinterlegt'}">${iconMail} Portal-Link senden</div>` : ''}
         <div class="btn" id="vehicleDetailsBtn">${iconCar} Fahrzeugdetails</div>
@@ -5312,7 +5333,7 @@ function renderAiPanel(){
   const ctx = alexCurrentOrder();
   panel.innerHTML = `
     <div class="ai-panel-head">
-      <div class="ic">${iconBot}</div>
+      ${alexAvatar(34, { speak: alexBusy })}
       <div><b>ALEX</b><span>${alexBusy ? '● denkt nach…' : (navigator.onLine===false ? '● offline – lokales Wissen' : '● KI-Assistent')}</span></div>
       <div class="ai-panel-close" id="aiPanelClose">${iconClose}</div>
     </div>
@@ -5349,7 +5370,7 @@ async function aiAsk(prefill){
   if(!q) return;
   aiChat.push({ from:'user', text: escHtml(q), plain: q });
   aiChat.push({ from:'bot', text:'<span class="alex-typing"><i></i><i></i><i></i></span>', pending:true });
-  alexBusy = true; renderAiPanel();
+  alexBusy = true; renderAiPanel(); alexFabSpeak(true);
   const ctx = alexCurrentOrder();
   const messages = aiChat.filter(m=>!m.pending && m.plain).slice(-10).map(m=>({ role: m.from==='user' ? 'user' : 'assistant', content: m.plain }));
   const r = await tabletRequest('alex_ask', { messages, order_id: ctx ? ctx.id : null }, 60000);
@@ -5373,7 +5394,7 @@ async function aiAsk(prefill){
     const why = r.quota ? 'Das kostenlose KI-Kontingent für heute ist aufgebraucht (ab 2 Uhr nachts wieder da)' : r.missing ? 'ALEX ist auf dem Server noch nicht freigeschaltet' : r.credits ? 'Das KI-Kontingent dieses Monats ist aufgebraucht' : `Keine Verbindung zu ALEX (${escHtml(r.reason||'Fehler')})`;
     aiChat.push({ from:'bot', text: `<div class="alex-general">${why} – Antwort aus dem lokalen Wissen:</div>` + (local || 'Dazu habe ich lokal nichts hinterlegt. Versuch es mit einem Fehlercode oder Stichwort wie „Bremse“ oder „Öl“.') });
   }
-  alexBusy = false;
+  alexBusy = false; alexFabSpeak(false);
   if(input) input.value = '';
   renderAiPanel();
   const inp = document.getElementById('aiInput'); if(inp) inp.focus();
@@ -6494,7 +6515,7 @@ document.getElementById('logoImgBig').src = LOGO_WORDMARK_SRC;
 document.getElementById('logoImgLogin').src = LOGO_WORDMARK_SRC;
 document.getElementById('logoImgProfile').src = LOGO_WORDMARK_SRC;
 applyThemeLogos(); renderThemeControls();
-document.getElementById('aiFabIcon').innerHTML = iconBot;
+document.getElementById('aiFabIcon').innerHTML = alexAvatar(56);
 document.getElementById('noteFabIcon').innerHTML = iconNote;
 updateNoteBadge();
 if(navigator.onLine===false) renderOfflineBanner(false);
