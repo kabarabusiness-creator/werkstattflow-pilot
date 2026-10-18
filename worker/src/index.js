@@ -104,6 +104,25 @@ async function cachedList(db, entity) {
 }
 function invalidate(...entities) { entities.forEach(e => cache.delete(e)); }
 
+/* Fortschritt der Hebebühne aus den Aufgaben des zugewiesenen Auftrags neu berechnen.
+   Dashboard-Hebebühnen-Ansicht liest lift.progress / current_task / remaining_minutes. */
+async function syncLiftProgress(db, orderId, code) {
+  if (!orderId) return null;
+  const lifts = (await db.list('Lift', { assigned_order_id: orderId }, { limit: 5 })).filter(l => l.workshop_code === code);
+  if (!lifts.length) return null;
+  const tasks = (await db.list('OrderTask', { order_id: orderId }, { limit: 500 }))
+    .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+  const total = tasks.length;
+  const done = tasks.filter(t => t.status === 'erledigt').length;
+  const progress = total ? Math.round(done / total * 100) : 0;
+  const current = tasks.find(t => t.status === 'in_arbeit') || tasks.find(t => t.status === 'offen') || null;
+  const remaining = tasks.filter(t => t.status !== 'erledigt').reduce((s, t) => s + (Number(t.estimated_minutes) || 0), 0);
+  const upd = { progress, current_task: current ? (current.title || null) : (total ? 'Alle Aufgaben erledigt' : null), remaining_minutes: remaining || null };
+  for (const l of lifts) await db.update('Lift', l.id, upd);
+  invalidate('Lift');
+  return progress;
+}
+
 /* ---------------- Sitzungen ---------------- */
 async function requireSession(db, request) {
   const auth = request.headers.get('Authorization') || '';
@@ -584,6 +603,8 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
         invalidate('Order'); orderStatus = 'reparatur_laeuft';
       }
     }
+    // Hebebühnen-Ansicht im Dashboard liest Fortschritt/aktuelle Aufgabe vom Lift → hier nachziehen
+    await syncLiftProgress(db, task.order_id, code).catch(e => console.log('lift_sync', String(e)));
     return { ok: true, order_status: orderStatus };
   }
   if (action === 'worktime_start') {

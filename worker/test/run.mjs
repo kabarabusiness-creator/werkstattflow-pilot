@@ -131,6 +131,23 @@ await t('Erste Aufgabe startet → Auftrag „Reparatur läuft“ (nur aus „Fa
   await call('/tabletAction', { action: 'task_update', task_id: 't3', status: 'erledigt' }, token);
   assert.equal(db.Order.at(-1).status, 'diagnose_laeuft');
 });
+await t('Aufgabe starten/erledigen → Hebebühne zeigt Fortschritt + aktuelle Aufgabe', async () => {
+  db.Order.push({ id: 'o4', workshop_code: 'AL-T1', status: 'reparatur_laeuft', customer_name: 'D' });
+  db.OrderTask.push(
+    { id: 't4a', order_id: 'o4', workshop_code: 'AL-T1', title: 'Bremsen', status: 'offen', order_index: 1, estimated_minutes: 60 },
+    { id: 't4b', order_id: 'o4', workshop_code: 'AL-T1', title: 'Ölwechsel', status: 'offen', order_index: 2, estimated_minutes: 30 },
+  );
+  db.Lift.push({ id: 'l1', workshop_code: 'AL-T1', assigned_order_id: 'o4', status: 'in_arbeit', progress: 0, current_task: null });
+  db.Lift.push({ id: 'l2', workshop_code: 'AL-T2', assigned_order_id: 'o4', status: 'in_arbeit', progress: 0 });
+  await call('/tabletAction', { action: 'task_update', task_id: 't4a', status: 'in_arbeit' }, token);
+  let l = db.Lift.find(x => x.id === 'l1');
+  assert.equal(l.progress, 0); assert.equal(l.current_task, 'Bremsen'); assert.equal(l.remaining_minutes, 90);
+  await call('/tabletAction', { action: 'task_update', task_id: 't4a', status: 'erledigt' }, token);
+  assert.equal(l.progress, 50); assert.equal(l.current_task, 'Ölwechsel'); assert.equal(l.remaining_minutes, 30);
+  await call('/tabletAction', { action: 'task_update', task_id: 't4b', status: 'erledigt' }, token);
+  assert.equal(l.progress, 100); assert.equal(l.current_task, 'Alle Aufgaben erledigt');
+  assert.equal(db.Lift.find(x => x.id === 'l2').progress, 0, 'fremde Werkstatt unberührt');
+});
 await t('Fremde Aufgabe nicht änderbar', async () => {
   const r = await call('/tabletAction', { action: 'task_update', task_id: 't2', status: 'erledigt' }, token);
   assert.equal(r.status, 404); assert.equal(db.OrderTask[1].status, 'offen');
