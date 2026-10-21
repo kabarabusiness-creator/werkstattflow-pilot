@@ -448,7 +448,20 @@ function cleanDiagnosis(b) {
     const km = num(b.since_clear.km, 1e6), warmups = num(b.since_clear.warmups, 1000);
     if (km !== null || warmups !== null) since_clear = { ...(km !== null ? { km } : {}), ...(warmups !== null ? { warmups } : {}) };
   }
-  return { codes, vin, live, readiness, freeze, since_clear, simulated: !!b.simulated, cleared: !!b.cleared, share: !!b.share && !b.simulated, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
+  // Steuergeräte-Scan (VW-Konzern, UDS): je Steuergerät Adresse, Bezeichnung, Teilenummer, Fehler mit Fehlerart
+  let ecus = null;
+  if (Array.isArray(b.ecus) && b.ecus.length <= 40) {
+    ecus = b.ecus.slice(0, 40).map(e => ({
+      id: str(e && e.id, 4).toUpperCase(), name: str(e && e.name, 60), part: str(e && e.part, 40), sys: str(e && e.sys, 40),
+      status: ['ok', 'neg'].includes(e && e.status) ? e.status : 'ok',
+      codes: (Array.isArray(e && e.codes) ? e.codes : []).slice(0, 40).map(x => ({
+        code: str(x && x.code, 5).toUpperCase(), ftb: /^[0-9A-F]{2}$/i.test(String(x && x.ftb)) ? String(x.ftb).toUpperCase() : '00',
+        active: !!(x && x.active), desc: str(x && x.desc, 200), ftb_text: str(x && x.ftb_text, 80),
+      })).filter(x => /^[PCBU][0-3][0-9A-F]{3}$/.test(x.code)),
+    })).filter(e => /^[0-9A-F]{2}$/.test(e.id) && e.name);
+    if (!ecus.length) ecus = null;
+  }
+  return { codes, vin, live, readiness, freeze, since_clear, ecus, simulated: !!b.simulated, cleared: !!b.cleared, share: !!b.share && !b.simulated, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
 }
 const DIAG_TYPE_LABEL = { stored: 'gespeichert', pending: 'sporadisch/ausstehend', permanent: 'permanent' };
 function diagnosisNote(d, name) {
@@ -474,6 +487,13 @@ function diagnosisNote(d, name) {
   if (d.readiness) {
     const open = d.readiness.items.filter(x => !x.ok).map(x => x.label);
     lines.push(`AU-Bereitschaft (Readiness): ${open.length ? open.length + ' von ' + d.readiness.items.length + ' offen (' + open.join(', ') + ')' : 'alle ' + d.readiness.items.length + ' Prüfungen abgeschlossen'}`);
+  }
+  if (d.ecus) {
+    const bad = d.ecus.filter(e => e.codes.length);
+    lines.push(`Steuergeräte-Scan (VW-Konzern): ${d.ecus.length} Steuergeräte, ${bad.length ? bad.reduce((s, e) => s + e.codes.length, 0) + ' Fehlereinträge' : 'keine Fehler'}`);
+    bad.forEach(e => e.codes.forEach(x => lines.push(`  ${e.id} ${e.name}: ${x.code}${x.ftb !== '00' ? ' ' + x.ftb : ''} (${x.active ? 'aktiv' : 'sporadisch'})${x.desc ? ' – ' + x.desc : ''}${x.ftb_text ? ', ' + x.ftb_text : ''}`)));
+    const neg = d.ecus.filter(e => e.status === 'neg').map(e => e.id + ' ' + e.name);
+    if (neg.length) lines.push(`  nicht lesbar: ${neg.join(', ')}`);
   }
   if (d.since_clear) lines.push(`Seit letztem Löschen: ${d.since_clear.km !== undefined ? f(d.since_clear.km, ' km') : '–'}${d.since_clear.warmups !== undefined ? ', ' + d.since_clear.warmups + ' Warmlaufzyklen' : ''}`);
   if (d.remark) lines.push('Bemerkung Mechaniker: ' + d.remark.split(/\n+/).join('; '));

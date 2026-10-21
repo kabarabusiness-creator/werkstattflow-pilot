@@ -286,6 +286,15 @@ await t('OBD-Diagnose: Readiness, Freeze-Frame, seit Löschen gespeichert und im
   const note = db.InternalNote.filter(n => n.order_id === 'o1').pop().content;
   assert.match(note, /Langzeit-Trim B1 11,7 %/); assert.match(note, /Freeze-Frame zu P0420: Drehzahl 1800 1\/min, Geschw\. 50 km\/h/);
   assert.match(note, /AU-Bereitschaft \(Readiness\): 1 von 2 offen \(Tankentlüftung \(EVAP\)\)/); assert.match(note, /Seit letztem Löschen: 1840 km, 37 Warmlaufzyklen/);
+  // Steuergeräte-Scan
+  const r3 = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', codes: [], ecus: [
+    { id: '03', name: 'Bremsenelektronik (ABS/ESP)', part: '5Q0907379BA', sys: 'ESC', status: 'ok', codes: [{ code: 'c0035', ftb: '29', active: true, desc: 'Raddrehzahlsensor vorne links', ftb_text: 'Signal ungültig' }, { code: 'bad' }] },
+    { id: '15', name: 'Airbag', status: 'ok', codes: [] }, { id: '44', name: 'Lenkhilfe', status: 'neg', codes: [] }, { id: 'zz', name: 'x' }] }, token)).data;
+  assert.equal(r3.entry.ecus.length, 3); assert.deepEqual(r3.entry.ecus[0].codes.map(x => x.code + x.ftb), ['C003529']);
+  const note3 = db.InternalNote.filter(n => n.order_id === 'o1').pop().content;
+  assert.match(note3, /Steuergeräte-Scan \(VW-Konzern\): 3 Steuergeräte, 1 Fehlereinträge/);
+  assert.match(note3, /03 Bremsenelektronik \(ABS\/ESP\): C0035 29 \(aktiv\) – Raddrehzahlsensor vorne links, Signal ungültig/);
+  assert.match(note3, /nicht lesbar: 44 Lenkhilfe/);
   // ungültige Readiness/Freeze werden verworfen statt zu scheitern
   const r2 = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', codes: [], readiness: { items: 'x' }, freeze: { code: 'XYZ' } }, token)).data;
   assert.equal(r2.entry.readiness, null); assert.equal(r2.entry.freeze, null);

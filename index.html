@@ -1254,6 +1254,14 @@
   .dg-ff{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;} .dg-ff div{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:8px;background:var(--panel);}
   .dg-ff span{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.3px;} .dg-ff b{font-size:15px;font-variant-numeric:tabular-nums;} .dg-ff i{font-style:normal;font-size:11px;color:var(--text-faint);font-weight:400;}
   .dg-proto{display:flex;justify-content:flex-end;}
+  .dg-scan-intro{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--text-dim);} .dg-scan-act{display:flex;justify-content:flex-end;gap:8px;align-items:center;flex-wrap:wrap;}
+  .dg-scan-run{display:flex;align-items:center;gap:10px;font-size:13px;} .dg-spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:dgspin .8s linear infinite;}
+  @keyframes dgspin{to{transform:rotate(360deg);}}
+  .dg-ecus{display:flex;flex-direction:column;gap:6px;} .dg-ecu{display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:10px;background:var(--panel);border:1px solid var(--border);} .dg-ecu.has{border-color:rgba(239,68,68,.35);}
+  .dg-ecu-h{display:flex;align-items:center;gap:10px;} .dg-ecu-h>div{display:flex;flex-direction:column;min-width:0;flex:1;} .dg-ecu-h>div span{font-size:11.5px;color:var(--text-faint);}
+  .dg-ecu-id{font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:12px;padding:3px 7px;border-radius:6px;background:var(--panel-2);}
+  .dg-ecu-st{font-size:12px;font-weight:600;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;} .dg-ecu-st.ok{color:#16a34a;} .dg-ecu-st.ok svg{width:14px;height:14px;} .dg-ecu-st.err{color:var(--danger-text,#dc2626);} .dg-ecu-st.neg{color:#d97706;font-weight:500;}
+  .dg-code small{font-size:10px;margin-left:3px;opacity:.75;}
   .dg-hist{display:flex;flex-direction:column;gap:4px;font-size:12px;} .dg-hist>b{font-size:12.5px;margin-bottom:2px;}
   .dg-hist-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border);color:var(--text-faint);} .dg-hist-row span:last-child{color:var(--text);text-align:right;}
   .dg-simtag{font-style:normal;font-size:10.5px;padding:1px 6px;border-radius:6px;background:rgba(245,158,11,.15);color:var(--warning-text);}
@@ -5570,6 +5578,66 @@ function parseReadiness(raw){
   return { diesel, items, open: items.filter(x=>!x.ok).length };
 }
 
+/* --- Steuergeräte-Scan VW-Konzern (VW, Audi, Skoda, Seat/Cupra) über UDS auf dem Diagnose-CAN ---
+   Anfrage-ID → Antwort-ID: Motor/Getriebe +8 (OBD-Standard), alle anderen +0x6A (VW-Schema).
+   Adressen gelten für CAN-Fahrzeuge mit UDS (v. a. MQB/MLB ab ca. 2012); ältere KWP-Steuergeräte antworten nicht. */
+const VAG_ECUS = [
+  { id:'01', name:'Motorelektronik',          tx:0x7E0, rx:0x7E8 },
+  { id:'02', name:'Getriebeelektronik',       tx:0x7E1, rx:0x7E9 },
+  { id:'03', name:'Bremsenelektronik (ABS/ESP)', tx:0x713 },
+  { id:'15', name:'Airbag',                   tx:0x715 },
+  { id:'17', name:'Schalttafeleinsatz',       tx:0x714 },
+  { id:'19', name:'Diagnose-Interface (Gateway)', tx:0x710 },
+  { id:'09', name:'Elektronische Zentralelektrik', tx:0x70E },
+  { id:'44', name:'Lenkhilfe',                tx:0x712 },
+  { id:'16', name:'Lenksäulenelektronik',     tx:0x70C },
+  { id:'08', name:'Klima-/Heizungselektronik', tx:0x746 },
+  { id:'13', name:'Abstandsregelung (ACC)',   tx:0x757 },
+  { id:'5F', name:'Informationselektronik',   tx:0x773 },
+];
+const VAG_WMI = /^(WVW|WV1|WV2|WV3|WAU|WA1|WUA|TRU|VSS|TMB)/;
+function isVagVehicle(o, vin){
+  if(VAG_WMI.test(String(vin||'').toUpperCase())) return true;
+  return /\b(vw|volkswagen|audi|skoda|škoda|seat|cupra)\b/i.test(String((o && o.vehicle) || ''));
+}
+// Fehlerart (3. Byte des UDS-Fehlercodes, SAE J2012) – nur die häufigsten
+const FTB_TEXT = {
+  '01':'allgemeiner elektrischer Fehler', '11':'Kurzschluss nach Masse', '12':'Kurzschluss nach Plus', '13':'Unterbrechung',
+  '14':'Kurzschluss nach Masse oder Unterbrechung', '15':'Kurzschluss nach Plus oder Unterbrechung', '16':'Spannung unter Grenzwert',
+  '17':'Spannung über Grenzwert', '1C':'Spannung außerhalb des Bereichs', '1D':'Strom außerhalb des Bereichs', '21':'Signal zu klein',
+  '22':'Signal zu groß', '23':'Signal ständig niedrig', '24':'Signal ständig hoch', '29':'Signal ungültig', '2F':'Signal unregelmäßig',
+  '31':'kein Signal', '4B':'Übertemperatur', '54':'Grundeinstellung/Kalibrierung fehlt', '55':'nicht codiert/angelernt',
+  '62':'Signalvergleich fehlerhaft', '64':'Signal unplausibel', '71':'Stellglied blockiert', '87':'Botschaft fehlt', '96':'Bauteil intern defekt',
+};
+const UDS_NRC = { '11':'Dienst nicht unterstützt', '12':'Funktion nicht unterstützt', '13':'falsche Anfrage', '22':'Bedingungen nicht erfüllt', '31':'Bereich nicht unterstützt', '33':'Zugriff gesperrt', '7F':'Dienst in dieser Sitzung nicht unterstützt' };
+// Antwort auf 19 02 <Maske>: 59 02 <Verfügbarkeitsmaske> dann je 4 Byte: DTC (3) + Status
+function parseUdsDtcs(raw){
+  const lines = elmClean(raw);
+  if(!lines.length || elmNoData(lines)) return { status:'nodata' };
+  const msgs = elmMessages(lines);
+  const all = msgs.join('');
+  const neg = all.match(/7F19([0-9A-F]{2})/);
+  const i = all.indexOf('5902');
+  if(i<0){ if(neg && neg[1]==='78') return { status:'pending' }; if(neg) return { status:'neg', nrc:neg[1] }; return { status:'nodata' }; }
+  const msg = msgs.find(m=>m.includes('5902')) || all;
+  const b = (msg.slice(msg.indexOf('5902')+6).match(/../g)||[]).map(h=>parseInt(h,16));
+  const codes = []; const seen = new Set();
+  for(let k=0; k+3<b.length; k+=4){
+    const code = decodeDtc(b[k], b[k+1]); if(!code) continue;
+    const ftb = b[k+2].toString(16).toUpperCase().padStart(2,'0'); const st = b[k+3];
+    if(!(st & 0x0D)) continue; // weder aktiv noch bestätigt noch ausstehend → historisch, nicht anzeigen
+    if(seen.has(code+ftb)) continue; seen.add(code+ftb);
+    codes.push({ code, ftb, active: !!(st & 0x01), status: st, desc: dtcDescription(code), ftb_text: FTB_TEXT[ftb] || '' });
+  }
+  return { status:'ok', codes };
+}
+// ReadDataByIdentifier (22 xx xx) → ASCII, z. B. F187 Teilenummer, F197 Systembezeichnung
+function parseUdsAscii(raw, did){
+  const lines = elmClean(raw); if(elmNoData(lines)) return '';
+  const all = elmMessages(lines).join(''); const i = all.indexOf('62'+did); if(i<0) return '';
+  return (all.slice(i+6).match(/../g)||[]).map(h=>parseInt(h,16)).filter(c=>c>=32 && c<127).map(c=>String.fromCharCode(c)).join('').trim().slice(0,40);
+}
+
 /* --- Antwort-Parser (gleich für echten Adapter und Simulation) --- */
 function elmClean(raw){
   return String(raw||'').replace(/>/g,'').split(/[\r\n]+/).map(l=>l.trim()).filter(l=>l && !/^(SEARCHING\.*|BUS INIT:?.*|STOPPED|OK)$/i.test(l));
@@ -5673,6 +5741,18 @@ class ElmBle {
   disconnect(){ try{ this.device && this.device.gatt.connected && this.device.gatt.disconnect(); }catch(_){} }
 }
 /* --- Simulation: antwortet wie ein ELM327 an einem CAN-Fahrzeug (Benziner) --- */
+// Simulierte Steuergeräte eines Golf 7: DTC (3 Byte) + Status (09 = aktiv, 08 = sporadisch)
+const SIM_VAG = {
+  '7E0': { part:'04E906016DE', sys:'R4 1.4l TFSI' },
+  '7E1': { part:'0CW300049H', sys:'DQ200-MQB' },
+  '713': { part:'5Q0907379BA', sys:'ESC', dtcs:['40352909'], slow:true },
+  '715': { part:'5Q0959655AB', sys:'Airbag VW8', dtcs:['80011D08'] },
+  '714': { part:'5G1920741A', sys:'KOMBI', dtcs:[] },
+  '710': { part:'5Q0907530AA', sys:'GW MQB High', dtcs:['C1210008'] },
+  '70E': { part:'5Q0937084BD', sys:'BCM MQB', dtcs:[] },
+  '712': { part:'5Q0909144R', sys:'EPS_ZFLS Kl.', dtcs:[] },
+  '746': { part:'5G0907044BT', sys:'CLIMA', dtcs:['90AB7109'] },
+};
 const SIM_SUPPORTED = ['01','03','04','05','06','07','0B','0C','0D','0E','0F','10','11','13','1C','20','21','2F','30','31','40','42','46','5C'];
 class ElmSim {
   constructor(vin){ this.name='Simulation'; this.sim=true; this.codes=['0420','0171']; this.pending=['C100']; this.mil=true; this.t0=Date.now(); this.vin=vin;
@@ -5710,7 +5790,21 @@ class ElmSim {
     if(c==='ATRV') return (this.cranked ? (14.0+Math.sin(sec)*0.15) : 12.6).toFixed(1)+'V\r\r>';
     if(c==='ATDPN') return 'A6\r\r>';
     if(c==='ATDP') return 'AUTO, ISO 15765-4 (CAN 11/500)\r\r>';
+    if(c.startsWith('ATSH')) this.hdr = c.slice(4);
     if(c.startsWith('AT')) return 'OK\r\r>';
+    // UDS an einzelne Steuergeräte (VW-Konzern): Fehlerspeicher 19 02, Kennung 22 F187/F197
+    if(this.hdr && this.hdr!=='7DF' && /^(19|22)/.test(c)){
+      const ecu = SIM_VAG[this.hdr];
+      if(!ecu) return 'NO DATA\r\r>';
+      if(c==='22F187') return '62F187'+[...ecu.part].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c==='22F197') return '62F197'+[...ecu.sys].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c.startsWith('1902')){
+        if(ecu.slow && !this['_slow'+this.hdr]){ this['_slow'+this.hdr]=1; return '7F1978\r\r>'; }
+        const list = this.hdr==='7E0' ? this.codes.map(x=>x+'0009') : (ecu.dtcs || []);
+        return '5902FF'+list.join('')+'\r\r>';
+      }
+      return '7F'+c.slice(0,2)+'11\r\r>';
+    }
     if(/^01(00|20|40)$/.test(c)){
       const base = parseInt(c.slice(2),16); const bytes=[0,0,0,0];
       SIM_SUPPORTED.forEach(p=>{ const i=parseInt(p,16)-base-1; if(i>=0 && i<32) bytes[i>>3] |= 0x80>>(i&7); });
@@ -5748,7 +5842,7 @@ class ElmSim {
 /* --- Zustand & Ablauf --- */
 var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false };
 function diagOrder(){ return diag.orderId ? orders.find(o=>o.id===diag.orderId) || null : null; }
-function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false, readiness:null, freeze:null, sinceClear:null, tasks:{} }); }
+function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false, readiness:null, freeze:null, sinceClear:null, tasks:{}, ecus:null, ecuScanAt:null }); }
 function diagOnDisconnect(){
   if(!diag.conn || diag.conn.sim) return;
   diagStopLive(); diag.conn = null; diag.error = 'Verbindung zum Adapter getrennt.'; rerenderDiagPanel();
@@ -5830,6 +5924,39 @@ async function diagReadFreeze(){
   }
   return { code, values };
 }
+/* Steuergeräte-Scan VW-Konzern: jedes Steuergerät einzeln per UDS ansprechen, danach Adapter zurück auf OBD-Standard */
+async function diagScanVag(){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  if(diag.isCan===false){ diag.error = 'Der Steuergeräte-Scan geht nur bei CAN-Fahrzeugen (VW-Konzern etwa ab Golf 5 / 2004, vollständig ab ca. 2012).'; rerenderDiagPanel(); return; }
+  const r = diagRes(o); diagStopLive();
+  diag.busy='scan'; diag.error=''; r.ecus = []; r.saved = false; rerenderDiagPanel();
+  const send = (c,t)=>diag.conn.send(c, t||2000);
+  const hex = n=>n.toString(16).toUpperCase();
+  try{
+    for(const c of ['ATCAF1','ATH0','ATS0']) await send(c);
+    for(let i=0;i<VAG_ECUS.length;i++){
+      const ecu = VAG_ECUS[i]; const tx = hex(ecu.tx), rx = hex(ecu.rx || ecu.tx+0x6A);
+      diag.scanStep = `${i+1}/${VAG_ECUS.length} · ${ecu.name}`; rerenderDiagPanel();
+      for(const c of ['ATSH'+tx, 'ATCRA'+rx, 'ATFCSH'+tx, 'ATFCSD300000', 'ATFCSM1']) await send(c);
+      let res = parseUdsDtcs(await send('1902FF', 5000));
+      if(res.status==='pending'){ await new Promise(z=>setTimeout(z, 900)); res = parseUdsDtcs(await send('1902FF', 8000)); }
+      if(res.status==='pending') res = { status:'neg', nrc:'78' };
+      const e = { id:ecu.id, name:ecu.name, addr:tx, status:res.status, nrc:res.nrc||'', codes:res.codes||[], part:'', sys:'' };
+      if(res.status!=='nodata'){
+        e.part = parseUdsAscii(await send('22F187', 3000), 'F187');
+        e.sys = parseUdsAscii(await send('22F197', 3000), 'F197');
+      }
+      r.ecus.push(e);
+    }
+    r.ecuScanAt = new Date().toISOString();
+  }catch(err){ diag.error = 'Scan abgebrochen: ' + (err && err.message || err); }
+  // Adapter zurück auf OBD-Standard (Funktionsadresse 7DF, kein Filter, Standard-Flusskontrolle)
+  try{ for(const c of ['ATCRA','ATFCSM0','ATSH7DF']) await send(c); }catch(_){}
+  diag.busy=''; diag.scanStep='';
+  const n = (r.ecus||[]).reduce((s,e)=>s+e.codes.length,0), found = (r.ecus||[]).filter(e=>e.status!=='nodata').length;
+  if(r.ecus && r.ecus.length) showUpdateToast(`${found} Steuergeräte gefunden · ${n} Fehlereinträge`);
+  rerenderDiagPanel();
+}
 async function diagLiveTick(){
   const o = diagOrder(); if(!diag.conn || !diag.liveOn) return;
   const r = diagRes(o);
@@ -5873,6 +6000,7 @@ async function diagSave(extra){
   const res = await tabletRequest('diagnosis_save', {
     order_id:o.id, codes, vin:r.vin, live:r.live, simulated: !!(diag.conn && diag.conn.sim), cleared: !!(extra && extra.cleared),
     readiness: r.readiness, freeze: r.freeze, since_clear: r.sinceClear,
+    ecus: r.ecus ? r.ecus.filter(e=>e.status!=='nodata').map(e=>({ id:e.id, name:e.name, part:e.part, sys:e.sys, status:e.status, codes:e.codes.map(x=>({ code:x.code, ftb:x.ftb, active:x.active, desc:x.desc, ftb_text:x.ftb_text })) })) : null,
     adapter: diag.conn ? diag.conn.name : '', protocol: diag.protocol, remark: r.remark, share: !!r.share && !(extra && extra.cleared),
   }, 20000);
   diag.busy='';
@@ -5894,6 +6022,12 @@ async function loadDiagHistory(o){
 function diagAskAlex(code){
   const o = diagOrder();
   const r = diagRes(o); const c = (r.codes||[]).find(x=>x.code===code);
+  if(code.includes(':')){
+    const [eid, dc, ftb] = code.split(':'); const e = (r.ecus||[]).find(x=>x.id===eid); const x = e && e.codes.find(y=>y.code===dc && y.ftb===ftb);
+    openAlexPanel(o ? o.id : null);
+    aiAsk(`Fehler ${dc}${x && x.ftb_text ? ' ('+x.ftb_text+')' : ''} im Steuergerät ${e ? e.id+' '+e.name : ''} bei ${(o && o.vehicle)||'einem Fahrzeug aus dem VW-Konzern'}: Was sind die häufigsten Ursachen und in welcher Reihenfolge sollte ich prüfen?`);
+    return;
+  }
   openAlexPanel(o ? o.id : null);
   aiAsk(`Fehlercode ${code}${c ? ` (${c.desc}, ${DTC_TYPE_LABEL[c.type]})` : ''} bei ${(o && o.vehicle)||'diesem Fahrzeug'}${o && o.motor && o.motor!=='–' ? ', '+o.motor : ''}: Was sind die häufigsten Ursachen und in welcher Reihenfolge sollte ich prüfen?`);
 }
@@ -5966,8 +6100,42 @@ function renderDiagPanel(o){
     ${diag.error && !noBt ? `<div class="alex-warn">${iconWarn} ${escHtml(diag.error)}</div>` : ''}
     ${live}
     ${result}
+    ${renderDiagEcus(o, r)}
     ${histHtml}
   </div>`;
+}
+function renderDiagEcus(o, r){
+  const c = diag.conn; const sim = c && c.sim;
+  const vag = isVagVehicle(o, r.vin);
+  const scanning = diag.busy==='scan';
+  if(!c && !r.ecus) return '';
+  let head = `<div class="dg-head"><b>Alle Steuergeräte (VW-Konzern)</b><span>${r.ecuScanAt ? 'gescannt ' + escHtml(fmtSavedAt(r.ecuScanAt)) : 'VW · Audi · Skoda · Seat/Cupra'}</span></div>`;
+  let body = '';
+  if(scanning) body = `<div class="dg-scan-run"><span class="dg-spin"></span>Scanne ${escHtml(diag.scanStep||'')}</div>`;
+  else if(!r.ecus) body = `<div class="dg-scan-intro">${vag ? '' : '<div class="alex-muted">Fahrzeug nicht eindeutig als VW-Konzern erkannt – der Scan funktioniert nur bei VW, Audi, Skoda, Seat/Cupra.</div>'}
+      <span>Liest ABS/ESP, Airbag, Kombiinstrument, Gateway, Zentralelektrik, Lenkung, Klima u. a. einzeln aus. Dauer ca. 20–40 Sekunden, Zündung an.</span></div>`;
+  if(r.ecus && r.ecus.length){
+    const found = r.ecus.filter(e=>e.status!=='nodata');
+    body += `<div class="dg-ecus">${found.map(e=>{
+      const st = e.status==='neg' ? `<span class="dg-ecu-st neg">nicht lesbar${e.nrc ? ' – ' + escHtml(UDS_NRC[e.nrc] || 'Code '+e.nrc) : ''}</span>`
+        : e.codes.length ? `<span class="dg-ecu-st err">${e.codes.length} Fehler</span>` : `<span class="dg-ecu-st ok">${iconCheck} i. O.</span>`;
+      return `<div class="dg-ecu ${e.codes.length?'has':''}">
+        <div class="dg-ecu-h"><span class="dg-ecu-id">${escHtml(e.id)}</span><div><b>${escHtml(e.name)}</b><span>${escHtml([e.sys, e.part].filter(Boolean).join(' · '))}</span></div>${st}</div>
+        ${e.codes.map(x=>{ const key = `${e.id}:${x.code}:${x.ftb}`; return `<div class="dg-row">
+          <span class="dg-code ${x.active?'stored':'pending'}">${x.code}<small>${x.ftb!=='00'?x.ftb:''}</small></span>
+          <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${x.active?'aktiv':'sporadisch'}${x.ftb_text ? ' · ' + escHtml(x.ftb_text) : ''}</span></div>
+          <div class="dg-row-acts">
+            <button class="btn" data-diagalex="${escHtml(key)}">ALEX fragen</button>
+            ${o && !sim ? (r.tasks[key] ? `<span class="dg-task-done">${iconCheck} Aufgabe angelegt</span>` : `<button class="btn" data-diagtask="${escHtml(key)}" ${diag.busy==='task'?'disabled':''}>${iconPlus} Aufgabe</button>`) : ''}
+          </div></div>`; }).join('')}
+      </div>`; }).join('')}</div>
+      <div class="alex-hint">${r.ecus.length - found.length} von ${r.ecus.length} abgefragten Adressen ohne Antwort (nicht verbaut oder ältere Steuergeräte-Generation). Beschreibungen generisch – Herstellerdaten beachten.</div>`;
+  }
+  const btn = c ? `<button class="btn ${r.ecus?'':'primary'}" id="diagScanBtn" ${diag.busy?'disabled':''}>${scanning ? 'Scan läuft…' : r.ecus ? 'Erneut scannen' : 'Steuergeräte scannen'}</button>` : '';
+  // Speichern auch ohne vorheriges Lesen des Motor-Fehlerspeichers (sonst übernimmt das der Block darüber)
+  const save = r.ecus && r.ecus.length && !r.codes && o && !scanning
+    ? (r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert</div>` : `<button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} Am Auftrag speichern</button>`) : '';
+  return `<div class="dg-block dg-ecu-block">${head}${body}<div class="dg-scan-act">${save}${btn}</div></div>`;
 }
 /* Readiness, "seit Löschen", Freeze-Frame */
 function renderDiagExtras(r){
@@ -5994,19 +6162,25 @@ function renderDiagExtras(r){
 }
 async function diagCreateTask(code){
   const o = diagOrder(); if(!o || diag.busy) return;
-  const r = diagRes(o); const c = (r.codes||[]).find(x=>x.code===code); if(!c) return;
+  const r = diagRes(o); let c = (r.codes||[]).find(x=>x.code===code), ecu = null;
+  if(!c && code.includes(':')){
+    const [eid, dc, ftb] = code.split(':'); ecu = (r.ecus||[]).find(e=>e.id===eid);
+    const x = ecu && ecu.codes.find(y=>y.code===dc && y.ftb===ftb);
+    if(x) c = { code:dc, desc: x.desc + (x.ftb_text ? ' – ' + x.ftb_text : ''), type: x.active ? 'stored' : 'pending' };
+  }
+  if(!c) return;
   diag.busy='task'; rerenderDiagPanel();
   const ff = r.freeze && r.freeze.code===code ? Object.entries(r.freeze.values).map(([k,v])=>{ const p = LIVE_PIDS.find(x=>x.key===k); return p ? `${p.label} ${diagFmt(v,p.d)} ${p.unit}` : ''; }).filter(Boolean).join(', ') : '';
   const res = await tabletRequest('task_create', {
     order_id:o.id,
-    title:`Fehler ${code} prüfen – ${c.desc}`.slice(0,120),
-    description:`Aus OBD-Diagnose: ${code} (${DTC_TYPE_LABEL[c.type]}) – ${c.desc}.${ff ? ' Freeze-Frame: '+ff+'.' : ''} Ursache prüfen, Herstellerdaten beachten.`,
+    title:`Fehler ${c.code} prüfen${ecu ? ' ('+ecu.name+')' : ''} – ${c.desc}`.slice(0,120),
+    description:`Aus ${ecu ? 'Steuergeräte-Scan, '+ecu.id+' '+ecu.name+(ecu.part?' ('+ecu.part+')':'') : 'OBD-Diagnose'}: ${c.code} (${ecu ? (c.type==='stored'?'aktiv':'sporadisch') : DTC_TYPE_LABEL[c.type]}) – ${c.desc}.${ff ? ' Freeze-Frame: '+ff+'.' : ''} Ursache prüfen, Herstellerdaten beachten.`,
     estimated_minutes:30,
   }, 15000);
   diag.busy='';
   if(res.ok){
     r.tasks[code] = res.data.task_id;
-    showUpdateToast(`Aufgabe „Fehler ${code} prüfen“ am Auftrag angelegt`);
+    showUpdateToast(`Aufgabe „Fehler ${c.code} prüfen“ am Auftrag angelegt`);
     try{ await loadFromBase44(); }catch(_){}
   } else diag.error = 'Aufgabe konnte nicht angelegt werden: ' + res.reason;
   rerenderDiagPanel();
@@ -6033,6 +6207,7 @@ function diagPrint(){
   ${r.live.mil!==undefined ? `<p>Motorkontrollleuchte: <b>${r.live.mil?'AN':'aus'}</b>${r.live.distance_mil_km ? ` · gefahren mit leuchtender MIL: ${diagFmt(r.live.distance_mil_km)} km` : ''}</p>` : ''}
   ${sc ? `<p>Seit letztem Löschen: ${sc.km!==undefined ? diagFmt(sc.km)+' km' : '–'}${sc.warmups!==undefined ? ', '+sc.warmups+' Warmlaufzyklen' : ''}</p>` : ''}
   ${ff && Object.keys(ff.values).length ? `<h2>Freeze-Frame zu ${e(ff.code)}</h2><table>${LIVE_PIDS.filter(p=>ff.values[p.key]!==undefined).map(p=>`<tr><th>${e(p.label)}</th><td>${diagFmt(ff.values[p.key],p.d)} ${e(p.unit)}</td></tr>`).join('')}</table>` : ''}
+  ${r.ecus && r.ecus.length ? `<h2>Steuergeräte (VW-Konzern)</h2><table>${r.ecus.filter(x=>x.status!=='nodata').map(x=>`<tr><th>${e(x.id)} ${e(x.name)}${x.part ? `<br><small>${e(x.part)}${x.sys?' · '+e(x.sys):''}</small>` : ''}</th><td>${x.status==='neg' ? 'nicht lesbar' : x.codes.length ? x.codes.map(y=>`<span class="code">${e(y.code)}${y.ftb!=='00'?' '+e(y.ftb):''}</span> ${e(y.desc)}${y.ftb_text?' – '+e(y.ftb_text):''} <small>(${y.active?'aktiv':'sporadisch'})</small>`).join('<br>') : '<span class="ok">i. O.</span>'}</td></tr>`).join('')}</table>` : ''}
   ${rd && rd.items.length ? `<h2>AU-Bereitschaft (Readiness)</h2><table>${rd.items.map(x=>`<tr><th>${e(x.label)}</th><td class="${x.ok?'ok':'open'}">${x.ok?'abgeschlossen':'offen'}</td></tr>`).join('')}</table><p>${rd.open ? rd.open+' Prüfung(en) offen.' : 'Alle unterstützten Prüfungen abgeschlossen.'}</p>` : ''}
   ${liveRows ? `<h2>Messwerte</h2><table>${liveRows}</table>` : ''}
   ${r.remark ? `<h2>Bemerkung</h2><p>${e(r.remark).replace(/\n/g,'<br>')}</p>` : ''}
@@ -6075,6 +6250,7 @@ function handleDiagClick(e){
   if(t.closest('#diagClearYes')){ diagClear(); return true; }
   if(t.closest('#diagSaveBtn')){ diagSave(); return true; }
   if(t.closest('#diagPrintBtn')){ diagPrint(); return true; }
+  if(t.closest('#diagScanBtn')){ diagScanVag(); return true; }
   const tk = t.closest('[data-diagtask]'); if(tk){ diagCreateTask(tk.dataset.diagtask); return true; }
   const a = t.closest('[data-diagalex]'); if(a){ diagAskAlex(a.dataset.diagalex); return true; }
   return false;
