@@ -1255,6 +1255,15 @@
   .dg-ff{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;} .dg-ff div{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:8px;background:var(--panel);}
   .dg-ff span{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.3px;} .dg-ff b{font-size:15px;font-variant-numeric:tabular-nums;} .dg-ff i{font-style:normal;font-size:11px;color:var(--text-faint);font-weight:400;}
   .dg-proto{display:flex;justify-content:flex-end;}
+  .bh-week{display:flex;align-items:center;gap:12px;} .bh-week>div{flex:1;display:flex;flex-direction:column;align-items:center;} .bh-week b{font-size:17px;} .bh-week span{font-size:12px;color:var(--text-faint);} .bh-week .btn svg{width:16px;height:16px;}
+  .bh-sum{display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-dim);padding:0 2px;}
+  .bh-days{display:flex;flex-direction:column;gap:8px;}
+  .bh-day{padding:10px 12px;border-radius:12px;background:var(--panel);border:1px solid var(--border);display:flex;flex-direction:column;gap:6px;}
+  .bh-day-h{font-weight:700;font-size:14px;display:flex;justify-content:space-between;} .bh-day-h span{font-weight:500;color:var(--text-faint);font-size:12.5px;}
+  .bh-item{display:grid;grid-template-columns:1fr auto;gap:0 10px;padding:6px 8px;border-radius:8px;background:var(--panel-2);} .bh-item b{font-size:13.5px;font-weight:600;} .bh-item span{grid-column:1;font-size:12px;color:var(--text-faint);} .bh-item em{grid-row:1/3;grid-column:2;align-self:center;font-style:normal;font-size:12.5px;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+  .bh-empty{font-size:12px;color:var(--text-faint);}
+  .bh-tips{display:flex;flex-direction:column;gap:8px;} .bh-tips>div{display:flex;flex-direction:column;gap:3px;padding:12px;border-radius:12px;background:var(--panel);border:1px solid var(--border);} .bh-tips span{font-size:13px;color:var(--text-dim);line-height:1.45;}
+  .bh-menu{grid-template-columns:repeat(3,minmax(0,1fr));}
   .dg-menu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
   @media (min-width:1300px){ .dg-menu{grid-template-columns:repeat(5,minmax(0,1fr));} }
   .dg-tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:20px 18px 18px;border-radius:16px;background:var(--panel);border:1px solid var(--border);color:var(--text);font:inherit;cursor:pointer;min-height:168px;transition:transform .12s, border-color .12s, box-shadow .12s;}
@@ -1576,6 +1585,7 @@
       <div class="sheet-handle"></div>
       <div class="sheet-item" data-mainview="dashboard"><span class="sheet-ic"></span> Dashboard</div>
       <div class="sheet-item" data-mainview="diagnose"><span class="sheet-ic"></span> Diagnose</div>
+      <div class="sheet-item" data-mainview="berichtsheft"><span class="sheet-ic"></span> Berichtsheft</div>
       <div class="sheet-item" data-mainview="dokumente"><span class="sheet-ic"></span> Dokumente</div>
       <div class="sheet-item" data-mainview="einstellungen"><span class="sheet-ic"></span> Einstellungen</div>
       <div class="sheet-item" id="sheetSwitchUser"><span class="sheet-ic">⇄</span> Mitarbeiter wechseln</div>
@@ -2317,6 +2327,8 @@ const iconSupport = svg('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12"
 const iconChevRight = svg('<polyline points="9 18 15 12 9 6"/>');
 const iconChevronsLeft = svg('<polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>');
 const iconArrowLeft = svg('<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>');
+const iconBook = svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/>');
+const iconInfo = svg('<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.6" r=".6"/>');
 const iconBackspace = svg('<path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/>');
 
 const messages = [
@@ -2379,6 +2391,7 @@ function renderChrome(){
     {ic:iconDoc, label:'Dokumente', view:'dokumente'},
     {ic:iconTire, label:'Reifenlager', view:'reifenlager'},
     {ic:iconObd, label:'Diagnose', view:'diagnose'},
+    {ic:iconBook, label:'Berichtsheft', view:'berichtsheft'},
     {ic:iconShield, label:'Team', view:'benutzer', roles:['admin']},
     {ic:iconGrid, label:'Team-Auslastung', view:'auslastung', roles:['meister','serviceberater','admin']},
     {ic:iconSupport, label:'Support', view:'support'},
@@ -2417,14 +2430,14 @@ function renderChrome(){
     {ic:iconMore, label:'Mehr', mehr:true},
   ];
   document.getElementById('bottomNav').innerHTML = bnItems.map(n=>`
-    <div class="bn-item ${n.view&&state.mainView===n.view?'active':''} ${n.mehr&&['dokumente','einstellungen','dashboard','benutzer','diagnose'].includes(state.mainView)?'active':''}" ${n.mehr?'data-mehr="1"':`data-mainview="${n.view}"`}>${n.ic}<span>${n.label}</span>${n.badge&&n.badge!=='0'?`<span class="bn-badge">${n.badge}</span>`:''}</div>
+    <div class="bn-item ${n.view&&state.mainView===n.view?'active':''} ${n.mehr&&['dokumente','einstellungen','dashboard','benutzer','diagnose','berichtsheft'].includes(state.mainView)?'active':''}" ${n.mehr?'data-mehr="1"':`data-mainview="${n.view}"`}>${n.ic}<span>${n.label}</span>${n.badge&&n.badge!=='0'?`<span class="bn-badge">${n.badge}</span>`:''}</div>
   `).join('');
 
   document.getElementById('sheetLogout').querySelector('.sheet-ic').innerHTML = iconLogout;
   const sheetDocs = document.querySelector('#mehrOverlay .sheet-item[data-mainview="dokumente"]');
   if(sheetDocs) sheetDocs.style.display = PILOT_HIDE_DEMO ? 'none' : '';
   document.getElementById('mehrOverlay').querySelectorAll('.sheet-item .sheet-ic').forEach((el,i)=>{
-    const icons = [iconDashboard, iconObd, iconFolder, iconGear];
+    const icons = [iconDashboard, iconObd, iconBook, iconFolder, iconGear];
     if(icons[i]) el.innerHTML = icons[i];
   });
 }
@@ -2473,6 +2486,7 @@ async function setVehiclePhoto(o, file){
 
 /* ---------- Kurze Erklärungen je Bereich (einmal pro Gerät, „Verstanden“ blendet aus) ---------- */
 const HELP_TEXTS = {
+  berichtsheft:{ t:'Dein Berichtsheft.', d:'Hier öffnest du dein Online-Berichtsheft und findest alle Aufgaben, die du diese Woche erledigt hast – als Vorlage zum Eintragen.', li:['„Meine Tätigkeiten“ zeigt deine erledigten Aufgaben pro Tag.','„Woche kopieren“ und in der Lernwelt einfügen.','Berichtsheft regelmäßig führen – dein Ausbilder zeichnet es ab.'] },
   dashboard:{ t:'Dein Tag auf einen Blick.', d:'Erledigte Aufgaben, deine Arbeitszeit und die nächsten Termine.', li:['Die Zahlen aktualisieren sich automatisch alle 30 Sekunden.','Tippe auf einen Termin, um den Auftrag zu öffnen.'] },
   auftraege:{ t:'Deine Aufträge.', d:'Links die Aufträge nach Status, rechts alle Details zum ausgewählten Fahrzeug.', li:['Aufgabe antippen und „Start“ drücken – die Zeit läuft bis „Fertig“ oder „Pause“.','Fotos und Sprachbericht hängst du direkt an die Aufgabe.','„Auftrag abschließen“ geht erst, wenn die Checkliste komplett ist – danach wird der Kunde automatisch informiert.'], tip:'Tipp: Unten rechts findest du Schnellnotizen und ALEX für Technikfragen.' },
   alle:{ t:'Alle Aufträge der Werkstatt.', d:'Status und Fortschritt jedes Fahrzeugs, das gerade in der Werkstatt ist.', li:['Tippe auf eine Zeile, um den Auftrag zu öffnen.'] },
@@ -2688,6 +2702,7 @@ function renderOtherView(view){
   if(view==='dokumente') return renderDokumenteView(ov);
   if(view==='reifenlager') return renderReifenlagerView(ov);
   if(view==='diagnose') return renderDiagnoseView(ov);
+  if(view==='berichtsheft') return renderBerichtsheftView(ov);
   if(view==='benutzer') return renderBenutzerView(ov);
   if(view==='auslastung') return renderAuslastungView(ov);
   if(view==='support') return renderSupportView(ov);
@@ -6354,7 +6369,6 @@ function renderDiagLive(L){
   return html;
 }
 /* ===== Tester-Hauptmenü: Kacheln → eigenes Fenster je Funktion ===== */
-const iconInfo = svg('<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.6" r=".6"/>');
 const dgIc = {
   codes: iconWarn, clear: iconTrash, history: iconClock, report: iconDoc, info: iconCar,
   scan: svg('<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>'),
@@ -6653,6 +6667,112 @@ function diagPrint(){
   w.document.open(); w.document.write(html); w.document.close();
 }
 function rerenderDiagPanel(){ if(state.mainView!=='diagnose') return; const el = document.getElementById('diagPanel'); if(el) el.innerHTML = renderDiagPanel(diagOrder()); }
+/* ===== Berichtsheft (Azubis): Hauptmenü → Lernwelt (Vogel) / Tätigkeiten der Woche / Tipps ===== */
+const BERICHTSHEFT_URL = 'https://app.lernwelt.vogel.de/';   // leitet selbst zur Anmeldung (SSO) weiter
+var bh = { screen:'menu', weekOffset:0 };
+function bhWeek(offset){
+  const now = new Date(); const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7) + offset*7);
+  const sun = new Date(mon); sun.setDate(mon.getDate()+6); sun.setHours(23,59,59,999);
+  // ISO-Kalenderwoche
+  const t = new Date(Date.UTC(mon.getFullYear(), mon.getMonth(), mon.getDate()+3)); const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,4));
+  const kw = 1 + Math.round(((t - y0)/864e5 - 3 + ((y0.getUTCDay()+6)%7))/7);
+  return { mon, sun, kw };
+}
+function bhMs(x){ const v = String(x||''); return Date.parse(/Z|[+-]\d\d:?\d\d$/.test(v) ? v : v + 'Z') || 0; }
+// Erledigte Aufgaben des angemeldeten Mitarbeiters in der Woche, mit gebuchter Zeit (sonst Vorgabezeit)
+function bhActivities(offset){
+  const me = state.currentUser ? state.currentUser.name : ''; const data = state.base44Data || {};
+  const { mon, sun, kw } = bhWeek(offset);
+  const tasks = (data.tasks||[]).filter(t=>t.status==='erledigt' && t.completed_by===me && t.completed_date);
+  const wts = (data.worktimes||[]).filter(w=>w.employee_name===me);
+  const ordersById = Object.fromEntries((data.orders||[]).map(o=>[o.id,o]));
+  const days = [0,1,2,3,4,5].map(i=>{ const d = new Date(mon); d.setDate(mon.getDate()+i); return { date:d, items:[] }; });
+  tasks.forEach(t=>{
+    const at = new Date(bhMs(t.completed_date)); if(at < mon || at > sun) return;
+    const day = days[(at.getDay()+6)%7]; if(!day) return;
+    const o = ordersById[t.order_id] || {};
+    const booked = wts.filter(w=>w.task_id===t.id).reduce((s,w)=>s+(Number(w.duration_minutes)||0),0);
+    day.items.push({ title:t.title || 'Aufgabe', vehicle:[o.vehicle_brand, o.vehicle_model].filter(Boolean).join(' '), minutes: booked || Number(t.estimated_minutes) || 0, booked: !!booked, at });
+  });
+  days.forEach(d=>d.items.sort((a,b)=>a.at-b.at));
+  return { days: days.filter((d,i)=>i<5 || d.items.length), kw, mon, sun, me };
+}
+function bhText(w){
+  const f = d=>d.toLocaleDateString('de-DE',{weekday:'long', day:'2-digit', month:'2-digit'});
+  const lines = [`Betriebliche Tätigkeiten – KW ${w.kw} (${w.mon.toLocaleDateString('de-DE')} bis ${w.sun.toLocaleDateString('de-DE')})`, ''];
+  w.days.forEach(d=>{
+    lines.push(f(d.date) + ':');
+    if(!d.items.length) lines.push('- ');
+    d.items.forEach(x=>lines.push(`- ${x.title}${x.vehicle ? ' (' + x.vehicle + ')' : ''}${x.minutes ? ', ' + minutesToLabel(x.minutes) : ''}`));
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+}
+async function bhCopy(){
+  const txt = bhText(bhActivities(bh.weekOffset));
+  let ok = false;
+  try{ await navigator.clipboard.writeText(txt); ok = true; }catch(_){
+    try{ const ta = document.createElement('textarea'); ta.value = txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); }catch(__){}
+  }
+  showUpdateToast(ok ? 'Woche kopiert – jetzt in der Lernwelt einfügen' : 'Kopieren nicht möglich – Text bitte markieren und kopieren');
+}
+function bhOpen(){
+  const w = window.open(BERICHTSHEFT_URL, '_blank', 'noopener');
+  if(!w) location.href = BERICHTSHEFT_URL;
+}
+function renderBerichtsheftView(ov){
+  const head = `<div class="ov-head"><div><h1>Berichtsheft</h1><div class="sub">Ausbildungsnachweis führen – mit deinen Tätigkeiten aus AutoLeitwerk</div></div></div>`;
+  const back = (t, ic)=>`<div class="dg-screen-h"><button class="btn" data-bh="menu">${iconArrowLeft} Hauptmenü</button><span class="dg-screen-ic">${ic}</span><b>${t}</b></div>`;
+  let body = '';
+  if(bh.screen==='woche'){
+    const w = bhActivities(bh.weekOffset);
+    const total = w.days.reduce((s,d)=>s+d.items.reduce((a,x)=>a+x.minutes,0),0);
+    const n = w.days.reduce((s,d)=>s+d.items.length,0);
+    body = `${back('Meine Tätigkeiten', iconTasks)}
+      <div class="bh-week">
+        <button class="btn" data-bhweek="-1">${iconArrowLeft}</button>
+        <div><b>KW ${w.kw}</b><span>${w.mon.toLocaleDateString('de-DE')} – ${w.sun.toLocaleDateString('de-DE')}</span></div>
+        <button class="btn" data-bhweek="1" ${bh.weekOffset>=0?'disabled':''} style="transform:scaleX(-1)">${iconArrowLeft}</button>
+      </div>
+      <div class="bh-sum"><span>${n} erledigte Aufgaben</span><span>${total ? minutesToLabel(total) + ' gebucht/geplant' : ''}</span></div>
+      <div class="bh-days">${w.days.map(d=>`<div class="bh-day">
+          <div class="bh-day-h">${d.date.toLocaleDateString('de-DE',{weekday:'long'})}<span>${d.date.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})}</span></div>
+          ${d.items.length ? d.items.map(x=>`<div class="bh-item"><b>${escHtml(x.title)}</b><span>${escHtml(x.vehicle||'')}</span><em>${x.minutes ? minutesToLabel(x.minutes) : ''}</em></div>`).join('') : '<div class="bh-empty">keine erledigten Aufgaben – z. B. Berufsschule, Unterweisung oder Werkstattpflege selbst eintragen</div>'}
+        </div>`).join('')}</div>
+      <div class="dg-bar"><button class="btn primary" id="bhCopyBtn">${iconDoc} Woche kopieren</button><button class="btn" id="bhOpenBtn">${iconBook} Berichtsheft öffnen</button></div>
+      <div class="alex-hint">Grundlage sind die Aufgaben, die du am Tablet als erledigt markiert hast${w.me ? ' (als ' + escHtml(w.me) + ')' : ''}. Zeiten: gebuchte Arbeitszeit, sonst Vorgabezeit. Bitte vor dem Eintragen prüfen und ergänzen.</div>`;
+  } else if(bh.screen==='tipps'){
+    body = `${back('So schreibst du dein Berichtsheft', iconInfo)}
+      <div class="bh-tips">
+        <div><b>Regelmäßig</b><span>Am besten jede Woche – nachträglich wird es ungenau. Das Berichtsheft ist Voraussetzung für die Zulassung zur Gesellenprüfung.</span></div>
+        <div><b>Was gehört rein?</b><span>Betriebliche Tätigkeiten (was hast du an welchem Fahrzeug gemacht), Unterweisungen und Schulungen, Berufsschulthemen.</span></div>
+        <div><b>Konkret statt allgemein</b><span>Statt „Werkstatt“ lieber „Bremsbeläge und -scheiben VA erneuert, Bremsflüssigkeit gewechselt“.</span></div>
+        <div><b>Abzeichnen lassen</b><span>Dein Ausbilder prüft und zeichnet das Berichtsheft regelmäßig ab.</span></div>
+      </div>`;
+  } else {
+    const tiles = [
+      ['open', iconBook, 'Berichtsheft öffnen', 'Online-Berichtsheft in der Vogel Lernwelt – Anmeldung mit deinen Lernwelt-Zugangsdaten'],
+      ['woche', iconTasks, 'Meine Tätigkeiten', 'Deine erledigten Aufgaben der Woche als Vorlage zum Eintragen'],
+      ['tipps', iconInfo, 'So schreibst du es', 'Was ins Berichtsheft gehört und worauf der Ausbilder achtet'],
+    ];
+    const n = bhActivities(0).days.reduce((s,d)=>s+d.items.length,0);
+    body = `<div class="dg-menu bh-menu">${tiles.map(([k,ic,t,d])=>`<button class="dg-tile" data-bh="${k}">
+        <span class="dg-tile-ic">${ic}</span><span class="dg-tile-t">${t}</span><span class="dg-tile-d">${d}</span>
+        ${k==='woche' && n ? `<span class="dg-tile-b ok">${n} diese Woche</span>` : ''}${k==='open' ? '<span class="dg-tile-b">extern ↗</span>' : ''}
+      </button>`).join('')}</div>
+      <div class="alex-hint">Das Berichtsheft öffnet sich in einem eigenen Fenster (die Lernwelt erlaubt aus Sicherheitsgründen keine Anzeige innerhalb anderer Apps). Zurück zu AutoLeitwerk: Fenster schließen bzw. „Fertig“ tippen.</div>`;
+  }
+  ov.innerHTML = head + `<div class="dg-view">${body}</div>`;
+}
+document.addEventListener('click', (e)=>{
+  if(state.mainView!=='berichtsheft') return;
+  const t = e.target;
+  const b = t.closest('[data-bh]'); if(b){ if(b.dataset.bh==='open'){ bhOpen(); return; } bh.screen = b.dataset.bh; renderBerichtsheftView(document.getElementById('otherView')); return; }
+  const wk = t.closest('[data-bhweek]'); if(wk){ bh.weekOffset = Math.min(0, bh.weekOffset + Number(wk.dataset.bhweek)); renderBerichtsheftView(document.getElementById('otherView')); return; }
+  if(t.closest('#bhCopyBtn')){ bhCopy(); return; }
+  if(t.closest('#bhOpenBtn')){ bhOpen(); return; }
+});
 function renderDiagnoseView(ov){
   if(diag.orderId && !orders.some(o=>o.id===diag.orderId)) diag.orderId = null;
   const open = orders.filter(o=>o.status!=='erledigt');
