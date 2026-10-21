@@ -1228,6 +1228,7 @@
   .dg-steps{font-size:12.5px;color:var(--text-faint);line-height:1.5;} .dg-steps b{color:var(--text);}
   .dg-conn{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--panel-2);border:1px solid rgba(34,197,94,.35);}
   .dg-conn.sim{border-color:rgba(245,158,11,.45);} .dg-conn>div{flex:1;min-width:0;} .dg-conn b{display:block;font-size:13.5px;} .dg-conn span{font-size:11.5px;color:var(--text-faint);}
+  .dg-ic-btn{padding:6px 8px;} .dg-ic-btn svg{width:16px;height:16px;}
   .dg-dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(34,197,94,.18);flex-shrink:0;} .dg-conn.sim .dg-dot{background:var(--warn);box-shadow:0 0 0 4px rgba(245,158,11,.18);}
   .dg-confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12.5px;color:var(--danger-text);}
   .dg-live{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;}
@@ -1254,14 +1255,14 @@
   .dg-ff{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;} .dg-ff div{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:8px;background:var(--panel);}
   .dg-ff span{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.3px;} .dg-ff b{font-size:15px;font-variant-numeric:tabular-nums;} .dg-ff i{font-style:normal;font-size:11px;color:var(--text-faint);font-weight:400;}
   .dg-proto{display:flex;justify-content:flex-end;}
-  .dg-menu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  .dg-menu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
   @media (min-width:1300px){ .dg-menu{grid-template-columns:repeat(5,minmax(0,1fr));} }
-  .dg-tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:14px 14px 12px;border-radius:14px;background:var(--panel);border:1px solid var(--border);color:var(--text);font:inherit;cursor:pointer;min-height:118px;transition:transform .12s, border-color .12s, box-shadow .12s;}
+  .dg-tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:20px 18px 18px;border-radius:16px;background:var(--panel);border:1px solid var(--border);color:var(--text);font:inherit;cursor:pointer;min-height:168px;transition:transform .12s, border-color .12s, box-shadow .12s;}
   .dg-tile:hover:not(.off){border-color:var(--accent);box-shadow:0 4px 16px rgba(124,58,237,.12);} .dg-tile:active:not(.off){transform:scale(.98);}
   .dg-tile.off{opacity:.45;cursor:not-allowed;}
-  .dg-tile-ic{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:var(--accent-soft,rgba(124,58,237,.12));color:var(--accent);margin-bottom:4px;} .dg-tile-ic svg{width:21px;height:21px;}
-  .dg-tile-t{font-weight:700;font-size:14.5px;} .dg-tile-d{font-size:12px;color:var(--text-faint);line-height:1.35;}
-  .dg-tile-b{position:absolute;top:12px;right:12px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:var(--panel-2);color:var(--text-dim);}
+  .dg-tile-ic{width:50px;height:50px;border-radius:13px;display:grid;place-items:center;background:var(--accent-soft,rgba(124,58,237,.12));color:var(--accent);margin-bottom:4px;} .dg-tile-ic svg{width:26px;height:26px;}
+  .dg-tile-t{font-weight:700;font-size:16.5px;} .dg-tile-d{font-size:13px;color:var(--text-faint);line-height:1.35;}
+  .dg-tile-b{position:absolute;top:14px;right:14px;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;background:var(--panel-2);color:var(--text-dim);}
   .dg-tile-b.ok{background:rgba(34,197,94,.14);color:#16a34a;} .dg-tile-b.err{background:rgba(239,68,68,.14);color:#dc2626;} .dg-tile-b.warn{background:rgba(245,158,11,.16);color:#d97706;}
   .dg-screen-h{display:flex;align-items:center;gap:10px;padding-bottom:2px;} .dg-screen-h b{font-size:17px;} .dg-screen-h .btn svg{width:16px;height:16px;}
   .dg-screen-ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--accent-soft,rgba(124,58,237,.12));color:var(--accent);} .dg-screen-ic svg{width:17px;height:17px;}
@@ -1294,7 +1295,7 @@
   .dg-hist{display:flex;flex-direction:column;gap:4px;font-size:12px;} .dg-hist>b{font-size:12.5px;margin-bottom:2px;}
   .dg-hist-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border);color:var(--text-faint);} .dg-hist-row span:last-child{color:var(--text);text-align:right;}
   .dg-simtag{font-style:normal;font-size:10.5px;padding:1px 6px;border-radius:6px;background:rgba(245,158,11,.15);color:var(--warning-text);}
-  @media (max-width:760px){ .dg-menu{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-tile{min-height:104px;padding:12px;} .dg-tile-b{top:8px;right:8px;font-size:10px;padding:2px 6px;} .dg-tile-d{display:none;} .dg-bat{flex-wrap:wrap;} .dg-bat-v{align-items:flex-start;} .dg-live{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-row{flex-wrap:wrap;} .dg-rd{grid-template-columns:1fr;} .dg-ff{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (max-width:760px){ .dg-menu{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-tile{min-height:132px;padding:14px;} .dg-tile-ic{width:42px;height:42px;} .dg-tile-t{font-size:15px;} .dg-tile-b{top:8px;right:8px;font-size:10px;padding:2px 6px;} .dg-tile-d{display:none;} .dg-bat{flex-wrap:wrap;} .dg-bat-v{align-items:flex-start;} .dg-live{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-row{flex-wrap:wrap;} .dg-rd{grid-template-columns:1fr;} .dg-ff{grid-template-columns:repeat(2,minmax(0,1fr));} }
   .ts-intro{display:flex;gap:10px;align-items:flex-start;} .ts-intro svg{width:22px;height:22px;flex-shrink:0;color:var(--accent);} .ts-intro b{display:block;} .ts-intro span{font-size:12.5px;color:var(--text-faint);}
   .ts-slots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
   .ts-slot{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:var(--panel-2);border:1px dashed var(--border);}
@@ -6050,6 +6051,8 @@ class ElmSim {
 
 /* --- Zustand & Ablauf --- */
 var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false, openInfo:{}, screen:'menu' };
+diag.simQuiet = (()=>{ try{ return localStorage.getItem('autoleitwerk.diagSimQuiet')==='1'; }catch(_){ return false; } })();
+function diagSetSimQuiet(on){ diag.simQuiet = on; try{ localStorage.setItem('autoleitwerk.diagSimQuiet', on ? '1' : '0'); }catch(_){} rerenderDiagPanel(); }
 function diagOrder(){ return diag.orderId ? orders.find(o=>o.id===diag.orderId) || null : null; }
 function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false, readiness:null, freeze:null, sinceClear:null, tasks:{}, ecus:null, ecuScanAt:null, info:null, battery:null, clearedAt:null }); }
 function diagOnDisconnect(){
@@ -6079,7 +6082,7 @@ async function diagConnect(sim){
     if(sup.includes('20')){ const s2 = parseSupported(await conn.send('0120', 6000), '20'); sup.push(...s2); if(s2.includes('40')) sup.push(...parseSupported(await conn.send('0140', 6000), '40')); }
     diag.supported = sup.length ? new Set(sup) : null;
     diag.conn = conn;
-    showUpdateToast(sim ? 'Simulation gestartet' : `Verbunden mit ${conn.name}`);
+    showUpdateToast(sim ? (diag.simQuiet ? 'Fahrzeug verbunden' : 'Simulation gestartet') : `Verbunden mit ${conn.name}`);
   }catch(err){
     const m = String(err && err.message || err);
     diag.error = m==='nobt' ? 'nobt'
@@ -6351,6 +6354,7 @@ function renderDiagLive(L){
   return html;
 }
 /* ===== Tester-Hauptmenü: Kacheln → eigenes Fenster je Funktion ===== */
+const iconInfo = svg('<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.6" r=".6"/>');
 const dgIc = {
   codes: iconWarn, clear: iconTrash, history: iconClock, report: iconDoc, info: iconCar,
   scan: svg('<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>'),
@@ -6405,7 +6409,9 @@ function renderDiagConn(){
     </div>
     <div class="dg-steps"><b>So geht's:</b> Adapter in die OBD-Buchse (meist unter dem Lenkrad) stecken · Zündung an · „Fahrzeug verbinden“ tippen und den Adapter in der Liste wählen.</div>
     ${noBt ? `<div class="alex-warn">${iconWarn} <span>Dieser Browser kann kein Bluetooth. Auf dem iPad das Tablet in der kostenlosen App <b>„Bluefy – Web BLE Browser“</b> öffnen (gleiche Adresse, gleiche Anmeldung). Die Simulation funktioniert auch hier.</span></div>` : ''}`;
-  return `<div class="dg-conn ${c.sim?'sim':''}"><span class="dg-dot"></span><div><b>${escHtml(c.sim ? 'Simulationsmodus' : c.name)}</b><span>${escHtml(c.sim ? 'Keine echten Fahrzeugdaten – nur zum Üben und Vorführen' : (diag.protocol || 'verbunden'))}</span></div><button class="btn" id="diagDisconnectBtn">Trennen</button></div>`;
+  // Vorführmodus: Simulationshinweis ausgeblendet → Leiste wie eine normale Verbindung (das Protokoll bleibt als Simulation gekennzeichnet)
+  if(c.sim && diag.simQuiet) return `<div class="dg-conn"><span class="dg-dot"></span><div><b>Fahrzeug verbunden</b><span>${escHtml(diag.protocol || 'verbunden')}</span></div><button class="btn dg-ic-btn" id="diagSimShow" title="Simulationshinweis einblenden" aria-label="Simulationshinweis einblenden">${iconInfo}</button><button class="btn" id="diagDisconnectBtn">Trennen</button></div>`;
+  return `<div class="dg-conn ${c.sim?'sim':''}"><span class="dg-dot"></span><div><b>${escHtml(c.sim ? 'Simulationsmodus' : c.name)}</b><span>${escHtml(c.sim ? 'Keine echten Fahrzeugdaten – nur zum Üben und Vorführen' : (diag.protocol || 'verbunden'))}</span></div>${c.sim ? `<button class="btn" id="diagSimHide">Hinweis ausblenden</button>` : ''}<button class="btn" id="diagDisconnectBtn">Trennen</button></div>`;
 }
 function renderDiagCodeList(o, r){
   const sim = diag.conn && diag.conn.sim;
@@ -6443,7 +6449,7 @@ function renderDiagScreen(o, r){
         ${renderDiagExtras(r, ['sc'])}
         <div class="dg-links">${r.freeze ? `<button class="btn" data-diagscreen="freeze">${dgIc.freeze} Freeze-Frame zu ${escHtml(r.freeze.code)}</button>` : ''}${r.readiness ? `<button class="btn" data-diagscreen="readiness">${dgIc.ready} AU-Bereitschaft${r.readiness.open ? ' ('+r.readiness.open+' offen)' : ''}</button>` : ''}</div>
         ${renderDiagSave(o, r)}
-        <div class="alex-hint">${sim ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>` : ''}`);
+        <div class="alex-hint">${sim && !diag.simQuiet ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>` : ''}`);
     case 'scan': return need(()=>renderDiagEcus(o, r));
     case 'live': return need(()=>`
       <div class="dg-bar"><button class="btn ${diag.liveOn?'':'primary'}" id="diagLiveBtn">${diag.liveOn?'Anhalten':'Starten'}</button><span class="alex-muted">${diag.liveOn ? 'Werte werden laufend aktualisiert' : 'angehalten'}</span></div>
@@ -6679,6 +6685,8 @@ function handleDiagClick(e){
   if(t.closest('#diagSaveBtn')){ diagSave(); return true; }
   if(t.closest('#diagPrintBtn')){ diagPrint(); return true; }
   if(t.closest('#diagScanBtn')){ diagScanVag(); return true; }
+  if(t.closest('#diagSimHide')){ diagSetSimQuiet(true); return true; }
+  if(t.closest('#diagSimShow')){ diagSetSimQuiet(false); return true; }
   const scr = t.closest('[data-diagscreen]'); if(scr){ diagOpenScreen(scr.dataset.diagscreen); return true; }
   const bm = t.closest('[data-batmeasure]'); if(bm){ batMeasure(bm.dataset.batmeasure); return true; }
   if(t.closest('#diagInfoBtn')){ diagReadInfo(); return true; }
