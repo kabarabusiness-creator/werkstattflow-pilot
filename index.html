@@ -1254,6 +1254,30 @@
   .dg-ff{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;} .dg-ff div{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:8px;background:var(--panel);}
   .dg-ff span{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.3px;} .dg-ff b{font-size:15px;font-variant-numeric:tabular-nums;} .dg-ff i{font-style:normal;font-size:11px;color:var(--text-faint);font-weight:400;}
   .dg-proto{display:flex;justify-content:flex-end;}
+  .dg-menu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  .dg-tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:14px 14px 12px;border-radius:14px;background:var(--panel);border:1px solid var(--border);color:var(--text);font:inherit;cursor:pointer;min-height:118px;transition:transform .12s, border-color .12s, box-shadow .12s;}
+  .dg-tile:hover:not(.off){border-color:var(--accent);box-shadow:0 4px 16px rgba(124,58,237,.12);} .dg-tile:active:not(.off){transform:scale(.98);}
+  .dg-tile.off{opacity:.45;cursor:not-allowed;}
+  .dg-tile-ic{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:var(--accent-soft,rgba(124,58,237,.12));color:var(--accent);margin-bottom:4px;} .dg-tile-ic svg{width:21px;height:21px;}
+  .dg-tile-t{font-weight:700;font-size:14.5px;} .dg-tile-d{font-size:12px;color:var(--text-faint);line-height:1.35;}
+  .dg-tile-b{position:absolute;top:12px;right:12px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:var(--panel-2);color:var(--text-dim);}
+  .dg-tile-b.ok{background:rgba(34,197,94,.14);color:#16a34a;} .dg-tile-b.err{background:rgba(239,68,68,.14);color:#dc2626;} .dg-tile-b.warn{background:rgba(245,158,11,.16);color:#d97706;}
+  .dg-screen-h{display:flex;align-items:center;gap:10px;padding-bottom:2px;} .dg-screen-h b{font-size:17px;} .dg-screen-h .btn svg{width:16px;height:16px;}
+  .dg-screen-ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--accent-soft,rgba(124,58,237,.12));color:var(--accent);} .dg-screen-ic svg{width:17px;height:17px;}
+  .dg-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} .dg-bar .btn svg,.dg-links .btn svg,.dg-save-row .btn svg{width:15px;height:15px;}
+  .dg-links{display:flex;gap:8px;flex-wrap:wrap;} .dg-links:empty{display:none;}
+  .dg-save-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .dg-warnbox{display:flex;gap:10px;padding:12px;border-radius:12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);font-size:13px;} .dg-warnbox>svg{width:20px;height:20px;color:#d97706;flex-shrink:0;} .dg-warnbox ul{margin:4px 0 0;padding-left:18px;}
+  .btn.danger{background:#dc2626;color:#fff;border-color:#dc2626;}
+  .dg-sum,.dg-kvs{display:flex;flex-direction:column;gap:1px;border-radius:12px;overflow:hidden;border:1px solid var(--border);}
+  .dg-sum>div,.dg-kv{display:flex;justify-content:space-between;gap:12px;padding:9px 12px;background:var(--panel);font-size:13px;} .dg-sum span,.dg-kv span{color:var(--text-faint);} .dg-sum b,.dg-kv b{text-align:right;font-weight:600;word-break:break-word;}
+  .dg-chips{display:flex;flex-wrap:wrap;gap:6px;} .dg-chips span{font-size:12px;padding:4px 9px;border-radius:999px;background:var(--panel);border:1px solid var(--border);}
+  .dg-bats{display:flex;flex-direction:column;gap:8px;}
+  .dg-bat{display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;background:var(--panel);border:1px solid var(--border);} .dg-bat.ok{border-color:rgba(34,197,94,.5);} .dg-bat.warn{border-color:rgba(245,158,11,.55);} .dg-bat.err{border-color:rgba(239,68,68,.55);}
+  .dg-bat-n{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--panel-2);font-weight:700;flex-shrink:0;}
+  .dg-bat-t{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;} .dg-bat-t span{font-size:12px;color:var(--text-faint);} .dg-bat-t em{font-style:normal;font-size:12.5px;font-weight:600;}
+  .dg-bat.ok .dg-bat-t em{color:#16a34a;} .dg-bat.warn .dg-bat-t em{color:#d97706;} .dg-bat.err .dg-bat-t em{color:#dc2626;}
+  .dg-bat-v{display:flex;flex-direction:column;align-items:flex-end;min-width:96px;} .dg-bat-v b{font-size:20px;font-variant-numeric:tabular-nums;} .dg-bat-v i{font-style:normal;font-size:11px;color:var(--text-faint);}
   .dg-scan-intro{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--text-dim);} .dg-scan-act{display:flex;justify-content:flex-end;gap:8px;align-items:center;flex-wrap:wrap;}
   .dg-scan-run{display:flex;align-items:center;gap:10px;font-size:13px;} .dg-spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:dgspin .8s linear infinite;}
   @keyframes dgspin{to{transform:rotate(360deg);}}
@@ -1269,7 +1293,7 @@
   .dg-hist{display:flex;flex-direction:column;gap:4px;font-size:12px;} .dg-hist>b{font-size:12.5px;margin-bottom:2px;}
   .dg-hist-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border);color:var(--text-faint);} .dg-hist-row span:last-child{color:var(--text);text-align:right;}
   .dg-simtag{font-style:normal;font-size:10.5px;padding:1px 6px;border-radius:6px;background:rgba(245,158,11,.15);color:var(--warning-text);}
-  @media (max-width:760px){ .dg-live{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-row{flex-wrap:wrap;} .dg-rd{grid-template-columns:1fr;} .dg-ff{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (max-width:760px){ .dg-menu{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-tile{min-height:104px;padding:12px;} .dg-tile-b{top:8px;right:8px;font-size:10px;padding:2px 6px;} .dg-tile-d{display:none;} .dg-bat{flex-wrap:wrap;} .dg-bat-v{align-items:flex-start;} .dg-live{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-row{flex-wrap:wrap;} .dg-rd{grid-template-columns:1fr;} .dg-ff{grid-template-columns:repeat(2,minmax(0,1fr));} }
   .ts-intro{display:flex;gap:10px;align-items:flex-start;} .ts-intro svg{width:22px;height:22px;flex-shrink:0;color:var(--accent);} .ts-intro b{display:block;} .ts-intro span{font-size:12.5px;color:var(--text-faint);}
   .ts-slots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
   .ts-slot{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:var(--panel-2);border:1px dashed var(--border);}
@@ -5964,7 +5988,14 @@ class ElmSim {
     const hx = arr=>arr.map(x=>h(x,2)).join('');
     const sec = (Date.now()-this.t0)/1000;
     if(c==='ATZ') return 'ELM327 v1.5\r\r>';
-    if(c==='ATRV') return (this.cranked ? (14.0+Math.sin(sec)*0.15) : 12.6).toFixed(1)+'V\r\r>';
+    if(c==='ATRV'){
+      if(this.simCrankAt){ const t = (Date.now()-this.simCrankAt)/1000;
+        if(t<1.2) return '12.5V\r\r>'; if(t<2.2) return (9.9+Math.random()*0.5).toFixed(1)+'V\r\r>'; this.cranked = true; this.simCrankAt = null; }
+      return (this.cranked ? (14.0+Math.sin(sec)*0.15) : 12.6).toFixed(1)+'V\r\r>';
+    }
+    if(c==='ATI') return 'ELM327 v1.5\r\r>';
+    if(c==='090A') return '490A01'+[...'ECM-EngineControl'].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+    if(c==='0904') return '490401'+[...'04E906016DE 0003'].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
     if(c==='ATDPN') return 'A6\r\r>';
     if(c==='ATDP') return 'AUTO, ISO 15765-4 (CAN 11/500)\r\r>';
     if(c.startsWith('ATSH')) this.hdr = c.slice(4);
@@ -6017,9 +6048,9 @@ class ElmSim {
 }
 
 /* --- Zustand & Ablauf --- */
-var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false, openInfo:{} };
+var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false, openInfo:{}, screen:'menu' };
 function diagOrder(){ return diag.orderId ? orders.find(o=>o.id===diag.orderId) || null : null; }
-function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false, readiness:null, freeze:null, sinceClear:null, tasks:{}, ecus:null, ecuScanAt:null }); }
+function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false, readiness:null, freeze:null, sinceClear:null, tasks:{}, ecus:null, ecuScanAt:null, info:null, battery:null, clearedAt:null }); }
 function diagOnDisconnect(){
   if(!diag.conn || diag.conn.sim) return;
   diagStopLive(); diag.conn = null; diag.error = 'Verbindung zum Adapter getrennt.'; rerenderDiagPanel();
@@ -6106,7 +6137,7 @@ async function diagScanVag(){
   const o = diagOrder(); if(!diag.conn || diag.busy) return;
   if(diag.isCan===false){ diag.error = 'Der Steuergeräte-Scan geht nur bei CAN-Fahrzeugen (VW-Konzern etwa ab Golf 5 / 2004, vollständig ab ca. 2012).'; rerenderDiagPanel(); return; }
   const r = diagRes(o); diagStopLive();
-  diag.busy='scan'; diag.error=''; r.ecus = []; r.saved = false; rerenderDiagPanel();
+  diag.busy='scan'; diag.error=''; r.ecus = []; r.ecusStale = false; r.saved = false; rerenderDiagPanel();
   const send = (c,t)=>diag.conn.send(c, t||2000);
   const hex = n=>n.toString(16).toUpperCase();
   try{
@@ -6133,6 +6164,101 @@ async function diagScanVag(){
   const n = (r.ecus||[]).reduce((s,e)=>s+e.codes.length,0), found = (r.ecus||[]).filter(e=>e.status!=='nodata').length;
   if(r.ecus && r.ecus.length) showUpdateToast(`${found} Steuergeräte gefunden · ${n} Fehlereinträge`);
   rerenderDiagPanel();
+}
+// Mode 09 als Text (0A = Steuergerätename, 04 = Kalibrierungs-ID); erstes Byte nach der PID = Anzahl Datenelemente
+function parseMode09Ascii(raw, pid){
+  const lines = elmClean(raw); if(elmNoData(lines)) return '';
+  const msg = elmMessages(lines).join(''); const i = msg.indexOf('49'+pid); if(i<0) return '';
+  return (msg.slice(i+6).match(/../g)||[]).map(h=>parseInt(h,16)).map(c=>c>=32 && c<127 ? String.fromCharCode(c) : ' ').join('').replace(/\s+/g,' ').trim().slice(0,60);
+}
+async function diagReadInfo(){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  const r = diagRes(o); diag.busy='info'; rerenderDiagPanel();
+  try{
+    const vin = parseVin(await diag.conn.send('0902', 8000)); if(vin) r.vin = vin;
+    const info = { ecu_name: parseMode09Ascii(await diag.conn.send('090A', 6000), '0A'), calid: parseMode09Ascii(await diag.conn.send('0904', 6000), '04') };
+    const v = parseFloat(elmClean(await diag.conn.send('ATRV')).join('')); if(Number.isFinite(v)) r.live.voltage = v;
+    info.adapter_version = elmClean(await diag.conn.send('ATI')).join(' ').slice(0,40);
+    r.info = info;
+  }catch(err){ diag.error = 'Lesen fehlgeschlagen: ' + (err && err.message || err); }
+  diag.busy=''; rerenderDiagPanel();
+}
+function renderDiagInfo(o, r){
+  const i = r.info || {};
+  const row = (k,v,extra)=> `<div class="dg-kv"><span>${k}</span><b>${v ? escHtml(v) : '–'}</b>${extra||''}</div>`;
+  const supported = diag.supported ? LIVE_PIDS.filter(p=>diag.supported.has(p.pid)).map(p=>p.label) : [];
+  const mis = r.vin && o && o.vin && o.vin!=='–' && o.vin.toUpperCase()!==r.vin;
+  return `${diag.busy==='info' ? `<div class="dg-scan-run"><span class="dg-spin"></span>Lese Fahrzeugdaten…</div>` : ''}
+    <div class="dg-kvs">
+      ${row('FIN (Steuergerät)', r.vin, mis ? ' <em class="dg-mis">weicht vom Auftrag ab</em>' : '')}
+      ${row('FIN am Auftrag', o && o.vin !== '–' ? o.vin : '')}
+      ${row('Fahrzeug (Auftrag)', o ? [o.vehicle, o.plate].filter(Boolean).join(' · ') : '')}
+      ${row('Steuergerät', i.ecu_name)}
+      ${row('Kalibrierung / Software', i.calid)}
+      ${row('Protokoll', diag.protocol)}
+      ${row('Adapter', diag.conn ? diag.conn.name + (i.adapter_version ? ' (' + i.adapter_version + ')' : '') : '')}
+      ${row('Bordspannung', r.live.voltage!==undefined ? diagFmt(r.live.voltage,1) + ' V' : '')}
+      ${row('Marke erkannt', isVagVehicle(o, r.vin) ? 'VW-Konzern – Steuergeräte-Scan möglich' : 'Standard-OBD')}
+    </div>
+    ${supported.length ? `<div class="dg-block"><div class="dg-head"><b>Unterstützte Live-Werte</b><span>${supported.length} von ${LIVE_PIDS.length}</span></div><div class="dg-chips">${supported.map(x=>`<span>${escHtml(x)}</span>`).join('')}</div></div>` : ''}
+    ${r.ecus ? `<div class="dg-block"><div class="dg-head"><b>Steuergeräte (aus dem Scan)</b></div><div class="dg-kvs">${r.ecus.filter(e=>e.status!=='nodata').map(e=>row(e.id+' '+e.name, [e.sys, e.part].filter(Boolean).join(' · '))).join('')}</div></div>` : ''}
+    <div class="dg-bar"><button class="btn" id="diagInfoBtn" ${diag.busy?'disabled':''}>Erneut lesen</button></div>`;
+}
+
+/* --- Batterie & Ladesystem: Spannung an der OBD-Buchse (Pin 16) über ATRV --- */
+function batVerdict(kind, v){
+  if(kind==='rest'){
+    if(v>13.2) return ['Motor läuft? Ruhespannung nur bei Motor aus messen', 'warn'];
+    if(v>=12.5) return ['gut geladen', 'ok']; if(v>=12.3) return ['teilentladen – nachladen', 'warn']; return ['schwach/tiefentladen – laden und Batterie testen', 'err'];
+  }
+  if(kind==='crank'){ if(v>=10) return ['gut', 'ok']; if(v>=9.6) return ['grenzwertig', 'warn']; return ['zu tief – Batterie, Anlasser oder Kabel prüfen', 'err']; }
+  if(v<13.2) return ['zu niedrig – Lichtmaschine/Regler/Riemen prüfen (Ausnahme: intelligentes Generatormanagement)', 'err'];
+  if(v<13.6) return ['niedrig – bei Start-Stopp/Generatormanagement teils normal', 'warn'];
+  if(v<=14.9) return ['Lichtmaschine lädt', 'ok']; return ['zu hoch – Regler prüfen', 'err'];
+}
+async function batReadV(){ const v = parseFloat(elmClean(await diag.conn.send('ATRV', 2000)).join('')); return Number.isFinite(v) ? v : null; }
+async function batMeasure(kind){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  const r = diagRes(o); r.battery = r.battery || {};
+  diagStopLive(); diag.busy='bat'; diag.batKind = kind; diag.batNow = null; rerenderDiagPanel();
+  try{
+    if(kind==='crank'){
+      // 15 s so schnell wie möglich messen, tiefsten Wert merken; Ende, wenn Motor läuft (Ladespannung)
+      if(diag.conn.sim) diag.conn.simCrankAt = Date.now();
+      let min = null; const t0 = Date.now(); let ran = false;
+      while(Date.now()-t0 < 15000){
+        const v = await batReadV(); if(v===null) continue;
+        diag.batNow = v; if(min===null || v<min) min = v;
+        const el = document.getElementById('batNow'); if(el) el.textContent = diagFmt(v,1) + ' V';
+        if(min < 11.8 && v > 13.2){ ran = true; break; }
+      }
+      if(min!==null && min < 11.8) r.battery.crank = { kind, v:min, at:new Date().toISOString() };
+      else diag.error = ran ? '' : 'Kein Startvorgang erkannt. „Messen“ tippen und dann innerhalb von 15 Sekunden den Motor starten.';
+    } else {
+      const vals = []; for(let i=0;i<5;i++){ const v = await batReadV(); if(v!==null) vals.push(v); await new Promise(z=>setTimeout(z,250)); }
+      if(vals.length) r.battery[kind] = { kind, v: Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*100)/100, at:new Date().toISOString() };
+    }
+    r.saved = false;
+  }catch(err){ diag.error = 'Messung fehlgeschlagen: ' + (err && err.message || err); }
+  diag.busy=''; diag.batKind=''; rerenderDiagPanel();
+}
+function renderBatTest(r){
+  const b = r.battery || {};
+  const step = (kind, n, title, how)=>{
+    const m = b[kind]; const vd = m ? batVerdict(kind, m.v) : null; const run = diag.busy==='bat' && diag.batKind===kind;
+    return `<div class="dg-bat ${vd ? vd[1] : ''}">
+      <span class="dg-bat-n">${n}</span>
+      <div class="dg-bat-t"><b>${title}</b><span>${how}</span>${vd ? `<em>${escHtml(vd[0])}</em>` : ''}</div>
+      <div class="dg-bat-v">${run ? `<b id="batNow">${kind==='crank' ? 'Jetzt starten!' : '…'}</b>` : m ? `<b>${diagFmt(m.v, kind==='crank'?1:2)} V</b>${kind==='crank'?'<i>tiefster Wert</i>':''}` : '<b>–</b>'}</div>
+      <button class="btn ${m?'':'primary'}" data-batmeasure="${kind}" ${diag.busy?'disabled':''}>${run ? 'Misst…' : m ? 'Neu messen' : 'Messen'}</button>
+    </div>`;
+  };
+  return `<div class="dg-bats">
+      ${step('rest', 1, 'Ruhespannung', 'Motor aus, Zündung an, Verbraucher aus')}
+      ${step('crank', 2, 'Startspannung', '„Messen“ tippen, dann Motor starten')}
+      ${step('charge', 3, 'Ladespannung', 'Motor läuft im Leerlauf, gern mit Licht/Gebläse an')}
+    </div>
+    <div class="alex-hint">Gemessen an der OBD-Buchse – liegt meist 0,1–0,2 V unter dem Wert direkt an der Batterie. Die Ruhespannung ist erst aussagekräftig, wenn das Fahrzeug einige Stunden stand. Ein Batterietester mit Lasttest ersetzt diese Messung nicht.</div>`;
 }
 async function diagLiveTick(){
   const o = diagOrder(); if(!diag.conn || !diag.liveOn) return;
@@ -6162,7 +6288,7 @@ async function diagClear(){
   const before = r.codes || [];
   const res = elmClean(await diag.conn.send('04', 10000));
   if(!res.some(l=>/^44/.test(l.replace(/\s/g,'')))){ diag.busy=''; diag.error='Fehlerspeicher konnte nicht gelöscht werden (Zündung an, Motor aus?).'; rerenderDiagPanel(); return; }
-  diag.busy='';
+  diag.busy=''; r.clearedAt = new Date().toISOString(); if(r.ecus) r.ecusStale = true;
   if(o) await diagSave({ cleared:true, codes: before });
   r.remark=''; r.share=false;
   await diagRead();
@@ -6177,6 +6303,7 @@ async function diagSave(extra){
   const res = await tabletRequest('diagnosis_save', {
     order_id:o.id, codes, vin:r.vin, live:r.live, simulated: !!(diag.conn && diag.conn.sim), cleared: !!(extra && extra.cleared),
     readiness: r.readiness, freeze: r.freeze, since_clear: r.sinceClear,
+    battery: r.battery ? Object.fromEntries(Object.entries(r.battery).map(([k,m])=>[k, m.v])) : null,
     ecus: r.ecus ? r.ecus.filter(e=>e.status!=='nodata').map(e=>({ id:e.id, name:e.name, part:e.part, sys:e.sys, status:e.status, codes:e.codes.map(x=>({ code:x.code, ftb:x.ftb, active:x.active, desc:x.desc, ftb_text:x.ftb_text })) })) : null,
     adapter: diag.conn ? diag.conn.name : '', protocol: diag.protocol, remark: r.remark, share: !!r.share && !(extra && extra.cleared),
   }, 20000);
@@ -6222,65 +6349,170 @@ function renderDiagLive(L){
   });
   return html;
 }
-function renderDiagPanel(o){
-  const r = diagRes(o);
-  const c = diag.conn;
-  const noBt = diag.error==='nobt';
+/* ===== Tester-Hauptmenü: Kacheln → eigenes Fenster je Funktion ===== */
+const dgIc = {
+  codes: iconWarn, clear: iconTrash, history: iconClock, report: iconDoc, info: iconCar,
+  scan: svg('<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>'),
+  live: svg('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
+  ready: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>'),
+  freeze: svg('<path d="M12 2v20M4.9 4.9l14.2 14.2M2 12h20M4.9 19.1 19.1 4.9"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2M4 9l2 3-2 3M20 9l-2 3 2 3"/>'),
+  battery: svg('<rect x="2" y="7" width="18" height="11" rx="2"/><path d="M22 11v3M7 12.5h4M9 10.5v4M14 12.5h3"/>'),
+};
+const DIAG_SCREENS = {
+  codes:     { t:'Fehlerspeicher lesen',  d:'Motor & Abgas: gespeicherte, sporadische und permanente Fehler', ic:'codes', conn:true },
+  scan:      { t:'Steuergeräte-Scan',     d:'Alle Steuergeräte einzeln (VW, Audi, Skoda, Seat/Cupra)', ic:'scan', conn:true },
+  live:      { t:'Live-Daten / Istwerte', d:'Drehzahl, Temperaturen, Gemisch, Luftmasse, Drücke …', ic:'live', conn:true },
+  readiness: { t:'AU-Bereitschaft',       d:'Readiness-Monitore vor AU/HU prüfen', ic:'ready', conn:true },
+  freeze:    { t:'Freeze-Frame',          d:'Bedingungen beim Speichern des Fehlers', ic:'freeze', conn:true },
+  clear:     { t:'Fehlerspeicher löschen', d:'Motor-Fehlerspeicher nach der Reparatur löschen', ic:'clear', conn:true },
+  battery:   { t:'Batterie & Ladung',     d:'Ruhespannung, Starteinbruch, Ladespannung', ic:'battery', conn:true },
+  info:      { t:'Fahrzeug-Info',         d:'FIN, Steuergerät, Protokoll, unterstützte Werte', ic:'info', conn:true },
+  report:    { t:'Protokoll & Speichern', d:'Am Auftrag speichern, Kundenportal, Drucken/PDF', ic:'report' },
+  history:   { t:'Verlauf',               d:'Gespeicherte Diagnosen zu diesem Auftrag', ic:'history' },
+};
+function diagBadge(key, o, r){
   const hist = o ? (diag.history[o.id] || []) : [];
-  let body = '';
-  if(!c){
-    body = `<div class="dg-connect">
+  switch(key){
+    case 'codes': return r.codes ? (r.codes.length ? [`${r.codes.length} Fehler`, 'err'] : ['keine Fehler', 'ok']) : null;
+    case 'scan': { if(!r.ecus) return null; if(r.ecusStale) return ['neu scannen', 'warn']; const n = r.ecus.reduce((s,e)=>s+e.codes.length,0); return n ? [`${n} Fehler`, 'err'] : ['alles i. O.', 'ok']; }
+    case 'readiness': return r.readiness ? (r.readiness.open ? [`${r.readiness.open} offen`, 'warn'] : ['alle fertig', 'ok']) : null;
+    case 'freeze': return r.freeze ? [r.freeze.code, 'warn'] : (r.codes && !r.codes.some(c=>c.type==='stored') ? ['kein Fehler', 'ok'] : null);
+    case 'live': return diag.liveOn ? ['läuft', 'ok'] : null;
+    case 'battery': { const b = r.battery; if(!b) return null; const v = [b.rest, b.crank, b.charge].filter(Boolean).map(x=>batVerdict(x.kind, x.v)[1]); return v.includes('err') ? ['prüfen', 'err'] : v.includes('warn') ? ['grenzwertig', 'warn'] : v.length ? ['i. O.', 'ok'] : null; }
+    case 'info': return r.vin ? [r.vin.slice(-6), ''] : null;
+    case 'report': return r.saved ? ['gespeichert', 'ok'] : null;
+    case 'history': return hist.length ? [`${hist.length}×`, ''] : null;
+  }
+  return null;
+}
+function renderDiagMenu(o, r){
+  const c = diag.conn;
+  return `<div class="dg-menu">${Object.entries(DIAG_SCREENS).map(([k,d])=>{
+    const off = d.conn && !c; const bd = diagBadge(k, o, r);
+    return `<button class="dg-tile ${off?'off':''}" data-diagscreen="${k}" ${off?'disabled':''}>
+      <span class="dg-tile-ic">${dgIc[d.ic]}</span>
+      <span class="dg-tile-t">${escHtml(d.t)}</span><span class="dg-tile-d">${escHtml(d.d)}</span>
+      ${bd ? `<span class="dg-tile-b ${bd[1]}">${escHtml(bd[0])}</span>` : ''}
+    </button>`; }).join('')}</div>
+    ${!c ? `<div class="alex-hint">Grau = erst Fahrzeug verbinden (oder Simulation starten).</div>` : ''}`;
+}
+function renderDiagConn(){
+  const c = diag.conn; const noBt = diag.error==='nobt';
+  if(!c) return `<div class="dg-connect">
       <button class="btn primary" id="diagConnectBtn" ${diag.connecting?'disabled':''}>${iconObd} ${diag.connecting?'Verbinde…':'Fahrzeug verbinden'}</button>
       <button class="btn" id="diagSimBtn" ${diag.connecting?'disabled':''}>Simulation starten</button>
     </div>
     <div class="dg-steps"><b>So geht's:</b> Adapter in die OBD-Buchse (meist unter dem Lenkrad) stecken · Zündung an · „Fahrzeug verbinden“ tippen und den Adapter in der Liste wählen.</div>
     ${noBt ? `<div class="alex-warn">${iconWarn} <span>Dieser Browser kann kein Bluetooth. Auf dem iPad das Tablet in der kostenlosen App <b>„Bluefy – Web BLE Browser“</b> öffnen (gleiche Adresse, gleiche Anmeldung). Die Simulation funktioniert auch hier.</span></div>` : ''}`;
-  } else {
-    const busy = diag.busy;
-    body = `<div class="dg-conn ${c.sim?'sim':''}"><span class="dg-dot"></span><div><b>${escHtml(c.sim ? 'Simulationsmodus' : c.name)}</b><span>${escHtml(c.sim ? 'Keine echten Fahrzeugdaten – nur zum Üben und Vorführen' : (diag.protocol || 'verbunden'))}</span></div><button class="btn" id="diagDisconnectBtn">Trennen</button></div>
-    <div class="dg-actions">
-      <button class="btn primary" id="diagReadBtn" ${busy?'disabled':''}>${busy==='read'?'Lese Fehlerspeicher…':'Fehlerspeicher lesen'}</button>
-      <button class="btn ${diag.liveOn?'primary':''}" id="diagLiveBtn" ${busy==='clear'?'disabled':''}>${diag.liveOn?'Live-Daten stoppen':'Live-Daten'}</button>
-      ${r.codes && r.codes.length ? (diag.confirmClear
-        ? `<span class="dg-confirm">Fehlerspeicher im Fahrzeug löschen? Motor aus, Zündung an. <button class="btn danger" id="diagClearYes">Ja, löschen</button><button class="btn" id="diagClearNo">Abbrechen</button></span>`
-        : `<button class="btn" id="diagClearBtn" ${busy?'disabled':''}>Codes löschen</button>`) : ''}
+  return `<div class="dg-conn ${c.sim?'sim':''}"><span class="dg-dot"></span><div><b>${escHtml(c.sim ? 'Simulationsmodus' : c.name)}</b><span>${escHtml(c.sim ? 'Keine echten Fahrzeugdaten – nur zum Üben und Vorführen' : (diag.protocol || 'verbunden'))}</span></div><button class="btn" id="diagDisconnectBtn">Trennen</button></div>`;
+}
+function renderDiagCodeList(o, r){
+  const sim = diag.conn && diag.conn.sim;
+  return r.codes.length ? `<div class="dg-table">${r.codes.map(x=>`<div class="dg-row">
+      <span class="dg-code ${x.type}">${x.code}</span>
+      <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${DTC_TYPE_LABEL[x.type]}</span></div>
+      <div class="dg-row-acts">
+        <button class="btn ${diag.openInfo[x.code]?'primary':''}" data-diaginfo="${x.code}">${diag.openInfo[x.code]?'Schließen':'Anzeigen'}</button>
+        <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
+        ${o && !sim ? (r.tasks[x.code] ? `<span class="dg-task-done">${iconCheck} Aufgabe angelegt</span>` : `<button class="btn" data-diagtask="${x.code}" ${diag.busy==='task'?'disabled':''}>${iconPlus} Aufgabe</button>`) : ''}
+      </div>
+    </div>${diag.openInfo[x.code] ? renderDtcInfo(x.code, x.code, '') : ''}`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`;
+}
+function renderDiagSave(o, r){
+  const sim = diag.conn && diag.conn.sim;
+  return `<textarea id="diagRemark" class="dg-remark" rows="2" placeholder="Bemerkung (optional), z. B. Ursache gefunden, Teil bestellt…">${escHtml(r.remark||'')}</textarea>
+    ${sim || !o || !r.codes ? '' : `<label class="dg-share"><input type="checkbox" id="diagShare" ${r.share?'checked':''} ${r.saved?'disabled':''}> Im Kundenportal anzeigen (Fehlercodes mit Beschreibung, ohne Bemerkung)</label>`}
+    <div class="dg-save-row">
+      ${!o ? `<span class="alex-muted">Zum Speichern oben einen Auftrag wählen.</span>` : r.saved ? `<span class="alex-done">${iconCheck} Am Auftrag gespeichert${r.share && !sim ? ' – im Kundenportal sichtbar' : ''}</span>` : `<button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button>`}
+      <button class="btn" id="diagPrintBtn">${iconDoc} Diagnoseprotokoll (Drucken/PDF)</button>
     </div>`;
+}
+const diagBusyText = { read:'Lese Fehlerspeicher…', clear:'Lösche…', scan:'Scan läuft…', info:'Lese Fahrzeugdaten…', bat:'Messe…', save:'Speichere…', task:'Lege Aufgabe an…' };
+function renderDiagScreen(o, r){
+  const c = diag.conn; const sim = c && c.sim; const busy = diag.busy;
+  const need = (fn)=> !c && DIAG_SCREENS[diag.screen].conn ? `<div class="alex-muted">Bitte zuerst das Fahrzeug verbinden.</div>` : fn();
+  const working = busy ? `<div class="dg-scan-run"><span class="dg-spin"></span>${escHtml(diagBusyText[busy] || 'Bitte warten…')}</div>` : '';
+  switch(diag.screen){
+    case 'codes': return need(()=>`
+      <div class="dg-bar"><button class="btn primary" id="diagReadBtn" ${busy?'disabled':''}>${r.codes ? 'Erneut lesen' : 'Fehlerspeicher lesen'}</button>
+        ${r.codes && r.codes.length ? `<button class="btn" data-diagscreen="clear">${iconTrash} Löschen…</button>` : ''}</div>
+      ${working}
+      ${r.codes ? `<div class="dg-head"><b>${r.codes.length ? r.codes.length + ' Fehler gefunden' : 'Fehlerspeicher leer'}</b><span>${r.readAt ? 'gelesen ' + escHtml(fmtSavedAt(r.readAt)) : ''}${r.live.mil!==undefined ? ` · Motorkontrollleuchte <b>${r.live.mil?'AN':'aus'}</b>` : ''}${r.live.distance_mil_km ? ` · ${diagFmt(r.live.distance_mil_km)} km mit MIL` : ''}</span></div>
+        ${renderDiagCodeList(o, r)}
+        ${renderDiagExtras(r, ['sc'])}
+        <div class="dg-links">${r.freeze ? `<button class="btn" data-diagscreen="freeze">${dgIc.freeze} Freeze-Frame zu ${escHtml(r.freeze.code)}</button>` : ''}${r.readiness ? `<button class="btn" data-diagscreen="readiness">${dgIc.ready} AU-Bereitschaft${r.readiness.open ? ' ('+r.readiness.open+' offen)' : ''}</button>` : ''}</div>
+        ${renderDiagSave(o, r)}
+        <div class="alex-hint">${sim ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>` : ''}`);
+    case 'scan': return need(()=>renderDiagEcus(o, r));
+    case 'live': return need(()=>`
+      <div class="dg-bar"><button class="btn ${diag.liveOn?'':'primary'}" id="diagLiveBtn">${diag.liveOn?'Anhalten':'Starten'}</button><span class="alex-muted">${diag.liveOn ? 'Werte werden laufend aktualisiert' : 'angehalten'}</span></div>
+      <div class="dg-live" id="diagLive">${renderDiagLive(r.live)}</div>
+      <div class="alex-hint">Rot = außerhalb des üblichen Bereichs. Trims: Kurzzeit ±20 %, Langzeit ±10 % als Richtwert.</div>`);
+    case 'readiness': return need(()=>`
+      <div class="dg-bar"><button class="btn" id="diagReadBtn" ${busy?'disabled':''}>Erneut lesen</button></div>${working}
+      ${r.readiness ? renderDiagExtras(r, ['rd']) + renderDiagExtras(r, ['sc']) + `<div class="alex-hint">„Offen“ heißt: Das Fahrzeug hat diese Selbstprüfung seit dem letzten Löschen noch nicht abgeschlossen. Abhilfe: Fahrzyklus (Kaltstart, Stadt, Landstraße, konstante Autobahnfahrt, Leerlauf). Nach dem Löschen sind alle Prüfungen zurückgesetzt.</div>`
+        : (busy ? '' : '<div class="alex-muted">Keine Readiness-Daten vom Steuergerät.</div>')}`);
+    case 'freeze': return need(()=>`
+      <div class="dg-bar"><button class="btn" id="diagReadBtn" ${busy?'disabled':''}>Erneut lesen</button></div>${working}
+      ${r.freeze ? renderDiagExtras(r, ['ff']) + `<div class="alex-hint">Hilft beim Nachstellen: Bei welcher Drehzahl, Last und Temperatur ist der Fehler aufgetreten? Für die Probefahrt nach der Reparatur diese Bedingungen wieder anfahren.</div>`
+        : (busy ? '' : `<div class="alex-muted">${r.codes && !r.codes.some(x=>x.type==='stored') ? 'Kein gespeicherter Fehler – daher kein Freeze-Frame.' : 'Das Steuergerät liefert keinen Freeze-Frame.'}</div>`)}`);
+    case 'clear': return need(()=>`
+      <div class="dg-warnbox">${iconWarn}<div><b>Vor dem Löschen beachten</b><ul>
+        <li>Erst löschen, wenn die Ursache behoben ist – sonst kommt der Fehler wieder.</li>
+        <li>Alle AU-Bereitschafts-Prüfungen werden zurückgesetzt. Vor einer AU/HU Fahrzyklus fahren.</li>
+        <li>Permanente Fehler verschwinden erst, wenn das Fahrzeug den Fehler selbst als behoben erkennt.</li>
+        <li>Motor aus, Zündung an.</li></ul></div></div>
+      ${r.codes ? `<div class="alex-muted">Aktuell im Speicher: ${r.codes.length ? r.codes.map(x=>x.code).join(', ') : 'keine Fehler'}</div>` : '<div class="alex-muted">Tipp: vorher „Fehlerspeicher lesen“ – die Codes werden dann beim Löschen am Auftrag protokolliert.</div>'}
+      ${working}
+      ${r.clearedAt && !busy ? `<div class="alex-done">${iconCheck} Gelöscht ${escHtml(fmtSavedAt(r.clearedAt))}. ${r.codes && r.codes.length ? 'Noch im Speicher: ' + r.codes.map(x=>x.code).join(', ') + ' (Ursache besteht oder permanenter Fehler).' : 'Fehlerspeicher ist jetzt leer.'}</div>` : ''}
+      <div class="dg-bar"><button class="btn danger" id="diagClearYes" ${busy?'disabled':''}>${iconTrash} Fehlerspeicher jetzt löschen</button></div>`);
+    case 'battery': return need(()=>renderBatTest(r));
+    case 'info': return need(()=>renderDiagInfo(o, r));
+    case 'report': return `
+      <div class="dg-sum">
+        ${[['Fehlerspeicher', r.codes ? (r.codes.length ? r.codes.map(x=>x.code).join(', ') : 'keine Fehler') : 'nicht gelesen'],
+           ['Steuergeräte', r.ecus ? r.ecus.filter(e=>e.status!=='nodata').length + ' gescannt, ' + r.ecus.reduce((s,e)=>s+e.codes.length,0) + ' Fehler' : 'nicht gescannt'],
+           ['AU-Bereitschaft', r.readiness ? (r.readiness.open ? r.readiness.open + ' von ' + r.readiness.items.length + ' offen' : 'alle fertig') : '–'],
+           ['Batterie & Ladung', r.battery ? [r.battery.rest && 'Ruhe '+diagFmt(r.battery.rest.v,2)+' V', r.battery.crank && 'Start min. '+diagFmt(r.battery.crank.v,1)+' V', r.battery.charge && 'Laden '+diagFmt(r.battery.charge.v,2)+' V'].filter(Boolean).join(' · ') : '–'],
+           ['FIN', r.vin || '–']].map(([k,v])=>`<div><span>${k}</span><b>${escHtml(v)}</b></div>`).join('')}
+      </div>
+      ${renderDiagSave(o, r)}`;
+    case 'history': {
+      const hist = o ? (diag.history[o.id] || []) : [];
+      if(!o) return '<div class="alex-muted">Oben einen Auftrag wählen, um gespeicherte Diagnosen zu sehen.</div>';
+      return hist.length ? `<div class="dg-hist">${hist.map(h=>`<div class="dg-hist-row">
+          <span>${escHtml(fmtSavedAt(h.saved_at))}${h.saved_by?' – '+escHtml(h.saved_by):''}${h.simulated?' <em class="dg-simtag">Simulation</em>':''}</span>
+          <span>${h.cleared ? 'Fehlerspeicher gelöscht' : h.codes.length ? h.codes.map(x=>x.code).join(', ') : 'keine Fehlercodes'}${h.ecus ? ' · Scan: ' + h.ecus.reduce((s,e)=>s+e.codes.length,0) + ' Fehler' : ''}</span>
+        </div>`).join('')}</div>` : '<div class="alex-muted">Zu diesem Auftrag ist noch keine Diagnose gespeichert.</div>';
+    }
   }
-  const live = (diag.liveOn || Object.keys(r.live).length) ? `<div class="dg-live" id="diagLive">${renderDiagLive(r.live)}</div>` : '';
-  let result = '';
-  if(r.codes){
-    const sim = c && c.sim;
-    result = `<div class="dg-result">
-      <div class="dg-head"><b>Fehlerspeicher</b><span>${r.readAt ? 'gelesen ' + escHtml(fmtSavedAt(r.readAt)) : ''}${r.vin ? ` · FIN ${escHtml(r.vin)}${o && o.vin && o.vin!=='–' && o.vin.toUpperCase()!==r.vin ? ' <em class="dg-mis">weicht vom Auftrag ab</em>' : ''}` : ''}</span></div>
-      ${r.codes.length ? `<div class="dg-table">${r.codes.map(x=>`<div class="dg-row">
-          <span class="dg-code ${x.type}">${x.code}</span>
-          <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${DTC_TYPE_LABEL[x.type]}</span></div>
-          <div class="dg-row-acts">
-            <button class="btn ${diag.openInfo[x.code]?'primary':''}" data-diaginfo="${x.code}">${diag.openInfo[x.code]?'Schließen':'Anzeigen'}</button>
-            <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
-            ${o && !sim ? (r.tasks[x.code] ? `<span class="dg-task-done">${iconCheck} Aufgabe angelegt</span>` : `<button class="btn" data-diagtask="${x.code}" ${diag.busy==='task'?'disabled':''}>${iconPlus} Aufgabe</button>`) : ''}
-          </div>
-        </div>${diag.openInfo[x.code] ? renderDtcInfo(x.code, x.code, '') : ''}`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`}
-      ${renderDiagExtras(r)}
-      <textarea id="diagRemark" class="dg-remark" rows="2" placeholder="Bemerkung (optional), z. B. Ursache gefunden, Teil bestellt…">${escHtml(r.remark||'')}</textarea>
-      ${sim || !o ? '' : `<label class="dg-share"><input type="checkbox" id="diagShare" ${r.share?'checked':''} ${r.saved?'disabled':''}> Im Kundenportal anzeigen (Fehlercodes mit Beschreibung, ohne Bemerkung)</label>`}
-      ${!o ? `<div class="alex-muted">Zum Speichern oben einen Auftrag wählen.</div>` : r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert${r.share && !sim ? ' – im Kundenportal sichtbar' : ''}</div>` : `<div class="alex-draft-actions"><button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button></div>`}
-      <div class="dg-proto"><button class="btn" id="diagPrintBtn">${iconDoc} Diagnoseprotokoll (Drucken/PDF)</button></div>
-      <div class="alex-hint">${sim ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>
-    </div>`;
-  }
-  const histHtml = hist.length ? `<div class="dg-hist"><b>Gespeicherte Diagnosen</b>${hist.slice(0,8).map(h=>`<div class="dg-hist-row">
-      <span>${escHtml(fmtSavedAt(h.saved_at))}${h.saved_by?' – '+escHtml(h.saved_by):''}${h.simulated?' <em class="dg-simtag">Simulation</em>':''}</span>
-      <span>${h.cleared ? 'Fehlerspeicher gelöscht' : h.codes.length ? h.codes.map(x=>x.code).join(', ') : 'keine Fehlercodes'}</span>
-    </div>`).join('')}</div>` : '';
+  return '';
+}
+function renderDiagPanel(o){
+  const r = diagRes(o);
+  if(!DIAG_SCREENS[diag.screen]) diag.screen = 'menu';
+  const noBt = diag.error==='nobt';
+  const err = diag.error && !noBt ? `<div class="alex-warn">${iconWarn} ${escHtml(diag.error)}</div>` : '';
+  if(diag.screen==='menu') return `<div class="ts-wrap">${renderDiagConn()}${err}${renderDiagMenu(o, r)}</div>`;
+  const sc = DIAG_SCREENS[diag.screen];
   return `<div class="ts-wrap">
-    ${body}
-    ${diag.error && !noBt ? `<div class="alex-warn">${iconWarn} ${escHtml(diag.error)}</div>` : ''}
-    ${live}
-    ${result}
-    ${renderDiagEcus(o, r)}
-    ${histHtml}
+    ${renderDiagConn()}
+    <div class="dg-screen-h"><button class="btn" data-diagscreen="menu">${iconArrowLeft} Hauptmenü</button><span class="dg-screen-ic">${dgIc[sc.ic]}</span><b>${escHtml(sc.t)}</b></div>
+    ${err}
+    ${renderDiagScreen(o, r)}
   </div>`;
+}
+// Beim Öffnen eines Fensters gleich das Passende auslesen
+function diagOpenScreen(k){
+  if(diag.screen==='live' && k!=='live') diagStopLive();
+  diag.screen = k; diag.error = diag.error==='nobt' ? 'nobt' : ''; 
+  const r = diagRes(diagOrder());
+  rerenderDiagPanel();
+  const el = document.getElementById('diagPanel'); if(el && el.scrollIntoView) try{ el.scrollIntoView({ block:'start', behavior:'smooth' }); }catch(_){}
+  if(!diag.conn || diag.busy) return;
+  if((k==='codes' || k==='readiness' || k==='freeze') && !r.codes) diagRead();
+  else if(k==='live' && !diag.liveOn) diagToggleLive();
+  else if(k==='info' && !r.info) diagReadInfo();
 }
 function renderDtcInfo(key, code, ftb){
   const h = dtcHelp(code, ftb);
@@ -6330,10 +6562,11 @@ function renderDiagEcus(o, r){
   return `<div class="dg-block dg-ecu-block">${head}${body}<div class="dg-scan-act">${save}${btn}</div></div>`;
 }
 /* Readiness, "seit Löschen", Freeze-Frame */
-function renderDiagExtras(r){
+function renderDiagExtras(r, only){
   let html = '';
+  const want = k => !only || only.includes(k);
   const rd = r.readiness;
-  if(rd && rd.items.length){
+  if(rd && rd.items.length && want('rd')){
     const verdict = rd.open===0
       ? `<span class="dg-rd-ok">${iconCheck} Alle ${rd.items.length} Prüfungen abgeschlossen</span>`
       : `<span class="dg-rd-open">${rd.open} von ${rd.items.length} Prüfungen noch offen – vor der AU ggf. Fahrzyklus fahren</span>`;
@@ -6341,12 +6574,12 @@ function renderDiagExtras(r){
       <div class="dg-rd">${rd.items.map(x=>`<div class="dg-rd-i ${x.ok?'ok':'open'}"><span class="dg-rd-dot"></span>${escHtml(x.label)}<em>${x.ok?'fertig':'offen'}</em></div>`).join('')}</div></div>`;
   }
   const sc = r.sinceClear;
-  if(sc){
+  if(sc && want('sc')){
     const recent = (sc.km!==undefined && sc.km<100) || (sc.warmups!==undefined && sc.warmups<10);
     html += `<div class="dg-since ${recent?'warn':''}">Seit letztem Löschen des Fehlerspeichers: <b>${sc.km!==undefined ? diagFmt(sc.km)+' km' : '–'}</b>${sc.warmups!==undefined ? ` · <b>${sc.warmups}</b> Warmlaufzyklen` : ''}${recent ? ' – <b>wurde kürzlich gelöscht</b> (Fehler evtl. noch nicht wieder erkannt)' : ''}</div>`;
   }
   const ff = r.freeze;
-  if(ff && Object.keys(ff.values).length){
+  if(ff && Object.keys(ff.values).length && want('ff')){
     html += `<div class="dg-block"><div class="dg-head"><b>Freeze-Frame zu ${escHtml(ff.code)}</b><span>Bedingungen, als der Fehler gespeichert wurde</span></div>
       <div class="dg-ff">${LIVE_PIDS.filter(p=>ff.values[p.key]!==undefined).map(p=>`<div><span>${escHtml(p.label)}</span><b>${diagFmt(ff.values[p.key],p.d)} <i>${escHtml(p.unit)}</i></b></div>`).join('')}</div></div>`;
   }
@@ -6401,6 +6634,8 @@ function diagPrint(){
   ${ff && Object.keys(ff.values).length ? `<h2>Freeze-Frame zu ${e(ff.code)}</h2><table>${LIVE_PIDS.filter(p=>ff.values[p.key]!==undefined).map(p=>`<tr><th>${e(p.label)}</th><td>${diagFmt(ff.values[p.key],p.d)} ${e(p.unit)}</td></tr>`).join('')}</table>` : ''}
   ${r.ecus && r.ecus.length ? `<h2>Steuergeräte (VW-Konzern)</h2><table>${r.ecus.filter(x=>x.status!=='nodata').map(x=>`<tr><th>${e(x.id)} ${e(x.name)}${x.part ? `<br><small>${e(x.part)}${x.sys?' · '+e(x.sys):''}</small>` : ''}</th><td>${x.status==='neg' ? 'nicht lesbar' : x.codes.length ? x.codes.map(y=>`<span class="code">${e(y.code)}${y.ftb!=='00'?' '+e(y.ftb):''}</span> ${e(y.desc)}${y.ftb_text?' – '+e(y.ftb_text):''} <small>(${y.active?'aktiv':'sporadisch'})</small>`).join('<br>') : '<span class="ok">i. O.</span>'}</td></tr>`).join('')}</table>` : ''}
   ${rd && rd.items.length ? `<h2>AU-Bereitschaft (Readiness)</h2><table>${rd.items.map(x=>`<tr><th>${e(x.label)}</th><td class="${x.ok?'ok':'open'}">${x.ok?'abgeschlossen':'offen'}</td></tr>`).join('')}</table><p>${rd.open ? rd.open+' Prüfung(en) offen.' : 'Alle unterstützten Prüfungen abgeschlossen.'}</p>` : ''}
+  ${r.battery ? `<h2>Batterie &amp; Ladung</h2><table>${[['rest','Ruhespannung'],['crank','Startspannung (tiefster Wert)'],['charge','Ladespannung']].filter(([k])=>r.battery[k]).map(([k,l])=>`<tr><th>${l}</th><td>${diagFmt(r.battery[k].v, k==='crank'?1:2)} V – ${e(batVerdict(k, r.battery[k].v)[0])}</td></tr>`).join('')}</table>` : ''}
+  ${r.info && (r.info.ecu_name || r.info.calid) ? `<h2>Steuergerät</h2><table>${row('Bezeichnung', r.info.ecu_name)}${row('Kalibrierung', r.info.calid)}</table>` : ''}
   ${liveRows ? `<h2>Messwerte</h2><table>${liveRows}</table>` : ''}
   ${r.remark ? `<h2>Bemerkung</h2><p>${e(r.remark).replace(/\n/g,'<br>')}</p>` : ''}
   <div class="sig"><div>Datum, Unterschrift Mechaniker</div><div>Datum, Unterschrift Kunde</div></div>
@@ -6443,6 +6678,9 @@ function handleDiagClick(e){
   if(t.closest('#diagSaveBtn')){ diagSave(); return true; }
   if(t.closest('#diagPrintBtn')){ diagPrint(); return true; }
   if(t.closest('#diagScanBtn')){ diagScanVag(); return true; }
+  const scr = t.closest('[data-diagscreen]'); if(scr){ diagOpenScreen(scr.dataset.diagscreen); return true; }
+  const bm = t.closest('[data-batmeasure]'); if(bm){ batMeasure(bm.dataset.batmeasure); return true; }
+  if(t.closest('#diagInfoBtn')){ diagReadInfo(); return true; }
   const inf = t.closest('[data-diaginfo]'); if(inf){ const k = inf.dataset.diaginfo; if(diag.openInfo[k]) delete diag.openInfo[k]; else diag.openInfo[k] = true; rerenderDiagPanel(); return true; }
   const tk = t.closest('[data-diagtask]'); if(tk){ diagCreateTask(tk.dataset.diagtask); return true; }
   const a = t.closest('[data-diagalex]'); if(a){ diagAskAlex(a.dataset.diagalex); return true; }

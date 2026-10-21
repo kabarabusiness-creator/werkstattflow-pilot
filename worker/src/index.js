@@ -461,7 +461,12 @@ function cleanDiagnosis(b) {
     })).filter(e => /^[0-9A-F]{2}$/.test(e.id) && e.name);
     if (!ecus.length) ecus = null;
   }
-  return { codes, vin, live, readiness, freeze, since_clear, ecus, simulated: !!b.simulated, cleared: !!b.cleared, share: !!b.share && !b.simulated, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
+  let battery = null;
+  if (b.battery && typeof b.battery === 'object') {
+    const bt = {}; for (const k of ['rest', 'crank', 'charge']) { const n = num(b.battery[k], 30); if (n !== null && n > 0) bt[k] = n; }
+    if (Object.keys(bt).length) battery = bt;
+  }
+  return { codes, vin, live, readiness, freeze, since_clear, ecus, battery, simulated: !!b.simulated, cleared: !!b.cleared, share: !!b.share && !b.simulated, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
 }
 const DIAG_TYPE_LABEL = { stored: 'gespeichert', pending: 'sporadisch/ausstehend', permanent: 'permanent' };
 function diagnosisNote(d, name) {
@@ -495,6 +500,7 @@ function diagnosisNote(d, name) {
     const neg = d.ecus.filter(e => e.status === 'neg').map(e => e.id + ' ' + e.name);
     if (neg.length) lines.push(`  nicht lesbar: ${neg.join(', ')}`);
   }
+  if (d.battery) lines.push('Batterie & Ladung: ' + [d.battery.rest !== undefined && `Ruhespannung ${f(d.battery.rest, ' V')}`, d.battery.crank !== undefined && `Startspannung min. ${f(d.battery.crank, ' V')}`, d.battery.charge !== undefined && `Ladespannung ${f(d.battery.charge, ' V')}`].filter(Boolean).join(', '));
   if (d.since_clear) lines.push(`Seit letztem Löschen: ${d.since_clear.km !== undefined ? f(d.since_clear.km, ' km') : '–'}${d.since_clear.warmups !== undefined ? ', ' + d.since_clear.warmups + ' Warmlaufzyklen' : ''}`);
   if (d.remark) lines.push('Bemerkung Mechaniker: ' + d.remark.split(/\n+/).join('; '));
   lines.push('Generische OBD-Beschreibung – Herstellerdaten und Prüfung durch Mechaniker erforderlich.');

@@ -295,6 +295,9 @@ await t('OBD-Diagnose: Readiness, Freeze-Frame, seit Löschen gespeichert und im
   assert.match(note3, /Steuergeräte-Scan \(VW-Konzern\): 3 Steuergeräte, 1 Fehlereinträge/);
   assert.match(note3, /03 Bremsenelektronik \(ABS\/ESP\): C0035 29 \(aktiv\) – Raddrehzahlsensor vorne links, Signal ungültig/);
   assert.match(note3, /nicht lesbar: 44 Lenkhilfe/);
+  const r4 = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', codes: [], battery: { rest: 12.58, crank: 9.9, charge: 14.12, x: 5, bad: 'a' } }, token)).data;
+  assert.deepEqual(r4.entry.battery, { rest: 12.6, crank: 9.9, charge: 14.1 });
+  assert.match(db.InternalNote.filter(n => n.order_id === 'o1').pop().content, /Batterie & Ladung: Ruhespannung 12,6 V, Startspannung min\. 9,9 V, Ladespannung 14,1 V/);
   // ungültige Readiness/Freeze werden verworfen statt zu scheitern
   const r2 = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', codes: [], readiness: { items: 'x' }, freeze: { code: 'XYZ' } }, token)).data;
   assert.equal(r2.entry.readiness, null); assert.equal(r2.entry.freeze, null);
