@@ -273,6 +273,36 @@ await t('OBD-Diagnose: Befund speichern, FIN übernehmen, Liste laden', async ()
   const pd = (await call('/portalApi', { token: 'tok-aaaaaa' })).data.diagnosis;
   assert.equal(pd.codes[0].code, 'P0301'); assert.equal(pd.remark, undefined); assert.equal(JSON.stringify(pd).includes('intern'), false);
 });
+await t('OBD-Diagnose: Readiness, Freeze-Frame, seit Löschen gespeichert und im Protokoll', async () => {
+  const r = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', codes: [{ code: 'P0420', desc: 'Kat' }],
+    live: { stft1: 9.4, ltft1: 11.7, maf_gs: 3.12, _no_oil_c: true },
+    readiness: { diesel: false, items: [{ key: 'catalyst', label: 'Katalysator', ok: true }, { key: 'evap', label: 'Tankentlüftung (EVAP)', ok: false }, { label: '' }] },
+    freeze: { code: 'p0420', values: { rpm: 1800, speed_kmh: 50, evil: 1 } },
+    since_clear: { km: 1840, warmups: 37, x: 1 } }, token)).data;
+  assert.equal(r.entry.readiness.open, 1); assert.equal(r.entry.readiness.items.length, 2);
+  assert.deepEqual(r.entry.freeze, { code: 'P0420', values: { rpm: 1800, speed_kmh: 50 } });
+  assert.deepEqual(r.entry.since_clear, { km: 1840, warmups: 37 });
+  assert.equal(r.entry.live.ltft1, 11.7); assert.equal(r.entry.live._no_oil_c, undefined);
+  const note = db.InternalNote.filter(n => n.order_id === 'o1').pop().content;
+  assert.match(note, /Langzeit-Trim B1 11,7 %/); assert.match(note, /Freeze-Frame zu P0420: Drehzahl 1800 1\/min, Geschw\. 50 km\/h/);
+  assert.match(note, /AU-Bereitschaft \(Readiness\): 1 von 2 offen \(Tankentlüftung \(EVAP\)\)/); assert.match(note, /Seit letztem Löschen: 1840 km, 37 Warmlaufzyklen/);
+  // ungültige Readiness/Freeze werden verworfen statt zu scheitern
+  const r2 = (await call('/tabletAction', { action: 'diagnosis_save', order_id: 'o1', codes: [], readiness: { items: 'x' }, freeze: { code: 'XYZ' } }, token)).data;
+  assert.equal(r2.entry.readiness, null); assert.equal(r2.entry.freeze, null);
+});
+await t('Aufgabe anlegen (z. B. aus Fehlercode): eigene Werkstatt, Reihenfolge, Hebebühne', async () => {
+  assert.equal((await call('/tabletAction', { action: 'task_create', order_id: 'o2', title: 'X' }, token)).status, 404);
+  assert.equal((await call('/tabletAction', { action: 'task_create', order_id: 'o1', title: '  ' }, token)).status, 400);
+  const before = db.OrderTask.filter(t => t.order_id === 'o4').length;
+  const r = await call('/tabletAction', { action: 'task_create', order_id: 'o4', title: 'Fehler P0420 prüfen – Kat', description: 'Aus OBD-Diagnose', estimated_minutes: 30 }, token);
+  assert.equal(r.data.ok, true);
+  const t = db.OrderTask.find(x => x.id === r.data.task_id);
+  assert.equal(t.workshop_code, 'AL-T1'); assert.equal(t.status, 'offen'); assert.equal(t.order_index, 3); assert.equal(t.estimated_minutes, 30);
+  assert.equal(db.OrderTask.filter(x => x.order_id === 'o4').length, before + 1);
+  const l = db.Lift.find(x => x.id === 'l1'); assert.equal(l.progress, 67); assert.equal(l.current_task, 'Fehler P0420 prüfen – Kat');
+  const r2 = await call('/tabletAction', { action: 'task_create', order_id: 'o1', title: 'Y', estimated_minutes: 9999 }, token);
+  assert.equal(db.OrderTask.find(x => x.id === r2.data.task_id).estimated_minutes, undefined);
+});
 await t('Qualitätskontrolle: Haken sofort am Auftrag gespeichert, wer/wann bleibt stabil', async () => {
   let r = await call('/tabletAction', { action: 'qc_save', order_id: 'o1', qc: [{ label: 'Ölstand geprüft', checked: true }, { label: 'Probefahrt durchgeführt', checked: false }] }, token);
   assert.equal(r.data.ok, true);

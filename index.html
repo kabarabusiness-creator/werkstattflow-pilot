@@ -1243,10 +1243,21 @@
   .dg-desc{flex:1;min-width:0;} .dg-desc b{display:block;font-size:13px;} .dg-desc span{font-size:11px;color:var(--text-faint);}
   .dg-remark{width:100%;box-sizing:border-box;border-radius:10px;padding:8px 10px;background:var(--panel-2);border:1px solid var(--border);color:inherit;font:inherit;font-size:13px;resize:vertical;}
   .dg-share{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--text-faint);} .dg-share input{width:18px;height:18px;accent-color:var(--accent);}
+  .dg-row-acts{display:flex;gap:6px;align-items:center;flex-shrink:0;} .dg-task-done{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--success,#16a34a);} .dg-task-done svg{width:14px;height:14px;}
+  .dg-block{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:10px;background:var(--panel-2);border:1px solid var(--border);}
+  .dg-block .dg-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;} .dg-block .dg-head span{font-size:12px;color:var(--text-faint);}
+  .dg-rd{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 14px;font-size:12.5px;}
+  .dg-rd-i{display:flex;align-items:center;gap:7px;} .dg-rd-i em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--text-faint);}
+  .dg-rd-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;} .dg-rd-i.open .dg-rd-dot{background:#f59e0b;} .dg-rd-i.open em{color:#d97706;font-weight:600;}
+  .dg-block .dg-head span.dg-rd-ok{color:#16a34a;display:inline-flex;align-items:center;gap:4px;} .dg-rd-ok svg{width:14px;height:14px;} .dg-block .dg-head span.dg-rd-open{color:#d97706;font-weight:600;}
+  .dg-since{font-size:12.5px;padding:8px 10px;border-radius:10px;background:var(--panel-2);color:var(--text-dim);} .dg-since.warn{border:1px solid rgba(245,158,11,.5);color:var(--text);}
+  .dg-ff{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;} .dg-ff div{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:8px;background:var(--panel);}
+  .dg-ff span{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.3px;} .dg-ff b{font-size:15px;font-variant-numeric:tabular-nums;} .dg-ff i{font-style:normal;font-size:11px;color:var(--text-faint);font-weight:400;}
+  .dg-proto{display:flex;justify-content:flex-end;}
   .dg-hist{display:flex;flex-direction:column;gap:4px;font-size:12px;} .dg-hist>b{font-size:12.5px;margin-bottom:2px;}
   .dg-hist-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border);color:var(--text-faint);} .dg-hist-row span:last-child{color:var(--text);text-align:right;}
   .dg-simtag{font-style:normal;font-size:10.5px;padding:1px 6px;border-radius:6px;background:rgba(245,158,11,.15);color:var(--warning-text);}
-  @media (max-width:760px){ .dg-live{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-row{flex-wrap:wrap;} }
+  @media (max-width:760px){ .dg-live{grid-template-columns:repeat(2,minmax(0,1fr));} .dg-row{flex-wrap:wrap;} .dg-rd{grid-template-columns:1fr;} .dg-ff{grid-template-columns:repeat(2,minmax(0,1fr));} }
   .ts-intro{display:flex;gap:10px;align-items:flex-start;} .ts-intro svg{width:22px;height:22px;flex-shrink:0;color:var(--accent);} .ts-intro b{display:block;} .ts-intro span{font-size:12.5px;color:var(--text-faint);}
   .ts-slots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
   .ts-slot{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:var(--panel-2);border:1px dashed var(--border);}
@@ -5495,6 +5506,70 @@ function dtcDescription(code){
 }
 const DTC_TYPE_LABEL = { stored:'gespeichert', pending:'sporadisch', permanent:'permanent' };
 
+/* --- Messwerte (Mode 01) – gleiche Tabelle für Live-Daten, Freeze-Frame und Protokoll ---
+   fast: wird bei jedem Live-Durchlauf abgefragt, sonst reihum (schont langsame BLE-Adapter) */
+const LIVE_PIDS = [
+  { pid:'0C', n:2, key:'rpm',          label:'Drehzahl',         unit:'1/min',   d:0, fast:true, f:b=>(b[0]*256+b[1])/4 },
+  { pid:'0D', key:'speed_kmh',    label:'Geschwindigkeit',  unit:'km/h',    d:0, fast:true, f:b=>b[0] },
+  { pid:'05', key:'coolant_c',    label:'Kühlmittel',       unit:'°C',      d:0, fast:true, f:b=>b[0]-40, warn:v=>v>110 },
+  { pid:'04', key:'load_pct',     label:'Motorlast',        unit:'%',       d:0, fast:true, f:b=>b[0]*100/255 },
+  { pid:'11', key:'throttle_pct', label:'Drosselklappe',    unit:'%',       d:0, fast:true, f:b=>b[0]*100/255 },
+  { pid:'06', key:'stft1',        label:'Kurzzeit-Trim B1', unit:'%',       d:1, fast:true, f:b=>(b[0]-128)*100/128, warn:v=>Math.abs(v)>20 },
+  { pid:'07', key:'ltft1',        label:'Langzeit-Trim B1', unit:'%',       d:1, f:b=>(b[0]-128)*100/128, warn:v=>Math.abs(v)>10 },
+  { pid:'08', key:'stft2',        label:'Kurzzeit-Trim B2', unit:'%',       d:1, f:b=>(b[0]-128)*100/128, warn:v=>Math.abs(v)>20 },
+  { pid:'09', key:'ltft2',        label:'Langzeit-Trim B2', unit:'%',       d:1, f:b=>(b[0]-128)*100/128, warn:v=>Math.abs(v)>10 },
+  { pid:'0B', key:'map_kpa',      label:'Saugrohrdruck',    unit:'kPa',     d:0, f:b=>b[0] },
+  { pid:'10', n:2, key:'maf_gs',       label:'Luftmasse',        unit:'g/s',     d:1, f:b=>(b[0]*256+b[1])/100 },
+  { pid:'0F', key:'intake_c',     label:'Ansaugluft',       unit:'°C',      d:0, f:b=>b[0]-40 },
+  { pid:'0E', key:'timing_deg',   label:'Zündwinkel',       unit:'° v. OT', d:1, f:b=>b[0]/2-64 },
+  { pid:'5C', key:'oil_c',        label:'Öltemperatur',     unit:'°C',      d:0, f:b=>b[0]-40, warn:v=>v>130 },
+  { pid:'23', n:2, key:'rail_bar',     label:'Raildruck',        unit:'bar',     d:0, f:b=>(b[0]*256+b[1])/10 },
+  { pid:'46', key:'ambient_c',    label:'Außentemperatur',  unit:'°C',      d:0, f:b=>b[0]-40 },
+  { pid:'2F', key:'fuel_pct',     label:'Tankinhalt',       unit:'%',       d:0, f:b=>b[0]*100/255 },
+  { pid:'42', n:2, key:'ecu_v',        label:'Spannung SG',      unit:'V',       d:1, f:b=>(b[0]*256+b[1])/1000 },
+];
+// Freeze-Frame: Umgebungsbedingungen im Moment, als der Fehler gespeichert wurde
+const FREEZE_PIDS = ['0C','0D','05','04','11','06','07','0B','10','0F'];
+
+// Rohbytes einer PID-Antwort; Mode 02 (Freeze-Frame) hat nach der PID noch die Frame-Nummer
+function pidData(raw, mode, pid){
+  const lines = elmClean(raw);
+  if(elmNoData(lines)) return null;
+  for(const msg of elmMessages(lines)){
+    const i = msg.indexOf(mode+pid); if(i<0) continue;
+    let b = (msg.slice(i+4).match(/../g)||[]).map(h=>parseInt(h,16));
+    if(mode==='42') b = b.slice(1);
+    if(b.length) return b;
+  }
+  return null;
+}
+function pidValue(def, bytes){
+  if(!bytes || bytes.length < (def.n||1)) return null;
+  const v = def.f(bytes); if(!Number.isFinite(v)) return null;
+  const p = Math.pow(10, def.d||0); return Math.round(v*p)/p;
+}
+// Unterstützte PIDs aus 0100/0120/0140 (je 32 Bit, höchstes Bit = PID base+1)
+function parseSupported(raw, base){
+  const b = pidData(raw, '41', base); const out = [];
+  if(!b || b.length<4) return out;
+  const start = parseInt(base,16);
+  for(let i=0;i<32;i++) if(b[i>>3] & (0x80 >> (i&7))) out.push((start+i+1).toString(16).toUpperCase().padStart(2,'0'));
+  return out;
+}
+/* --- Readiness (AU-Bereitschaft): PID 01, Bytes B–D. Bit gesetzt in "unterstützt" + Bit gesetzt in "unvollständig" = noch nicht abgeschlossen --- */
+const READINESS_CONT = [ ['misfire','Verbrennungsaussetzer'], ['fuel','Kraftstoffsystem'], ['components','Bauteile (Comprehensive)'] ];
+const READINESS_SPARK = [ ['catalyst','Katalysator'], ['heated_cat','Kat-Heizung'], ['evap','Tankentlüftung (EVAP)'], ['sec_air','Sekundärluft'], ['ac','Klimaanlage'], ['o2','Lambdasonden'], ['o2_heater','Lambdasonden-Heizung'], ['egr','Abgasrückführung (AGR)'] ];
+const READINESS_DIESEL = [ ['nmhc','NMHC-Katalysator'], ['nox','NOx/SCR-Nachbehandlung'], null, ['boost','Ladedruck'], null, ['exhaust_sensor','Abgassensoren'], ['dpf','Partikelfilter (DPF)'], ['egr','AGR / Nockenwellenverstellung'] ];
+function parseReadiness(raw){
+  const b = pidData(raw, '41', '01');
+  if(!b || b.length<4) return null;
+  const diesel = !!(b[1] & 0x08);
+  const items = [];
+  READINESS_CONT.forEach(([key,label],i)=>{ if(b[1] & (1<<i)) items.push({ key, label, ok: !(b[1] & (0x10<<i)) }); });
+  (diesel ? READINESS_DIESEL : READINESS_SPARK).forEach((def,i)=>{ if(def && (b[2] & (1<<i))) items.push({ key:def[0], label:def[1], ok: !(b[3] & (1<<i)) }); });
+  return { diesel, items, open: items.filter(x=>!x.ok).length };
+}
+
 /* --- Antwort-Parser (gleich für echten Adapter und Simulation) --- */
 function elmClean(raw){
   return String(raw||'').replace(/>/g,'').split(/[\r\n]+/).map(l=>l.trim()).filter(l=>l && !/^(SEARCHING\.*|BUS INIT:?.*|STOPPED|OK)$/i.test(l));
@@ -5597,46 +5672,83 @@ class ElmBle {
   }
   disconnect(){ try{ this.device && this.device.gatt.connected && this.device.gatt.disconnect(); }catch(_){} }
 }
-/* --- Simulation: antwortet wie ein ELM327 an einem CAN-Fahrzeug --- */
+/* --- Simulation: antwortet wie ein ELM327 an einem CAN-Fahrzeug (Benziner) --- */
+const SIM_SUPPORTED = ['01','03','04','05','06','07','0B','0C','0D','0E','0F','10','11','13','1C','20','21','2F','30','31','40','42','46','5C'];
 class ElmSim {
-  constructor(vin){ this.name='Simulation'; this.sim=true; this.codes=['0420','0171']; this.pending=['C100']; this.mil=true; this.t0=Date.now(); this.vin=vin; }
+  constructor(vin){ this.name='Simulation'; this.sim=true; this.codes=['0420','0171']; this.pending=['C100']; this.mil=true; this.t0=Date.now(); this.vin=vin;
+    this.incomplete=0x04; this.warmups=37; this.distClear=1840; }
   async connect(){ await new Promise(r=>setTimeout(r,600)); }
+  // Messwerte des laufenden Motors (leicht schwankend); Ausgabe als Rohbytes je PID
+  liveBytes(pid, sec){
+    const h1 = n=>[Math.max(0,Math.min(255,Math.round(n)))], h2 = n=>{ n=Math.max(0,Math.round(n)); return [(n>>8)&255, n&255]; };
+    const rpm = 780+Math.sin(sec*1.7)*35+Math.random()*20;
+    switch(pid){
+      case '0C': return h2(rpm*4);
+      case '0D': return h1(0);
+      case '05': return h1(Math.min(90, 62+sec*0.6)+40);
+      case '04': return h1((19+Math.random()*4)*2.55);
+      case '11': return h1(14.5*2.55);
+      case '06': return h1(128 + (9+Math.sin(sec*3)*4)*1.28);
+      case '07': return h1(128 + 11.7*1.28);
+      case '0B': return h1(31+Math.random()*2);
+      case '10': return h2((3.1+Math.random()*0.3)*100);
+      case '0F': return h1(24+40);
+      case '0E': return h1((6+Math.random()*2+64)*2);
+      case '5C': return h1(Math.min(96, 55+sec*0.4)+40);
+      case '46': return h1(12+40);
+      case '2F': return h1(0.42*255);
+      case '42': return h2((this.cranked?14.1:12.5)*1000);
+    }
+    return null;
+  }
   async send(cmd){
     await new Promise(r=>setTimeout(r, 60 + Math.random()*90));
     const c = cmd.toUpperCase().replace(/\s/g,''); const h = (n,l)=>Math.max(0,Math.round(n)).toString(16).toUpperCase().padStart(l,'0');
+    const hx = arr=>arr.map(x=>h(x,2)).join('');
     const sec = (Date.now()-this.t0)/1000;
     if(c==='ATZ') return 'ELM327 v1.5\r\r>';
     if(c==='ATRV') return (this.cranked ? (14.0+Math.sin(sec)*0.15) : 12.6).toFixed(1)+'V\r\r>';
     if(c==='ATDPN') return 'A6\r\r>';
     if(c==='ATDP') return 'AUTO, ISO 15765-4 (CAN 11/500)\r\r>';
     if(c.startsWith('AT')) return 'OK\r\r>';
-    if(c==='0100') return '4100BE3FA813\r\r>';
-    if(c==='0101') return '4101'+h((this.mil?0x80:0)+this.codes.length,2)+'076500\r\r>';
+    if(/^01(00|20|40)$/.test(c)){
+      const base = parseInt(c.slice(2),16); const bytes=[0,0,0,0];
+      SIM_SUPPORTED.forEach(p=>{ const i=parseInt(p,16)-base-1; if(i>=0 && i<32) bytes[i>>3] |= 0x80>>(i&7); });
+      return '41'+c.slice(2)+hx(bytes)+'\r\r>';
+    }
+    // B: Funken (Bit3=0), alle Daueraufgaben unterstützt; C: Kat, EVAP, Lambda, Lambda-Heizung; D: offene Prüfungen
+    if(c==='0101') return '4101'+h((this.mil?0x80:0)+this.codes.length,2)+'07'+'65'+h(this.incomplete,2)+'\r\r>';
+    if(c==='0130') return '4130'+h(this.warmups,2)+'\r\r>';
+    if(c==='0131') return '4131'+h(this.distClear,4)+'\r\r>';
     if(c==='03') return '43'+h(this.codes.length,2)+this.codes.join('')+'\r\r>';
     if(c==='07') return '47'+h(this.pending.length,2)+this.pending.join('')+'\r\r>';
     if(c==='0A') return '4A00\r\r>';
-    if(c==='04'){ this.codes=[]; this.pending=[]; this.mil=false; return '44\r\r>'; }
+    if(c==='04'){ this.codes=[]; this.pending=[]; this.mil=false; this.incomplete=0x65; this.warmups=0; this.distClear=0; return '44\r\r>'; }
     if(c==='0902'){
       const hex = '01' + [...this.vin].map(ch=>h(ch.charCodeAt(0),2)).join('');
       const all = '4902' + hex; const parts = []; parts.push('0:'+all.slice(0,12)); let rest = all.slice(12), i=1;
       while(rest.length){ parts.push(((i++)%16).toString(16).toUpperCase()+':'+rest.slice(0,14)); rest = rest.slice(14); }
       return '014\r' + parts.join('\r') + '\r\r>';
     }
-    this.cranked = true;
-    if(c==='010C') return '410C'+h((780+Math.sin(sec*1.7)*35+Math.random()*20)*4,4)+'\r\r>';
-    if(c==='0105') return '4105'+h(Math.min(90, 62+sec*0.6)+40,2)+'\r\r>';
-    if(c==='0104') return '4104'+h((19+Math.random()*4)*2.55,2)+'\r\r>';
-    if(c==='010D') return '410D00\r\r>';
     if(c==='0121') return '4121'+h(this.mil?412:0,4)+'\r\r>';
+    // Freeze-Frame (Frame 0) gehört zum ersten gespeicherten Code: warmer Motor, Teillast bei 50 km/h
+    const ff = c.match(/^02([0-9A-F]{2})00$/);
+    if(ff){
+      if(!this.codes.length) return 'NO DATA\r\r>';
+      const FF = { '02':[parseInt(this.codes[0].slice(0,2),16), parseInt(this.codes[0].slice(2),16)], '0C':[0x1C,0x20], '0D':[50], '05':[128], '04':[0x6B], '11':[0x33], '06':[128+16], '07':[128+15], '0B':[58], '10':[0x05,0xDC], '0F':[58] };
+      return FF[ff[1]] ? '42'+ff[1]+'00'+hx(FF[ff[1]])+'\r\r>' : 'NO DATA\r\r>';
+    }
+    const m = c.match(/^01([0-9A-F]{2})$/);
+    if(m){ this.cranked = true; const b = this.liveBytes(m[1], sec); if(b) return '41'+m[1]+hx(b)+'\r\r>'; }
     return 'NO DATA\r\r>';
   }
   disconnect(){}
 }
 
 /* --- Zustand & Ablauf --- */
-var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, results:{}, history:{}, liveOn:false, liveTimer:null, confirmClear:false };
+var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false };
 function diagOrder(){ return diag.orderId ? orders.find(o=>o.id===diag.orderId) || null : null; }
-function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false }); }
+function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false, readiness:null, freeze:null, sinceClear:null, tasks:{} }); }
 function diagOnDisconnect(){
   if(!diag.conn || diag.conn.sim) return;
   diagStopLive(); diag.conn = null; diag.error = 'Verbindung zum Adapter getrennt.'; rerenderDiagPanel();
@@ -5659,6 +5771,10 @@ async function diagConnect(sim){
     const dpn = elmClean(await conn.send('ATDPN')).join('').replace(/^A/,'');
     diag.isCan = /^[6-9AB]$/i.test(dpn) ? true : /^[1-5]$/.test(dpn) ? false : null;
     diag.protocol = elmClean(await conn.send('ATDP')).join(' ').replace(/^AUTO,\s*/,'');
+    // Welche Messwerte liefert dieses Steuergerät? (0100 → PIDs 01–20, 0120 → 21–40, 0140 → 41–60)
+    const sup = parseSupported(probe.join('\r'), '00');
+    if(sup.includes('20')){ const s2 = parseSupported(await conn.send('0120', 6000), '20'); sup.push(...s2); if(s2.includes('40')) sup.push(...parseSupported(await conn.send('0140', 6000), '40')); }
+    diag.supported = sup.length ? new Set(sup) : null;
     diag.conn = conn;
     showUpdateToast(sim ? 'Simulation gestartet' : `Verbunden mit ${conn.name}`);
   }catch(err){
@@ -5675,7 +5791,9 @@ async function diagRead(){
   const o = diagOrder(); if(!diag.conn || diag.busy) return;
   const r = diagRes(o); diag.busy='read'; diag.error=''; diag.confirmClear=false; rerenderDiagPanel();
   try{
-    const st = parsePid(await diag.conn.send('0101', 6000), '01');
+    const raw01 = await diag.conn.send('0101', 6000);
+    const st = parsePid(raw01, '01');
+    r.readiness = parseReadiness(raw01);
     const stored = parseDtcs(await diag.conn.send('03', 8000), '43', diag.isCan);
     const pending = parseDtcs(await diag.conn.send('07', 8000), '47', diag.isCan);
     const perm = parseDtcs(await diag.conn.send('0A', 8000), '4A', diag.isCan);
@@ -5689,20 +5807,48 @@ async function diagRead(){
     r.live = { ...r.live, ...(st||{}) };
     const v = parseFloat(elmClean(await diag.conn.send('ATRV')).join('')); if(Number.isFinite(v)) r.live.voltage = v;
     const dm = parsePid(await diag.conn.send('0121'), '21'); if(dm!==null) r.live.distance_mil_km = dm;
+    // Seit dem letzten Löschen (zeigt z. B. beim Gebrauchtwagen-Check, ob kurz vorher gelöscht wurde)
+    const sc = {};
+    if(diagSup('30')){ const b = pidData(await diag.conn.send('0130'), '41', '30'); if(b) sc.warmups = b[0]; }
+    if(diagSup('31')){ const b = pidData(await diag.conn.send('0131'), '41', '31'); if(b && b.length>1) sc.km = b[0]*256+b[1]; }
+    r.sinceClear = Object.keys(sc).length ? sc : null;
+    r.freeze = stored.length ? await diagReadFreeze() : null;
   }catch(err){ diag.error = 'Auslesen fehlgeschlagen: ' + (err && err.message || err); }
   diag.busy=''; rerenderDiagPanel();
+}
+function diagSup(pid){ return !diag.supported || diag.supported.has(pid); }
+async function diagReadFreeze(){
+  const head = pidData(await diag.conn.send('020200', 6000), '42', '02');
+  if(!head || head.length<2) return null;
+  const code = decodeDtc(head[0], head[1]); if(!code) return null;
+  const values = {};
+  for(const pid of FREEZE_PIDS){
+    if(!diagSup(pid)) continue;
+    const def = LIVE_PIDS.find(x=>x.pid===pid);
+    const v = pidValue(def, pidData(await diag.conn.send('02'+pid+'00', 4000), '42', pid));
+    if(v!==null) values[def.key] = v;
+  }
+  return { code, values };
 }
 async function diagLiveTick(){
   const o = diagOrder(); if(!diag.conn || !diag.liveOn) return;
   const r = diagRes(o);
+  const avail = LIVE_PIDS.filter(p=>diagSup(p.pid) && r.live['_no_'+p.key]!==true);
+  const slow = avail.filter(p=>!p.fast);
+  // schnelle Werte jedes Mal, von den übrigen zwei reihum
+  const batch = avail.filter(p=>p.fast).concat(slow.length ? [slow[diag.liveRound % slow.length], slow[(diag.liveRound+1) % slow.length]] : []);
+  diag.liveRound += 2;
   try{
-    const rpm = parsePid(await diag.conn.send('010C'), '0C'); if(rpm!==null) r.live.rpm = Math.round(rpm);
-    const ct = parsePid(await diag.conn.send('0105'), '05'); if(ct!==null) r.live.coolant_c = ct;
-    const ld = parsePid(await diag.conn.send('0104'), '04'); if(ld!==null) r.live.load_pct = ld;
+    for(const p of [...new Set(batch)]){
+      if(!diag.liveOn) break;
+      const v = pidValue(p, pidData(await diag.conn.send('01'+p.pid), '41', p.pid));
+      if(v===null){ if(!diag.supported) r.live['_no_'+p.key] = true; continue; }
+      r.live[p.key] = v;
+    }
     const v = parseFloat(elmClean(await diag.conn.send('ATRV')).join('')); if(Number.isFinite(v)) r.live.voltage = v;
   }catch(_){}
   const box = document.getElementById('diagLive'); if(box) box.innerHTML = renderDiagLive(r.live);
-  if(diag.liveOn) diag.liveTimer = setTimeout(diagLiveTick, 700);
+  if(diag.liveOn) diag.liveTimer = setTimeout(diagLiveTick, 500);
 }
 function diagStopLive(){ diag.liveOn=false; clearTimeout(diag.liveTimer); }
 function diagToggleLive(){ if(diag.liveOn){ diagStopLive(); rerenderDiagPanel(); return; } if(!diag.conn) return; diag.liveOn=true; rerenderDiagPanel(); diagLiveTick(); }
@@ -5716,6 +5862,7 @@ async function diagClear(){
   if(o) await diagSave({ cleared:true, codes: before });
   r.remark=''; r.share=false;
   await diagRead();
+  showUpdateToast('Fehlerspeicher gelöscht – Readiness ist zurückgesetzt, vor der AU Fahrzyklus fahren.');
 }
 async function diagSave(extra){
   const o = diagOrder(); if(!o){ diag.error='Bitte oben einen Auftrag wählen, um die Diagnose zu speichern.'; rerenderDiagPanel(); return; }
@@ -5725,6 +5872,7 @@ async function diagSave(extra){
   diag.busy='save'; rerenderDiagPanel();
   const res = await tabletRequest('diagnosis_save', {
     order_id:o.id, codes, vin:r.vin, live:r.live, simulated: !!(diag.conn && diag.conn.sim), cleared: !!(extra && extra.cleared),
+    readiness: r.readiness, freeze: r.freeze, since_clear: r.sinceClear,
     adapter: diag.conn ? diag.conn.name : '', protocol: diag.protocol, remark: r.remark, share: !!r.share && !(extra && extra.cleared),
   }, 20000);
   diag.busy='';
@@ -5751,14 +5899,17 @@ function diagAskAlex(code){
 }
 
 /* --- Darstellung --- */
+function diagFmt(v,d=0){ return v===undefined||v===null ? '–' : Number(v).toLocaleString('de-DE',{minimumFractionDigits:0, maximumFractionDigits:d}); }
 function renderDiagLive(L){
-  const f = (v,d=0)=> v===undefined||v===null ? '–' : Number(v).toLocaleString('de-DE',{maximumFractionDigits:d});
   const cell = (lbl,val,unit,warn)=>`<div class="dg-live-c ${warn?'warn':''}"><span>${lbl}</span><b>${val}</b><i>${unit}</i></div>`;
-  return cell('Drehzahl', f(L.rpm), '1/min')
-    + cell('Kühlmittel', f(L.coolant_c), '°C', L.coolant_c>110)
-    + cell('Bordspannung', f(L.voltage,1), 'V', L.voltage!==undefined && (L.voltage<11.8 || L.voltage>15))
-    + cell('Motorlast', f(L.load_pct), '%')
+  let html = cell('Bordspannung', diagFmt(L.voltage,1), 'V', L.voltage!==undefined && (L.voltage<11.8 || L.voltage>15))
     + cell('Motorleuchte', L.mil===undefined?'–':L.mil?'AN':'aus', '', L.mil);
+  LIVE_PIDS.forEach(p=>{
+    if(L['_no_'+p.key]) return;
+    if(L[p.key]===undefined && !(diag.liveOn && diagSup(p.pid) && diag.supported)) return;
+    html += cell(p.label, diagFmt(L[p.key], p.d), p.unit, L[p.key]!==undefined && p.warn && p.warn(L[p.key]));
+  });
+  return html;
 }
 function renderDiagPanel(o){
   const r = diagRes(o);
@@ -5793,11 +5944,16 @@ function renderDiagPanel(o){
       ${r.codes.length ? `<div class="dg-table">${r.codes.map(x=>`<div class="dg-row">
           <span class="dg-code ${x.type}">${x.code}</span>
           <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${DTC_TYPE_LABEL[x.type]}</span></div>
-          <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
+          <div class="dg-row-acts">
+            <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
+            ${o && !sim ? (r.tasks[x.code] ? `<span class="dg-task-done">${iconCheck} Aufgabe angelegt</span>` : `<button class="btn" data-diagtask="${x.code}" ${diag.busy==='task'?'disabled':''}>${iconPlus} Aufgabe</button>`) : ''}
+          </div>
         </div>`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`}
+      ${renderDiagExtras(r)}
       <textarea id="diagRemark" class="dg-remark" rows="2" placeholder="Bemerkung (optional), z. B. Ursache gefunden, Teil bestellt…">${escHtml(r.remark||'')}</textarea>
       ${sim || !o ? '' : `<label class="dg-share"><input type="checkbox" id="diagShare" ${r.share?'checked':''} ${r.saved?'disabled':''}> Im Kundenportal anzeigen (Fehlercodes mit Beschreibung, ohne Bemerkung)</label>`}
       ${!o ? `<div class="alex-muted">Zum Speichern oben einen Auftrag wählen.</div>` : r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert${r.share && !sim ? ' – im Kundenportal sichtbar' : ''}</div>` : `<div class="alex-draft-actions"><button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button></div>`}
+      <div class="dg-proto"><button class="btn" id="diagPrintBtn">${iconDoc} Diagnoseprotokoll (Drucken/PDF)</button></div>
       <div class="alex-hint">${sim ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>
     </div>`;
   }
@@ -5812,6 +5968,80 @@ function renderDiagPanel(o){
     ${result}
     ${histHtml}
   </div>`;
+}
+/* Readiness, "seit Löschen", Freeze-Frame */
+function renderDiagExtras(r){
+  let html = '';
+  const rd = r.readiness;
+  if(rd && rd.items.length){
+    const verdict = rd.open===0
+      ? `<span class="dg-rd-ok">${iconCheck} Alle ${rd.items.length} Prüfungen abgeschlossen</span>`
+      : `<span class="dg-rd-open">${rd.open} von ${rd.items.length} Prüfungen noch offen – vor der AU ggf. Fahrzyklus fahren</span>`;
+    html += `<div class="dg-block"><div class="dg-head"><b>AU-Bereitschaft (Readiness, ${rd.diesel?'Diesel':'Benziner'})</b>${verdict}</div>
+      <div class="dg-rd">${rd.items.map(x=>`<div class="dg-rd-i ${x.ok?'ok':'open'}"><span class="dg-rd-dot"></span>${escHtml(x.label)}<em>${x.ok?'fertig':'offen'}</em></div>`).join('')}</div></div>`;
+  }
+  const sc = r.sinceClear;
+  if(sc){
+    const recent = (sc.km!==undefined && sc.km<100) || (sc.warmups!==undefined && sc.warmups<10);
+    html += `<div class="dg-since ${recent?'warn':''}">Seit letztem Löschen des Fehlerspeichers: <b>${sc.km!==undefined ? diagFmt(sc.km)+' km' : '–'}</b>${sc.warmups!==undefined ? ` · <b>${sc.warmups}</b> Warmlaufzyklen` : ''}${recent ? ' – <b>wurde kürzlich gelöscht</b> (Fehler evtl. noch nicht wieder erkannt)' : ''}</div>`;
+  }
+  const ff = r.freeze;
+  if(ff && Object.keys(ff.values).length){
+    html += `<div class="dg-block"><div class="dg-head"><b>Freeze-Frame zu ${escHtml(ff.code)}</b><span>Bedingungen, als der Fehler gespeichert wurde</span></div>
+      <div class="dg-ff">${LIVE_PIDS.filter(p=>ff.values[p.key]!==undefined).map(p=>`<div><span>${escHtml(p.label)}</span><b>${diagFmt(ff.values[p.key],p.d)} <i>${escHtml(p.unit)}</i></b></div>`).join('')}</div></div>`;
+  }
+  return html;
+}
+async function diagCreateTask(code){
+  const o = diagOrder(); if(!o || diag.busy) return;
+  const r = diagRes(o); const c = (r.codes||[]).find(x=>x.code===code); if(!c) return;
+  diag.busy='task'; rerenderDiagPanel();
+  const ff = r.freeze && r.freeze.code===code ? Object.entries(r.freeze.values).map(([k,v])=>{ const p = LIVE_PIDS.find(x=>x.key===k); return p ? `${p.label} ${diagFmt(v,p.d)} ${p.unit}` : ''; }).filter(Boolean).join(', ') : '';
+  const res = await tabletRequest('task_create', {
+    order_id:o.id,
+    title:`Fehler ${code} prüfen – ${c.desc}`.slice(0,120),
+    description:`Aus OBD-Diagnose: ${code} (${DTC_TYPE_LABEL[c.type]}) – ${c.desc}.${ff ? ' Freeze-Frame: '+ff+'.' : ''} Ursache prüfen, Herstellerdaten beachten.`,
+    estimated_minutes:30,
+  }, 15000);
+  diag.busy='';
+  if(res.ok){
+    r.tasks[code] = res.data.task_id;
+    showUpdateToast(`Aufgabe „Fehler ${code} prüfen“ am Auftrag angelegt`);
+    try{ await loadFromBase44(); }catch(_){}
+  } else diag.error = 'Aufgabe konnte nicht angelegt werden: ' + res.reason;
+  rerenderDiagPanel();
+}
+/* Druckbares Protokoll (iPad: Teilen → Drucken → als PDF sichern) */
+function diagPrint(){
+  const o = diagOrder(); const r = diagRes(o); const sim = diag.conn && diag.conn.sim;
+  const ws = (state.base44Data && state.base44Data.workshop) || {};
+  const e = escHtml, now = new Date();
+  const row = (k,v)=> v && v!=='–' ? `<tr><th>${e(k)}</th><td>${e(v)}</td></tr>` : '';
+  const liveRows = [['Bordspannung', r.live.voltage, 'V', 1], ...LIVE_PIDS.map(p=>[p.label, r.live[p.key], p.unit, p.d])]
+    .filter(x=>x[1]!==undefined).map(x=>`<tr><th>${e(x[0])}</th><td>${diagFmt(x[1],x[3])} ${e(x[2])}</td></tr>`).join('');
+  const rd = r.readiness, ff = r.freeze, sc = r.sinceClear;
+  const html = `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Diagnoseprotokoll ${e(o ? o.plate : '')}</title>
+  <style>body{font:13px/1.45 -apple-system,Helvetica,Arial,sans-serif;color:#111;margin:28px;} h1{font-size:20px;margin:0 0 2px} .sub{color:#555;margin-bottom:18px}
+  h2{font-size:14px;margin:20px 0 6px;border-bottom:1px solid #ccc;padding-bottom:3px} table{border-collapse:collapse;width:100%} th,td{text-align:left;padding:4px 6px;border-bottom:1px solid #eee;vertical-align:top} th{width:38%;font-weight:600;color:#333}
+  .code{font-family:Menlo,monospace;font-weight:700} .ok{color:#15803d} .open{color:#b45309} .sim{background:#fef3c7;border:1px solid #f59e0b;padding:8px 10px;border-radius:6px;margin-bottom:14px}
+  .foot{margin-top:28px;color:#666;font-size:11px} .sig{margin-top:40px;display:flex;gap:40px} .sig div{flex:1;border-top:1px solid #999;padding-top:4px;font-size:11px;color:#555}
+  @media print{body{margin:12mm}} </style></head><body>
+  <h1>Diagnoseprotokoll</h1><div class="sub">${e(ws.name || 'Werkstatt')} · ${now.toLocaleDateString('de-DE')} ${now.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}${state.currentUser ? ' · ' + e(state.currentUser.name) : ''}</div>
+  ${sim ? '<div class="sim"><b>Simulation</b> – keine echten Fahrzeugdaten, nur zur Vorführung.</div>' : ''}
+  <h2>Fahrzeug</h2><table>${o ? row('Auftrag', '#'+o.orderNumber) + row('Kunde', o.customer) + row('Fahrzeug', o.vehicle) + row('Kennzeichen', o.plate) + row('Km-Stand', o.km) : ''}${row('FIN (Steuergerät)', r.vin)}${row('Protokoll', diag.protocol)}${row('Adapter', diag.conn ? diag.conn.name : '')}</table>
+  <h2>Fehlerspeicher</h2>${r.codes && r.codes.length ? `<table>${r.codes.map(c=>`<tr><th class="code">${e(c.code)}</th><td>${e(c.desc)}<br><small>${e(DTC_TYPE_LABEL[c.type])}</small></td></tr>`).join('')}</table>` : '<p>Keine Fehlercodes gespeichert.</p>'}
+  ${r.live.mil!==undefined ? `<p>Motorkontrollleuchte: <b>${r.live.mil?'AN':'aus'}</b>${r.live.distance_mil_km ? ` · gefahren mit leuchtender MIL: ${diagFmt(r.live.distance_mil_km)} km` : ''}</p>` : ''}
+  ${sc ? `<p>Seit letztem Löschen: ${sc.km!==undefined ? diagFmt(sc.km)+' km' : '–'}${sc.warmups!==undefined ? ', '+sc.warmups+' Warmlaufzyklen' : ''}</p>` : ''}
+  ${ff && Object.keys(ff.values).length ? `<h2>Freeze-Frame zu ${e(ff.code)}</h2><table>${LIVE_PIDS.filter(p=>ff.values[p.key]!==undefined).map(p=>`<tr><th>${e(p.label)}</th><td>${diagFmt(ff.values[p.key],p.d)} ${e(p.unit)}</td></tr>`).join('')}</table>` : ''}
+  ${rd && rd.items.length ? `<h2>AU-Bereitschaft (Readiness)</h2><table>${rd.items.map(x=>`<tr><th>${e(x.label)}</th><td class="${x.ok?'ok':'open'}">${x.ok?'abgeschlossen':'offen'}</td></tr>`).join('')}</table><p>${rd.open ? rd.open+' Prüfung(en) offen.' : 'Alle unterstützten Prüfungen abgeschlossen.'}</p>` : ''}
+  ${liveRows ? `<h2>Messwerte</h2><table>${liveRows}</table>` : ''}
+  ${r.remark ? `<h2>Bemerkung</h2><p>${e(r.remark).replace(/\n/g,'<br>')}</p>` : ''}
+  <div class="sig"><div>Datum, Unterschrift Mechaniker</div><div>Datum, Unterschrift Kunde</div></div>
+  <div class="foot">Ausgelesen über die genormte OBD-II-Schnittstelle. Generische Fehlerbeschreibungen – herstellerspezifische Codes und Ursachen sind mit Herstellerdaten zu prüfen. Erstellt mit AutoLeitwerk.</div>
+  <script>setTimeout(function(){window.print()},300)<\/script></body></html>`;
+  const w = window.open('', '_blank');
+  if(!w){ showUpdateToast('Bitte Pop-ups für diese Seite erlauben, um das Protokoll zu öffnen.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
 }
 function rerenderDiagPanel(){ if(state.mainView!=='diagnose') return; const el = document.getElementById('diagPanel'); if(el) el.innerHTML = renderDiagPanel(diagOrder()); }
 function renderDiagnoseView(ov){
@@ -5844,6 +6074,8 @@ function handleDiagClick(e){
   if(t.closest('#diagClearNo')){ diag.confirmClear=false; rerenderDiagPanel(); return true; }
   if(t.closest('#diagClearYes')){ diagClear(); return true; }
   if(t.closest('#diagSaveBtn')){ diagSave(); return true; }
+  if(t.closest('#diagPrintBtn')){ diagPrint(); return true; }
+  const tk = t.closest('[data-diagtask]'); if(tk){ diagCreateTask(tk.dataset.diagtask); return true; }
   const a = t.closest('[data-diagalex]'); if(a){ diagAskAlex(a.dataset.diagalex); return true; }
   return false;
 }

@@ -406,7 +406,12 @@ async function loadSavedTireScan(db, env, code, orderId) {
 
 /* ---- OBD-Diagnose (Tablet liest Fehlerspeicher über ELM327-Adapter; Server speichert nur den Befund) ---- */
 const diagKey = (code, orderId) => `_diag/${code}/${orderId}`;
-const DIAG_LIVE_KEYS = ['rpm', 'coolant_c', 'voltage', 'speed_kmh', 'load_pct', 'intake_c', 'fuel_pct', 'dtc_count', 'distance_mil_km', 'distance_clear_km'];
+const DIAG_LIVE_KEYS = ['rpm', 'coolant_c', 'voltage', 'speed_kmh', 'load_pct', 'intake_c', 'fuel_pct', 'dtc_count', 'distance_mil_km', 'distance_clear_km',
+  'throttle_pct', 'stft1', 'ltft1', 'stft2', 'ltft2', 'map_kpa', 'maf_gs', 'timing_deg', 'oil_c', 'rail_bar', 'ambient_c', 'ecu_v'];
+const DIAG_LIVE_LABEL = { rpm: ['Drehzahl', ' 1/min'], speed_kmh: ['Geschw.', ' km/h'], coolant_c: ['Kühlmittel', ' °C'], load_pct: ['Last', ' %'], throttle_pct: ['Drosselklappe', ' %'],
+  stft1: ['Kurzzeit-Trim B1', ' %'], ltft1: ['Langzeit-Trim B1', ' %'], stft2: ['Kurzzeit-Trim B2', ' %'], ltft2: ['Langzeit-Trim B2', ' %'], map_kpa: ['Saugrohrdruck', ' kPa'],
+  maf_gs: ['Luftmasse', ' g/s'], intake_c: ['Ansaugluft', ' °C'], timing_deg: ['Zündwinkel', '°'], oil_c: ['Öl', ' °C'], rail_bar: ['Raildruck', ' bar'], ambient_c: ['Außen', ' °C'],
+  fuel_pct: ['Tank', ' %'], ecu_v: ['Spannung SG', ' V'] };
 function cleanDiagnosis(b) {
   const str = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
   if (!Array.isArray(b.codes) || b.codes.length > 60) throw new HttpError(400, 'params');
@@ -424,7 +429,26 @@ function cleanDiagnosis(b) {
   const live = {};
   if (b.live && typeof b.live === 'object') for (const k of DIAG_LIVE_KEYS) { const n = Number(b.live[k]); if (b.live[k] !== null && b.live[k] !== '' && Number.isFinite(n) && Math.abs(n) < 1e6) live[k] = Math.round(n * 10) / 10; }
   if (b.live && typeof b.live.mil === 'boolean') live.mil = b.live.mil;
-  return { codes, vin, live, simulated: !!b.simulated, cleared: !!b.cleared, share: !!b.share && !b.simulated, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
+  const num = (v, max) => { const n = Number(v); return v !== null && v !== '' && Number.isFinite(n) && Math.abs(n) < max ? Math.round(n * 10) / 10 : null; };
+  // Readiness (AU-Bereitschaft): nur Bezeichnung + fertig/offen
+  let readiness = null;
+  if (b.readiness && Array.isArray(b.readiness.items) && b.readiness.items.length <= 16) {
+    const items = b.readiness.items.map(x => ({ key: str(x && x.key, 20), label: str(x && x.label, 60), ok: !!(x && x.ok) })).filter(x => x.label);
+    if (items.length) readiness = { diesel: !!b.readiness.diesel, items, open: items.filter(x => !x.ok).length };
+  }
+  // Freeze-Frame: Code + bekannte Messwerte
+  let freeze = null;
+  if (b.freeze && typeof b.freeze === 'object') {
+    const fc = str(b.freeze.code, 5).toUpperCase(); const values = {};
+    if (b.freeze.values && typeof b.freeze.values === 'object') for (const k of DIAG_LIVE_KEYS) { const n = num(b.freeze.values[k], 1e6); if (n !== null) values[k] = n; }
+    if (/^[PCBU][0-3][0-9A-F]{3}$/.test(fc)) freeze = { code: fc, values };
+  }
+  let since_clear = null;
+  if (b.since_clear && typeof b.since_clear === 'object') {
+    const km = num(b.since_clear.km, 1e6), warmups = num(b.since_clear.warmups, 1000);
+    if (km !== null || warmups !== null) since_clear = { ...(km !== null ? { km } : {}), ...(warmups !== null ? { warmups } : {}) };
+  }
+  return { codes, vin, live, readiness, freeze, since_clear, simulated: !!b.simulated, cleared: !!b.cleared, share: !!b.share && !b.simulated, adapter: str(b.adapter, 80), protocol: str(b.protocol, 60), remark: str(b.remark, 1000) };
 }
 const DIAG_TYPE_LABEL = { stored: 'gespeichert', pending: 'sporadisch/ausstehend', permanent: 'permanent' };
 function diagnosisNote(d, name) {
@@ -441,7 +465,17 @@ function diagnosisNote(d, name) {
   if (L.voltage !== undefined) parts.push(`Bordspannung ${f(L.voltage, ' V')}`);
   if (L.load_pct !== undefined) parts.push(`Last ${f(L.load_pct, ' %')}`);
   if (L.distance_mil_km !== undefined) parts.push(`seit MIL ${f(L.distance_mil_km, ' km')}`);
+  for (const k of DIAG_LIVE_KEYS) if (L[k] !== undefined && DIAG_LIVE_LABEL[k] && !['rpm', 'coolant_c', 'load_pct'].includes(k)) parts.push(`${DIAG_LIVE_LABEL[k][0]} ${f(L[k], DIAG_LIVE_LABEL[k][1])}`);
   if (parts.length) lines.push('Messwerte: ' + parts.join(', '));
+  if (d.freeze) {
+    const fv = Object.entries(d.freeze.values).filter(([k]) => DIAG_LIVE_LABEL[k]).map(([k, v]) => `${DIAG_LIVE_LABEL[k][0]} ${f(v, DIAG_LIVE_LABEL[k][1])}`);
+    lines.push(`Freeze-Frame zu ${d.freeze.code}${fv.length ? ': ' + fv.join(', ') : ''}`);
+  }
+  if (d.readiness) {
+    const open = d.readiness.items.filter(x => !x.ok).map(x => x.label);
+    lines.push(`AU-Bereitschaft (Readiness): ${open.length ? open.length + ' von ' + d.readiness.items.length + ' offen (' + open.join(', ') + ')' : 'alle ' + d.readiness.items.length + ' Prüfungen abgeschlossen'}`);
+  }
+  if (d.since_clear) lines.push(`Seit letztem Löschen: ${d.since_clear.km !== undefined ? f(d.since_clear.km, ' km') : '–'}${d.since_clear.warmups !== undefined ? ', ' + d.since_clear.warmups + ' Warmlaufzyklen' : ''}`);
   if (d.remark) lines.push('Bemerkung Mechaniker: ' + d.remark.split(/\n+/).join('; '));
   lines.push('Generische OBD-Beschreibung – Herstellerdaten und Prüfung durch Mechaniker erforderlich.');
   return lines.join('\n');
@@ -606,6 +640,23 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     // Hebebühnen-Ansicht im Dashboard liest Fortschritt/aktuelle Aufgabe vom Lift → hier nachziehen
     await syncLiftProgress(db, task.order_id, code).catch(e => console.log('lift_sync', String(e)));
     return { ok: true, order_status: orderStatus };
+  }
+  if (action === 'task_create') {
+    rateLimit('taskc:' + sess.employee_id, 60, 3600_000);
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    const clean = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').trim().slice(0, n);
+    const title = clean(body.title, 120);
+    if (!title) throw new HttpError(400, 'params');
+    const est = Number(body.estimated_minutes);
+    const existing = await db.list('OrderTask', { order_id: order.id }, { limit: 500 });
+    const task = await db.create('OrderTask', {
+      order_id: order.id, workshop_code: code, title, description: clean(body.description, 1000) || null, status: 'offen',
+      order_index: existing.reduce((m, t) => Math.max(m, Number(t.order_index) || 0), 0) + 1,
+      ...(Number.isFinite(est) && est > 0 && est <= 600 ? { estimated_minutes: Math.round(est) } : {}),
+    });
+    invalidate('OrderTask');
+    await syncLiftProgress(db, order.id, code).catch(e => console.log('lift_sync', String(e)));
+    return { ok: true, task_id: task.id };
   }
   if (action === 'worktime_start') {
     if (body.order_id) await ownRecord(db, 'Order', body.order_id, code);
