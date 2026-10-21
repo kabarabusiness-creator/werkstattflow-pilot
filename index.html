@@ -1262,6 +1262,10 @@
   .dg-ecu-id{font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:12px;padding:3px 7px;border-radius:6px;background:var(--panel-2);}
   .dg-ecu-st{font-size:12px;font-weight:600;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;} .dg-ecu-st.ok{color:#16a34a;} .dg-ecu-st.ok svg{width:14px;height:14px;} .dg-ecu-st.err{color:var(--danger-text,#dc2626);} .dg-ecu-st.neg{color:#d97706;font-weight:500;}
   .dg-code small{font-size:10px;margin-left:3px;opacity:.75;}
+  .dg-info{display:flex;flex-direction:column;gap:8px;margin:-2px 0 4px;padding:10px 12px;border-radius:0 0 10px 10px;background:var(--panel-2);border-top:1px dashed var(--border);font-size:13px;line-height:1.45;}
+  .dg-info ol{margin:4px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:2px;} .dg-info b{font-size:12.5px;}
+  .dg-info-m{font-weight:500;} .dg-info-ftb{padding:6px 8px;border-radius:8px;background:var(--panel);font-size:12.5px;}
+  .dg-info-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--text-faint);}
   .dg-hist{display:flex;flex-direction:column;gap:4px;font-size:12px;} .dg-hist>b{font-size:12.5px;margin-bottom:2px;}
   .dg-hist-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border);color:var(--text-faint);} .dg-hist-row span:last-child{color:var(--text);text-align:right;}
   .dg-simtag{font-style:normal;font-size:10.5px;padding:1px 6px;border-radius:6px;background:rgba(245,158,11,.15);color:var(--warning-text);}
@@ -5514,6 +5518,179 @@ function dtcDescription(code){
 }
 const DTC_TYPE_LABEL = { stored:'gespeichert', pending:'sporadisch', permanent:'permanent' };
 
+/* --- Fehlercode-Wissen: Bedeutung, häufige Ursachen (wahrscheinlichste zuerst), Prüfen & Beheben ---
+   Generisch (markenunabhängig). Herstellerdaten/Reparaturleitfaden haben immer Vorrang. */
+const DTC_KB = {
+  P0011:{ m:'Die Einlassnockenwelle steht weiter auf „früh“ als vom Steuergerät gefordert.',
+    u:['Ölstand zu niedrig oder falsche Ölviskosität','Magnetventil Nockenwellenverstellung verschmutzt/hängt','Sieb im Ölkanal zum Ventil zugesetzt','Steuerkette gelängt / Versteller defekt'],
+    p:['Ölstand und Ölqualität prüfen, ggf. Ölwechsel mit Freigabe-Öl','Magnetventil ausbauen, Sieb reinigen, Ansteuerung per Stellglieddiagnose testen','Soll-/Ist-Winkel der Nockenwelle in den Messwerten vergleichen','Bei Kettengeräusch beim Kaltstart: Steuertrieb prüfen'] },
+  P0016:{ m:'Kurbelwellen- und Nockenwellensignal passen zeitlich nicht zusammen.',
+    u:['Steuerkette/Zahnriemen gelängt oder übersprungen','Nockenwellenversteller defekt','Kurbel- oder Nockenwellensensor / Geberrad beschädigt'],
+    p:['Messwert „Abweichung Nockenwelle/Kurbelwelle“ auslesen','Steuerzeiten mit Arretierwerkzeug prüfen','Sensoren und Geberräder sichtprüfen, Signal mit Oszilloskop vergleichen','Nicht weiterfahren lassen, wenn Kette übersprungen sein könnte (Motorschaden)'] },
+  P0087:{ m:'Der Kraftstoffdruck im Rail ist niedriger als gefordert.',
+    u:['Kraftstofffilter zugesetzt','Vorförderpumpe (Tank) schwach','Hochdruckpumpe verschlissen','Druckregelventil/Raildrucksensor defekt','Luft im System (Diesel) / Tank fast leer'],
+    p:['Tankinhalt prüfen, Filter tauschen','Vordruck messen (Herstellerwert)','Soll/Ist-Raildruck unter Last in Live-Daten vergleichen','Rücklaufmengen der Injektoren prüfen (Diesel)'] },
+  P0101:{ m:'Das Luftmassen-Signal passt nicht zur berechneten Luftmenge.',
+    u:['Luftmassenmesser verschmutzt/defekt','Falschluft nach dem LMM (Schlauch, Ansaugbrücke, KGE)','Luftfilter stark verschmutzt','AGR-Ventil hängt offen'],
+    p:['Luftfilter und Ansaugtrakt auf Risse/Undichtigkeit prüfen','LMM-Wert im Leerlauf und bei 3000 1/min mit Sollwert vergleichen','Rauchtest auf Falschluft','LMM nur mit Spezialreiniger reinigen oder tauschen'] },
+  P0128:{ m:'Der Motor erreicht nicht rechtzeitig Betriebstemperatur.',
+    u:['Thermostat hängt offen','Kühlmitteltemperatursensor ungenau','Kühlerlüfter läuft dauerhaft'],
+    p:['Temperaturverlauf nach Kaltstart in Live-Daten beobachten','Kühlerschlauch oben fühlen: wird er früh warm, öffnet Thermostat zu früh','Sensorwert mit Infrarot-Thermometer vergleichen','Thermostat erneuern, Kühlsystem entlüften'] },
+  P0130:{ m:'Die Lambdasonde vor Kat liefert ein fehlerhaftes Signal.',
+    u:['Lambdasonde gealtert','Kabel/Stecker beschädigt','Abgasleck vor der Sonde'],
+    p:['Sondenspannung im Leerlauf und bei 2500 1/min beobachten (Sprungsonde pendelt 0,1–0,9 V)','Leitung und Stecker prüfen','Abgasanlage vor der Sonde auf Undichtigkeit prüfen'] },
+  P0133:{ m:'Die Lambdasonde vor Kat reagiert zu langsam.',
+    u:['Sonde gealtert/verrußt','Abgasleck vor der Sonde','Motor läuft dauerhaft zu fett (Öl-/Kühlmittelverbrennung vergiftet Sonde)'],
+    p:['Reaktionszeit der Sonde in Live-Daten prüfen','Ursache für Verrußung klären (Ölverbrauch, Kühlmittel)','Sonde erneuern'] },
+  P0135:{ m:'Die Heizung der Lambdasonde vor Kat funktioniert nicht.',
+    u:['Heizelement in der Sonde durchgebrannt','Sicherung/Relais der Sondenheizung','Kabel oder Stecker beschädigt'],
+    p:['Widerstand des Heizelements messen (meist wenige Ohm)','Versorgungsspannung am Stecker bei Motor an prüfen','Sicherung prüfen, Sonde ggf. tauschen'] },
+  P0141:{ m:'Die Heizung der Lambdasonde nach Kat funktioniert nicht.',
+    u:['Heizelement der Sonde defekt','Sicherung/Kabel'],
+    p:['Widerstand Heizelement messen','Spannungsversorgung und Masse prüfen','Sonde tauschen'] },
+  P0171:{ m:'Das Gemisch ist zu mager – das Steuergerät muss dauerhaft Kraftstoff hinzufügen (Langzeit-Trim hoch).',
+    u:['Falschluft (Unterdruckschlauch, Ansaugdichtung, Kurbelgehäuseentlüftung, Bremskraftverstärker)','Luftmassenmesser misst zu wenig','Kraftstoffdruck zu niedrig / Filter','Einspritzventile verschmutzt'],
+    p:['Trims prüfen: hoch im Leerlauf, normal bei Drehzahl → eher Falschluft; überall hoch → eher Kraftstoff/LMM','Rauchtest oder Bremsenreiniger-Test an Ansaugung','KGE-Ventil prüfen (häufige Ursache)','Kraftstoffdruck messen, LMM-Wert prüfen'] },
+  P0172:{ m:'Das Gemisch ist zu fett – das Steuergerät muss dauerhaft Kraftstoff wegnehmen.',
+    u:['Einspritzventil tropft','Kraftstoffdruck zu hoch','Luftmassenmesser misst zu viel','Aktivkohlefilter-Ventil hängt offen','Kühlmitteltemperatursensor meldet zu kalt'],
+    p:['Trims und LMM-Wert prüfen','Tankentlüftungsventil auf Dichtheit prüfen','Kraftstoffdruck und Haltedruck messen','Kühlmitteltemperatur-Wert plausibilisieren'] },
+  P0234:{ m:'Der Ladedruck ist höher als zulässig (Überladung).',
+    u:['Wastegate/VTG-Verstellung hängt','Ladedruckregelventil/Unterdruckleitung defekt','Ladedrucksensor falsch'],
+    p:['Soll/Ist-Ladedruck bei Volllast-Beschleunigung vergleichen','Unterdruckleitungen und Steller prüfen','Stellglieddiagnose Ladedrucksteller','Turbolader-Verstellung auf Gängigkeit prüfen (Verkokung beim Diesel)'] },
+  P0299:{ m:'Der Ladedruck ist niedriger als gefordert (Unterladung).',
+    u:['Ladeluftschlauch/Ladeluftkühler undicht','VTG/Wastegate hängt','Unterdruck für Steller fehlt','Turbolader verschlissen'],
+    p:['Ladeluftstrecke abdrücken und auf Ölspuren/Risse prüfen','Soll/Ist-Ladedruck unter Last vergleichen','Unterdruck am Steller messen','Turbolader auf Axial-/Radialspiel prüfen'] },
+  P0300:{ m:'Es werden Verbrennungsaussetzer auf mehreren/wechselnden Zylindern erkannt.',
+    u:['Zündkerzen verschlissen','Falschluft','Kraftstoffdruck zu niedrig','Zündspulen','mechanisch: Kompression/Ventile'],
+    p:['Aussetzerzähler je Zylinder in Live-Daten ansehen','Zündkerzen und Spulen prüfen','Falschluft und Kraftstoffdruck prüfen','Kompressionstest bei Verdacht auf Mechanik','Mit Aussetzern nicht lange fahren – Katalysator kann überhitzen'] },
+  P0335:{ m:'Kein oder fehlerhaftes Signal vom Kurbelwellensensor.',
+    u:['Sensor defekt','Kabel/Stecker (oft durch Hitze/Öl)','Geberrad beschädigt oder verschmutzt'],
+    p:['Startet der Motor nicht: Drehzahlanzeige beim Starten prüfen','Sensorwiderstand/Signal (Oszilloskop) prüfen','Stecker auf Öl/Korrosion prüfen, Sensor tauschen'] },
+  P0340:{ m:'Kein oder fehlerhaftes Signal vom Nockenwellensensor.',
+    u:['Sensor defekt','Kabel/Stecker','Geberrad / Steuerzeiten'],
+    p:['Versorgung und Signal am Sensor messen','Stecker prüfen','Bei gleichzeitigem P0016: Steuerzeiten prüfen'] },
+  P0380:{ m:'Störung im Stromkreis der Glühanlage (Diesel).',
+    u:['Glühkerze(n) defekt','Glühzeitsteuergerät/-relais','Kabel/Stecker'],
+    p:['Widerstand jeder Glühkerze messen (meist < 2 Ω)','Stromaufnahme beim Vorglühen prüfen','Glühkerzen vorsichtig lösen (Abrissgefahr, warm ausbauen)'] },
+  P0401:{ m:'Die Abgasrückführung bringt zu wenig Durchfluss.',
+    u:['AGR-Ventil verkokt/klemmt','AGR-Kanäle oder AGR-Kühler zugesetzt','Unterdruck/Ansteuerung fehlt'],
+    p:['Stellglieddiagnose AGR-Ventil, Bewegung sichtprüfen','Ventil und Kanäle auf Verkokung prüfen, reinigen oder tauschen','Bei Diesel: Ansaugbrücke auf Verkokung prüfen'] },
+  P0402:{ m:'Die Abgasrückführung bringt zu viel Durchfluss.',
+    u:['AGR-Ventil hängt offen','Positionssensor am Ventil defekt'],
+    p:['Ist-Position des AGR-Ventils im Leerlauf prüfen','Ventil ausbauen und Sitz prüfen','Ventil erneuern, danach anlernen'] },
+  P0420:{ m:'Der Katalysator speichert zu wenig Sauerstoff – die Lambdasonde hinter Kat schwankt fast so stark wie die vor Kat.',
+    u:['Katalysator gealtert/beschädigt','Lambdasonde nach Kat defekt oder träge','Abgasleck vor der hinteren Sonde','Vorangegangene Aussetzer oder hoher Ölverbrauch'],
+    p:['Erst andere Fehler (Aussetzer, Gemisch) beheben','Sondenspannungen vergleichen: hintere Sonde sollte ruhig bei ca. 0,6–0,7 V liegen','Abgasanlage auf Undichtigkeit prüfen','Hintere Sonde prüfen, dann Kat beurteilen','AU-Relevanz beachten'] },
+  P0442:{ m:'Kleines Leck in der Tankentlüftung (EVAP).',
+    u:['Tankdeckel undicht/nicht richtig geschlossen','Schläuche der Tankentlüftung porös','Aktivkohlefilter/Ventil undicht'],
+    p:['Tankdeckel und Dichtung prüfen','Leitungen sichtprüfen','Rauchtest der Tankentlüftung'] },
+  P0455:{ m:'Großes Leck in der Tankentlüftung (EVAP).',
+    u:['Tankdeckel fehlt/offen','Schlauch abgerutscht','Ventil der Tankentlüftung defekt'],
+    p:['Tankdeckel prüfen','Schlauchverbindungen am Aktivkohlefilter prüfen','Stellglieddiagnose Tankentlüftungsventil'] },
+  P0456:{ m:'Sehr kleines Leck in der Tankentlüftung (EVAP).',
+    u:['Tankdeckeldichtung','Minimale Undichtigkeit an Leitungen'],
+    p:['Tankdeckel tauschen/prüfen','Rauchtest','Fehler tritt oft nur sporadisch auf – nach Reparatur Fahrzyklen abwarten'] },
+  P0500:{ m:'Kein oder fehlerhaftes Geschwindigkeitssignal.',
+    u:['Raddrehzahlsensor / ABS-Fehler (Signal kommt meist vom ABS)','Datenbus-Problem','Tachosensor (ältere Fahrzeuge)'],
+    p:['ABS-Steuergerät auslesen','Raddrehzahlen in Live-Daten vergleichen','Bus-Fehler (U-Codes) zuerst prüfen'] },
+  P0505:{ m:'Die Leerlaufregelung funktioniert nicht richtig.',
+    u:['Drosselklappe verschmutzt','Falschluft','Leerlaufsteller/Drosselklappe nicht angelernt'],
+    p:['Drosselklappe reinigen','Drosselklappe/Leerlauf anlernen (Grundeinstellung)','Falschluft prüfen'] },
+  P0562:{ m:'Das Steuergerät misst zu niedrige Bordspannung.',
+    u:['Batterie schwach','Lichtmaschine/Regler defekt','Masseverbindung oder Pluskabel korrodiert'],
+    p:['Batterie testen (Ruhespannung, Kaltstartstrom)','Ladespannung bei laufendem Motor messen (ca. 13,8–14,7 V)','Spannungsabfall an Masse- und Plusleitung messen'] },
+  P0606:{ m:'Das Motorsteuergerät meldet einen internen Fehler.',
+    u:['Spannungseinbrüche/Unterspannung','Softwarefehler','Steuergerät defekt'],
+    p:['Bordspannung und Massen prüfen','Software-Update laut Hersteller prüfen','Fehler löschen und beobachten, bevor das Steuergerät getauscht wird'] },
+  P0700:{ m:'Das Getriebesteuergerät hat einen Fehler gespeichert.',
+    u:['Fehler liegt im Getriebe-Steuergerät – P0700 ist nur der Hinweis'],
+    p:['Getriebesteuergerät separat auslesen (beim VW-Konzern: Steuergeräte-Scan)','Ölstand und Ölzustand des Getriebes prüfen'] },
+  P2002:{ m:'Der Partikelfilter filtert nicht mehr ausreichend.',
+    u:['DPF beschädigt/gerissen','Differenzdrucksensor oder Schläuche defekt'],
+    p:['Differenzdruck in Live-Daten bei Leerlauf und Last prüfen','Schläuche zum Drucksensor prüfen','DPF-Zustand beurteilen'] },
+  P2187:{ m:'Gemisch im Leerlauf zu mager.',
+    u:['Falschluft (häufigste Ursache)','Kurbelgehäuseentlüftung defekt','LMM'],
+    p:['Rauchtest der Ansaugung','KGE-Membran prüfen','Trims im Leerlauf und bei Drehzahl vergleichen'] },
+  P2279:{ m:'Falschluft im Ansaugsystem erkannt.',
+    u:['Ansaugschlauch/Dichtung undicht','Kurbelgehäuseentlüftung','Unterdruckleitung'],
+    p:['Rauchtest','Schläuche nach dem LMM prüfen','KGE-Ventil prüfen'] },
+  P2463:{ m:'Der Partikelfilter ist zu stark mit Ruß beladen.',
+    u:['Viele Kurzstrecken, Regeneration bricht ab','Fehler, der die Regeneration verhindert (AGR, Sensoren, Glühanlage)','Differenzdrucksensor misst falsch'],
+    p:['Andere Fehler zuerst beheben','Rußbeladung und letzte Regeneration in Live-Daten prüfen','Service-Regeneration über Diagnosegerät','Bei sehr hoher Beladung: DPF reinigen/tauschen'] },
+  P242F:{ m:'Der Partikelfilter ist mit Asche zugesetzt (nicht regenerierbar).',
+    u:['Hohe Laufleistung','Ölverbrauch / falsches Öl (Low-SAPS beachten)'],
+    p:['Ascheberechnung/Laufleistung prüfen','DPF reinigen lassen oder tauschen, danach Werte zurücksetzen/anlernen'] },
+  P20EE:{ m:'Der SCR-Katalysator (AdBlue) reduziert zu wenig NOx.',
+    u:['AdBlue-Qualität/Kristallisation','Dosierventil verstopft','NOx-Sensor defekt','SCR-Kat gealtert'],
+    p:['AdBlue-Konzentration prüfen (Refraktometer)','Dosiermenge prüfen (Stellglieddiagnose)','NOx-Sensorwerte vor/nach SCR vergleichen'] },
+  U0100:{ m:'Ein Steuergerät bekommt keine Botschaften vom Motorsteuergerät.',
+    u:['Spannungsversorgung/Masse des Motorsteuergeräts','CAN-Leitung oder Stecker','Steuergerät war kurz ohne Spannung (z. B. Batterie abgeklemmt, Starthilfe)'],
+    p:['Prüfen, ob der Fehler sporadisch ist (oft nach Batteriearbeiten)','Versorgung und Masse am Motorsteuergerät messen','CAN-Widerstand (ca. 60 Ω) und Pegel messen','Fehler löschen, Probefahrt'] },
+  U0121:{ m:'Ein Steuergerät bekommt keine Botschaften vom ABS/ESP-Steuergerät.',
+    u:['Versorgung/Masse ABS-Steuergerät','CAN-Leitung','Unterspannung beim Start'],
+    p:['ABS-Steuergerät auslesen: erreichbar?','Sicherungen und Massen prüfen','Bei sporadischem Auftreten: Batterie testen'] },
+  C0035:{ m:'Störung am Raddrehzahlsensor vorne links.',
+    u:['Sensor defekt','Kabel am Radhaus beschädigt (Scheuerstelle, Marder)','Geber-/Magnetring verschmutzt oder beschädigt','Radlagerspiel'],
+    p:['Raddrehzahlen aller Räder bei langsamer Fahrt vergleichen','Kabel bis zum Stecker sichtprüfen','Sensor ausbauen, Magnetring/Lager prüfen','Sensor tauschen, Fehler löschen, Probefahrt'] },
+  C0040:{ m:'Störung am Raddrehzahlsensor vorne rechts.', ref:'C0035' },
+  C0045:{ m:'Störung am Raddrehzahlsensor hinten links.', ref:'C0035' },
+  C0050:{ m:'Störung am Raddrehzahlsensor hinten rechts.', ref:'C0035' },
+  B0001:{ m:'Störung im Zündkreis des Fahrer-Frontairbags.',
+    u:['Wickelfeder (Schleifring) im Lenkrad defekt','Stecker am Airbag-Modul','Airbag-Modul'],
+    p:['Sicherheitsregeln beachten: Batterie abklemmen, Wartezeit einhalten, Airbag nur geschult ausbauen','Widerstand nur mit Airbag-Ersatzwiderstand messen, nie direkt am Airbag','Wickelfeder prüfen (oft auch Hupe/Lenkradtasten ohne Funktion)','Nach Reparatur Fehler löschen, Airbag-Leuchte muss ausgehen'] },
+};
+// Zündaussetzer einzelner Zylinder
+for(let z=1; z<=8; z++) DTC_KB['P030'+z] = { m:`Verbrennungsaussetzer auf Zylinder ${z}.`,
+  u:[`Zündkerze Zylinder ${z}`,`Zündspule Zylinder ${z}`,`Einspritzventil Zylinder ${z}`,'Kompression (Ventile, Kolbenringe)'],
+  p:[`Zündspule mit Nachbarzylinder tauschen: wandert der Fehler mit, ist die Spule defekt`,'Zündkerze prüfen/erneuern','Einspritzventil prüfen bzw. ebenfalls tauschen und testen',`Kompression Zylinder ${z} messen`,'Mit Aussetzern nicht lange fahren – Katalysator kann überhitzen'] };
+DTC_KB.P0174 = { m:'Das Gemisch auf Bank 2 ist zu mager (Langzeit-Trim hoch).', ref:'P0171' };
+DTC_KB.P0175 = { m:'Das Gemisch auf Bank 2 ist zu fett.', ref:'P0172' };
+DTC_KB.P0136 = { m:'Die Lambdasonde nach Kat liefert ein fehlerhaftes Signal.', ref:'P0130' };
+
+// Allgemeine Hilfe nach Codegruppe, wenn kein Eintrag existiert
+function dtcGroupHelp(code){
+  const L = code[0], d = code[1], g = code[2];
+  const manu = d==='1' || (d==='3' && L!=='P');
+  if(L==='U') return { u:['Spannungsversorgung oder Masse des genannten Steuergeräts','CAN-/Bus-Leitung, Stecker, Feuchtigkeit','Unterspannung (Batterie, Starthilfe, Batteriewechsel)'],
+    p:['Prüfen, ob das genannte Steuergerät erreichbar ist','Batterie und Massen prüfen','Busleitungen messen (CAN-Widerstand ca. 60 Ω)','Fehler löschen und prüfen, ob er wiederkommt'] };
+  if(L==='C') return { u:['Sensor (Raddrehzahl, Lenkwinkel, Drehrate)','Kabel/Stecker im Radhaus','Fehlende Grundeinstellung (z. B. Lenkwinkelsensor nach Achsvermessung)'],
+    p:['ABS/ESP-Messwerte vergleichen','Leitungen sichtprüfen','Grundeinstellung/Anlernen laut Hersteller'] };
+  if(L==='B') return { u:['Stecker/Kabel (Sitze, Türen, Lenkrad)','Bauteil defekt','Codierung/Anlernen fehlt'],
+    p:['Bei Airbag-Fehlern Sicherheitsregeln beachten','Stecker unter Sitzen/an Türen prüfen','Herstellerdaten für genaue Bedeutung nutzen'] };
+  if(g==='3') return { u:['Zündkerzen/Zündspulen','Einspritzventile','Falschluft','Kompression'], p:['Aussetzerzähler je Zylinder prüfen','Zündung und Einspritzung prüfen','Kompressionstest'] };
+  if(g==='1' || g==='2' || g==='0') return { u:['Sensor im Luft-/Kraftstoffsystem','Falschluft','Kraftstoffdruck','Kabel/Stecker'], p:['Live-Daten (Trims, LMM, Drücke) mit Sollwerten vergleichen','Leitungen prüfen','Rauchtest auf Falschluft'] };
+  if(g==='4') return { u:['Abgasnachbehandlung (Kat, AGR, Tankentlüftung, DPF, SCR)','Sensoren der Abgasanlage'], p:['Andere Motorfehler zuerst beheben','Stellglieddiagnose der betroffenen Komponente','AU-Relevanz beachten'] };
+  if(g==='5') return { u:['Leerlaufregelung, Geschwindigkeitssignal, Bordspannung'], p:['Bordspannung und Ladung prüfen','Drosselklappe reinigen/anlernen'] };
+  if(g==='6') return { u:['Steuergerät oder dessen Versorgung'], p:['Spannung und Massen prüfen','Software-Stand prüfen'] };
+  if(g==='7' || g==='8' || g==='9') return { u:['Getriebe: Sensor, Magnetventil, Ölstand'], p:['Getriebesteuergerät auslesen','Getriebeöl prüfen'] };
+  return manu ? { u:['Herstellerspezifisch – Bedeutung je Marke unterschiedlich'], p:['Herstellerdaten oder ALEX fragen'] } : null;
+}
+// Zusatz nach Fehlerart (UDS, 3. Byte)
+const FTB_HELP = {
+  '11':'Kurzschluss nach Masse: Leitung auf Scheuerstellen prüfen, Widerstand gegen Masse messen.',
+  '12':'Kurzschluss nach Plus: Leitung auf Kontakt mit Plusleitungen prüfen.',
+  '13':'Unterbrechung: Durchgang der Leitung messen, Stecker auf Korrosion/zurückgeschobene Pins prüfen.',
+  '14':'Kurzschluss nach Masse oder Unterbrechung: Leitung und Stecker durchmessen.',
+  '15':'Kurzschluss nach Plus oder Unterbrechung: Leitung und Stecker durchmessen.',
+  '16':'Spannung zu niedrig: Versorgung, Masse und Batterie prüfen.', '17':'Spannung zu hoch: Ladespannung/Regler prüfen.',
+  '1C':'Spannung außerhalb des Bereichs: Versorgung und Signalleitung messen.', '1D':'Strom außerhalb des Bereichs: Bauteilwiderstand und Leitung messen.',
+  '29':'Signal ungültig: Sensor, Geber und Steckverbindung prüfen; Signal mit Oszilloskop ansehen.',
+  '2F':'Signal unregelmäßig: Wackelkontakt – Stecker und Kabel unter Bewegung prüfen.',
+  '31':'Kein Signal: Versorgung des Sensors und Signalleitung prüfen.',
+  '54':'Grundeinstellung fehlt: Anlernen/Grundeinstellung mit Diagnosegerät durchführen.',
+  '55':'Nicht codiert/angelernt: Codierung oder Anlernvorgang laut Hersteller.',
+  '64':'Signal unplausibel: Wert mit anderen Sensoren vergleichen, Sensor prüfen.',
+  '71':'Stellglied blockiert: Mechanik auf Gängigkeit prüfen, Stellglieddiagnose.',
+  '87':'Botschaft fehlt: Sender-Steuergerät und Busleitung prüfen.',
+  '96':'Bauteil intern defekt: Versorgung prüfen, sonst Bauteil tauschen.',
+};
+function dtcHelp(code, ftb){
+  let e = DTC_KB[code];
+  if(e && e.ref){ const base = DTC_KB[e.ref] || {}; e = { m: e.m || base.m, u: base.u, p: base.p }; }
+  const g = e ? null : dtcGroupHelp(code);
+  return { m: e ? e.m : '', u: (e ? e.u : g && g.u) || [], p: (e ? e.p : g && g.p) || [], specific: !!e, ftb: ftb && FTB_HELP[ftb] || '' };
+}
+
 /* --- Messwerte (Mode 01) – gleiche Tabelle für Live-Daten, Freeze-Frame und Protokoll ---
    fast: wird bei jedem Live-Durchlauf abgefragt, sonst reihum (schont langsame BLE-Adapter) */
 const LIVE_PIDS = [
@@ -5840,7 +6017,7 @@ class ElmSim {
 }
 
 /* --- Zustand & Ablauf --- */
-var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false };
+var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false, openInfo:{} };
 function diagOrder(){ return diag.orderId ? orders.find(o=>o.id===diag.orderId) || null : null; }
 function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false, readiness:null, freeze:null, sinceClear:null, tasks:{}, ecus:null, ecuScanAt:null }); }
 function diagOnDisconnect(){
@@ -6079,10 +6256,11 @@ function renderDiagPanel(o){
           <span class="dg-code ${x.type}">${x.code}</span>
           <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${DTC_TYPE_LABEL[x.type]}</span></div>
           <div class="dg-row-acts">
+            <button class="btn ${diag.openInfo[x.code]?'primary':''}" data-diaginfo="${x.code}">${diag.openInfo[x.code]?'Schließen':'Anzeigen'}</button>
             <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
             ${o && !sim ? (r.tasks[x.code] ? `<span class="dg-task-done">${iconCheck} Aufgabe angelegt</span>` : `<button class="btn" data-diagtask="${x.code}" ${diag.busy==='task'?'disabled':''}>${iconPlus} Aufgabe</button>`) : ''}
           </div>
-        </div>`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`}
+        </div>${diag.openInfo[x.code] ? renderDtcInfo(x.code, x.code, '') : ''}`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`}
       ${renderDiagExtras(r)}
       <textarea id="diagRemark" class="dg-remark" rows="2" placeholder="Bemerkung (optional), z. B. Ursache gefunden, Teil bestellt…">${escHtml(r.remark||'')}</textarea>
       ${sim || !o ? '' : `<label class="dg-share"><input type="checkbox" id="diagShare" ${r.share?'checked':''} ${r.saved?'disabled':''}> Im Kundenportal anzeigen (Fehlercodes mit Beschreibung, ohne Bemerkung)</label>`}
@@ -6102,6 +6280,19 @@ function renderDiagPanel(o){
     ${result}
     ${renderDiagEcus(o, r)}
     ${histHtml}
+  </div>`;
+}
+function renderDtcInfo(key, code, ftb){
+  const h = dtcHelp(code, ftb);
+  const li = a=>a.map(x=>`<li>${escHtml(x)}</li>`).join('');
+  return `<div class="dg-info">
+    ${h.m ? `<div class="dg-info-m">${escHtml(h.m)}</div>` : ''}
+    ${h.u.length ? `<div><b>Häufige Ursachen</b><ol>${li(h.u)}</ol></div>` : ''}
+    ${h.p.length ? `<div><b>Prüfen &amp; beheben</b><ol>${li(h.p)}</ol></div>` : ''}
+    ${h.ftb ? `<div class="dg-info-ftb"><b>Fehlerart ${escHtml(ftb)}:</b> ${escHtml(h.ftb)}</div>` : ''}
+    ${!h.u.length && !h.p.length ? '<div class="alex-muted">Für diesen Code liegt noch keine Beschreibung vor.</div>' : ''}
+    <div class="dg-info-foot"><span>${h.specific ? 'Allgemeine Werkstatterfahrung' : 'Allgemeine Hinweise zur Fehlergruppe'} – Herstellerdaten und Reparaturleitfaden haben Vorrang.</span>
+      <button class="btn" data-diagalex="${escHtml(key)}">Ausführlich mit ALEX</button></div>
   </div>`;
 }
 function renderDiagEcus(o, r){
@@ -6125,9 +6316,10 @@ function renderDiagEcus(o, r){
           <span class="dg-code ${x.active?'stored':'pending'}">${x.code}<small>${x.ftb!=='00'?x.ftb:''}</small></span>
           <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${x.active?'aktiv':'sporadisch'}${x.ftb_text ? ' · ' + escHtml(x.ftb_text) : ''}</span></div>
           <div class="dg-row-acts">
+            <button class="btn ${diag.openInfo[key]?'primary':''}" data-diaginfo="${escHtml(key)}">${diag.openInfo[key]?'Schließen':'Anzeigen'}</button>
             <button class="btn" data-diagalex="${escHtml(key)}">ALEX fragen</button>
             ${o && !sim ? (r.tasks[key] ? `<span class="dg-task-done">${iconCheck} Aufgabe angelegt</span>` : `<button class="btn" data-diagtask="${escHtml(key)}" ${diag.busy==='task'?'disabled':''}>${iconPlus} Aufgabe</button>`) : ''}
-          </div></div>`; }).join('')}
+          </div></div>${diag.openInfo[key] ? renderDtcInfo(key, x.code, x.ftb) : ''}`; }).join('')}
       </div>`; }).join('')}</div>
       <div class="alex-hint">${r.ecus.length - found.length} von ${r.ecus.length} abgefragten Adressen ohne Antwort (nicht verbaut oder ältere Steuergeräte-Generation). Beschreibungen generisch – Herstellerdaten beachten.</div>`;
   }
@@ -6251,6 +6443,7 @@ function handleDiagClick(e){
   if(t.closest('#diagSaveBtn')){ diagSave(); return true; }
   if(t.closest('#diagPrintBtn')){ diagPrint(); return true; }
   if(t.closest('#diagScanBtn')){ diagScanVag(); return true; }
+  const inf = t.closest('[data-diaginfo]'); if(inf){ const k = inf.dataset.diaginfo; if(diag.openInfo[k]) delete diag.openInfo[k]; else diag.openInfo[k] = true; rerenderDiagPanel(); return true; }
   const tk = t.closest('[data-diagtask]'); if(tk){ diagCreateTask(tk.dataset.diagtask); return true; }
   const a = t.closest('[data-diagalex]'); if(a){ diagAskAlex(a.dataset.diagalex); return true; }
   return false;
