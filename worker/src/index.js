@@ -16,7 +16,7 @@
  * gespeichert als SHA-256 in WorkshopSession; PIN = sha256(salt + ":" + pin).
  */
 
-import { alexAsk, tireScan } from './ai.js';
+import { alexAsk, tireScan, berichtsheftDraft } from './ai.js';
 import { handleFunction } from './dash.js';
 import { syncInvoiceMirror } from './invoices.js';
 import { handleCeo, readSettings, parseModules, logError, storeTicket } from './ceo.js';
@@ -517,6 +517,17 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     const [tablet, inventory] = await Promise.all([getTabletData(db, sess), cachedList(db, 'InventoryItem')]);
     const res = await alexAsk(db, sess, body, env, { ...tablet, inventory: inventory.filter(i => i.workshop_code === code) });
     countUsage('alex', 1, code);
+    return res;
+  }
+  // Berichtsheft-Vorschlag: Tätigkeiten des angemeldeten Mitarbeiters an einem Tag (KI nur, wenn ALEX für die Werkstatt freigeschaltet ist)
+  if (action === 'berichtsheft_draft') {
+    rateLimit('bh:' + sess.employee_id, 30, 3600_000);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || '')) ? body.date : new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
+    let useAi = body.ai !== false;
+    if (useAi) { try { await workshopGate(db, env, code, 'alex'); } catch (_) { useAi = false; } }
+    const [tablet, notes] = await Promise.all([getTabletData(db, sess), cachedList(db, 'InternalNote').catch(() => [])]);
+    const res = await berichtsheftDraft(env, emp.name, tablet, notes.filter(n => n.workshop_code === code), date, useAi);
+    if (res.ai) countUsage('alex', 1, code);
     return res;
   }
   if (action === 'tire_scan') {

@@ -837,5 +837,40 @@ await t('Rechnungen GoBD: Server-Nummer, Archiv mit Prüfwert, Storno, Journal, 
   const log = (await fn('invoiceLog', {})).data.events.map(e => e.event);
   for (const ev of ['ausgestellt', 'storniert', 'zahlungsstatus', 'abgerufen']) assert.ok(log.includes(ev), ev);
 });
+await t('Berichtsheft-Vorschlag: nur eigene Tätigkeiten des Tages, ohne Kundendaten, Fallback ohne KI', async () => {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
+  const now = new Date().toISOString();
+  db.Order.push({ id: 'o9', workshop_code: 'AL-T1', status: 'reparatur_laeuft', customer_name: 'Herr Geheim', license_plate: 'AB-CD 123', vehicle_brand: 'VW', vehicle_model: 'Polo' });
+  db.OrderTask.push(
+    { id: 't9a', order_id: 'o9', workshop_code: 'AL-T1', title: 'Bremsbeläge VA erneuert', status: 'erledigt', completed_by: 'Erika Muster', completed_date: now, estimated_minutes: 60 },
+    { id: 't9b', order_id: 'o9', workshop_code: 'AL-T1', title: 'Fremde Arbeit', status: 'erledigt', completed_by: 'Jemand Anders', completed_date: now },
+    { id: 't9c', order_id: 'o9', workshop_code: 'AL-T1', title: 'Gestern erledigt', status: 'erledigt', completed_by: 'Erika Muster', completed_date: '2020-01-01T10:00:00Z' },
+    { id: 't9d', order_id: 'o9', workshop_code: 'AL-T1', title: 'Klimaservice', status: 'in_arbeit' });
+  db.WorkTime.push({ id: 'w9', employee_name: 'Erika Muster', task_id: 't9a', order_id: 'o9', workshop_code: 'AL-T1', start_timestamp: now, duration_minutes: 75 },
+    { id: 'w9b', employee_name: 'Erika Muster', task_id: 't9d', order_id: 'o9', workshop_code: 'AL-T1', start_timestamp: now, duration_minutes: 20 });
+  db.InternalNote.push({ id: 'n9', order_id: 'o9', task_id: 't9a', workshop_code: 'AL-T1', author_name: 'Erika Muster', content: 'Scheiben unter Verschleißgrenze, Beläge 2 mm', created_date: now });
+  const realNow = Date.now; let shift = 0; Date.now = () => realNow() + shift; shift += 60_000; // Server-Cache (30 s) überspringen
+  let r = (await call('/tabletAction', { action: 'berichtsheft_draft', date: day }, token)).data;
+  assert.equal(r.ok, true); assert.equal(r.ai, false);
+  const titles = r.items.map(i => i.title);
+  assert.ok(titles.includes('Bremsbeläge VA erneuert') && titles.includes('Klimaservice')); assert.ok(!titles.includes('Fremde Arbeit') && !titles.includes('Gestern erledigt'));
+  const bb = r.items.find(i => i.title === 'Bremsbeläge VA erneuert'); assert.equal(bb.minutes, 75); assert.equal(r.items.find(i => i.title === 'Klimaservice').kind, 'mitgearbeitet');
+  assert.match(r.text, /- Bremsbeläge VA erneuert \(VW Polo\)/); assert.equal(/Geheim|AB-CD/.test(JSON.stringify(r)), false);
+  // mit KI: Prompt ohne Kundendaten, Antwort bereinigt
+  let seen;
+  env.AI = { async run(m, input) { seen = input; return { response: 'Hier dein Eintrag:\n- Bremsbeläge an der Vorderachse eines VW Polo erneuert (AB-CD 123)\n* Beim Klimaservice mitgearbeitet' }; } };
+  r = (await call('/tabletAction', { action: 'berichtsheft_draft', date: day }, token)).data;
+  assert.equal(r.ai, true); assert.equal(JSON.stringify(seen).includes('Geheim'), false); assert.equal(JSON.stringify(seen).includes('AB-CD'), false);
+  assert.match(JSON.stringify(seen), /Verschleißgrenze/);
+  assert.deepEqual(r.text.split('\n'), ['- Bremsbeläge an der Vorderachse eines VW Polo erneuert', '- Beim Klimaservice mitgearbeitet']);
+  // KI-Kontingent leer → Vorschlag trotzdem (ohne KI)
+  env.AI = { async run() { throw new Error('4006: daily free allocation'); } };
+  r = (await call('/tabletAction', { action: 'berichtsheft_draft', date: day }, token)).data;
+  assert.equal(r.ai, false); assert.match(r.text, /Bremsbeläge VA erneuert/);
+  delete env.AI;
+  r = (await call('/tabletAction', { action: 'berichtsheft_draft', date: '2019-05-05' }, token)).data;
+  assert.equal(r.items.length, 0); assert.equal(r.text, '');
+  Date.now = realNow;
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

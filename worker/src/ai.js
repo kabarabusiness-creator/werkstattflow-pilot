@@ -378,3 +378,57 @@ export async function tireScanImages(key, images, env) {
   if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
   return normalizeTire(await visionJson(env, TIRE_PROMPT, images.slice(0, 3), 900));
 }
+
+/* ---------- Berichtsheft: Tätigkeiten eines Tages sammeln und als Vorschlag formulieren ----------
+   Quelle: am Tablet erledigte Aufgaben, gebuchte Zeiten, Sprachberichte/Notizen und Diagnosen des Mitarbeiters.
+   Ins Berichtsheft gehören keine Kundendaten – die KI bekommt nur Fahrzeugtyp und Tätigkeit. */
+const BH_SYSTEM = `Du schreibst Einträge für das Berichtsheft (Ausbildungsnachweis) einer/eines Auszubildenden in der Kfz-Werkstatt.
+Aus den TÄTIGKEITEN des Tages formulierst du kurze, sachliche Stichpunkte in Ich-Form und Vergangenheit, z. B. "- Bremsbeläge und Bremsscheiben an der Vorderachse eines VW Golf 7 erneuert".
+Regeln:
+- Nur Tätigkeiten aus den Daten. Nichts erfinden, keine zusätzlichen Arbeitsschritte, keine Messwerte, die nicht genannt sind.
+- Keine Kundennamen, Kennzeichen, FIN, Preise oder Auftragsnummern. Fahrzeug nur als Marke/Modell.
+- Fachlich korrekte Begriffe. Gleichartige Tätigkeiten zusammenfassen. Höchstens 8 Stichpunkte, keine Zeitangaben.
+- Antworte NUR mit der Liste, jede Zeile beginnt mit "- ". Keine Überschrift, keine Einleitung.`;
+const berlinDay = iso => { const t = Date.parse(/Z|[+-]\d\d:?\d\d$/.test(String(iso)) ? iso : iso + 'Z'); return Number.isFinite(t) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(t)) : ''; };
+export function berichtsheftItems(name, data, notes, date) {
+  const orders = Object.fromEntries((data.orders || []).map(o => [o.id, o]));
+  const veh = id => { const o = orders[id]; return o ? [o.vehicle_brand, o.vehicle_model].filter(Boolean).join(' ') : ''; };
+  const wts = (data.worktimes || []).filter(w => w.employee_name === name && berlinDay(w.start_timestamp) === date);
+  const myNotes = (notes || []).filter(n => n.author_name === name && berlinDay(n.created_date) === date);
+  const items = [];
+  (data.tasks || []).filter(t => t.status === 'erledigt' && t.completed_by === name && berlinDay(t.completed_date) === date).forEach(t => {
+    const booked = wts.filter(w => w.task_id === t.id).reduce((s, w) => s + (Number(w.duration_minutes) || 0), 0);
+    const report = myNotes.filter(n => n.task_id === t.id && !/^OBD-Diagnose/.test(n.content || '')).map(n => String(n.content).slice(0, 400)).join(' ');
+    items.push({ kind: 'aufgabe', title: String(t.title || 'Aufgabe').slice(0, 120), vehicle: veh(t.order_id), minutes: booked || Number(t.estimated_minutes) || 0, detail: report });
+  });
+  // Zeiten ohne erledigte Aufgabe (z. B. noch offen oder freie Tätigkeit)
+  const done = new Set(items.map(i => i.title));
+  wts.filter(w => !(data.tasks || []).some(t => t.id === w.task_id && t.status === 'erledigt' && t.completed_by === name)).forEach(w => {
+    const t = (data.tasks || []).find(x => x.id === w.task_id);
+    const title = String((t && t.title) || w.description || '').slice(0, 120); if (!title || done.has(title)) return;
+    done.add(title); items.push({ kind: 'mitgearbeitet', title, vehicle: veh(w.order_id), minutes: Number(w.duration_minutes) || 0, detail: '' });
+  });
+  myNotes.filter(n => /^OBD-Diagnose \(Fahrzeug ausgelesen\)/.test(n.content || '')).forEach(n => {
+    items.push({ kind: 'diagnose', title: 'Fehlerspeicher mit OBD-Diagnosegerät ausgelesen', vehicle: veh(n.order_id), minutes: 0, detail: (String(n.content).match(/\b[PCBU][0-3][0-9A-F]{3}\b/g) || []).slice(0, 5).join(', ') });
+  });
+  return items;
+}
+export function berichtsheftFallback(items) {
+  return items.map(i => `- ${i.title}${i.vehicle ? ' (' + i.vehicle + ')' : ''}${i.kind === 'mitgearbeitet' ? ' – mitgearbeitet' : ''}${i.kind === 'diagnose' && i.detail ? ', Fehlercodes ' + i.detail : ''}`).join('\n');
+}
+export async function berichtsheftDraft(env, name, data, notes, date, useAi) {
+  const items = berichtsheftItems(name, data, notes, date);
+  const minutes = items.reduce((s, i) => s + i.minutes, 0);
+  const base = { ok: true, date, items: items.map(({ kind, title, vehicle, minutes }) => ({ kind, title, vehicle, minutes })), minutes };
+  if (!items.length) return { ...base, text: '', ai: false };
+  if (useAi && env.AI) {
+    try {
+      const facts = items.map((i, n) => `${n + 1}. ${i.kind === 'mitgearbeitet' ? '(mitgearbeitet, noch nicht abgeschlossen) ' : ''}${i.title}${i.vehicle ? ' – Fahrzeug: ' + i.vehicle : ''}${i.detail ? ' – Bericht/Details: ' + i.detail : ''}`).join('\n');
+      const r = await runAi(env, TEXT_MODEL, { messages: [{ role: 'system', content: BH_SYSTEM }, { role: 'user', content: `TÄTIGKEITEN am ${deDate(date)}:\n${facts}` }], max_tokens: 400, temperature: 0.2 });
+      const lines = textOf(r).split('\n').map(l => l.trim().replace(/^[*•–]\s+/, '- ')).filter(l => /^- \S/.test(l)).slice(0, 10)
+        .map(l => l.replace(/\b[A-ZÄÖÜ]{1,3}-[A-ZÄÖÜ]{1,2}\s?\d{1,4}[EH]?\b/g, '').replace(/\b[A-HJ-NPR-Z0-9]{17}\b/g, '').replace(/\(\s*\)/g, '').replace(/\s{2,}/g, ' ').replace(/\s+([.,;])/g, '$1').trim());
+      if (lines.length) return { ...base, text: lines.join('\n'), ai: true };
+    } catch (e) { console.log('bh_ai', String((e && e.code) || e)); }
+  }
+  return { ...base, text: berichtsheftFallback(items), ai: false };
+}

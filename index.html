@@ -1263,7 +1263,16 @@
   .bh-item{display:grid;grid-template-columns:1fr auto;gap:0 10px;padding:6px 8px;border-radius:8px;background:var(--panel-2);} .bh-item b{font-size:13.5px;font-weight:600;} .bh-item span{grid-column:1;font-size:12px;color:var(--text-faint);} .bh-item em{grid-row:1/3;grid-column:2;align-self:center;font-style:normal;font-size:12.5px;color:var(--text-dim);font-variant-numeric:tabular-nums;}
   .bh-empty{font-size:12px;color:var(--text-faint);}
   .bh-tips{display:flex;flex-direction:column;gap:8px;} .bh-tips>div{display:flex;flex-direction:column;gap:3px;padding:12px;border-radius:12px;background:var(--panel);border:1px solid var(--border);} .bh-tips span{font-size:13px;color:var(--text-dim);line-height:1.45;}
-  .bh-menu{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .dg-menu.bh-menu{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .bh-chips{display:flex;gap:6px;flex-wrap:wrap;} .bh-chip{font:inherit;font-size:13px;padding:7px 12px;border-radius:999px;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer;} .bh-chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;} .bh-chip:disabled{opacity:.4;}
+  .bh-alex{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:14px;background:var(--panel);border:1px solid var(--border);}
+  .bh-alex-h{display:flex;gap:10px;align-items:center;} .bh-alex-h>div{display:flex;flex-direction:column;} .bh-alex-h span{font-size:12.5px;color:var(--text-faint);}
+  .bh-alex-av{display:grid;place-items:center;flex-shrink:0;}
+  .bh-draft{width:100%;box-sizing:border-box;font:inherit;font-size:14px;line-height:1.55;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);resize:vertical;}
+  .bh-src{font-size:12.5px;color:var(--text-dim);} .bh-src summary{cursor:pointer;color:var(--text-faint);} .bh-src div{padding:2px 0 2px 14px;}
+  .bh-day-alex{padding:3px 9px;font-size:12px;margin-left:8px;} .bh-day-alex svg{width:13px;height:13px;}
+  .bh-nudge{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;z-index:60;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:var(--panel);border:1px solid var(--border);box-shadow:0 10px 30px rgba(0,0,0,.18);max-width:calc(100vw - 32px);}
+  .bh-nudge>div{display:flex;flex-direction:column;font-size:13px;} .bh-nudge>div span{color:var(--text-dim);}
   .dg-menu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
   @media (min-width:1300px){ .dg-menu{grid-template-columns:repeat(5,minmax(0,1fr));} }
   .dg-tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:20px 18px 18px;border-radius:16px;background:var(--panel);border:1px solid var(--border);color:var(--text);font:inherit;cursor:pointer;min-height:168px;transition:transform .12s, border-color .12s, box-shadow .12s;}
@@ -1974,6 +1983,7 @@ async function loadFromBase44(){
   const data = await fetchBase44Data();
   state.base44Data = data;
   try{ renderTrialBanner(); }catch(_){} // Ankündigung aus der CEO-Konsole aktuell halten
+  setTimeout(()=>{ try{ bhMaybeNudge(); }catch(_){} }, 0);
   const prevOrders = orders;
   orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
   attachSavedTaskData(orders, data);
@@ -2327,6 +2337,7 @@ const iconSupport = svg('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12"
 const iconChevRight = svg('<polyline points="9 18 15 12 9 6"/>');
 const iconChevronsLeft = svg('<polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>');
 const iconArrowLeft = svg('<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>');
+const iconSpark = svg('<path d="M12 3l1.8 4.6L18.5 9.4 13.8 11.2 12 16l-1.8-4.8L5.5 9.4l4.7-1.8z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>');
 const iconBook = svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/>');
 const iconInfo = svg('<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.6" r=".6"/>');
 const iconBackspace = svg('<path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/>');
@@ -6669,7 +6680,69 @@ function diagPrint(){
 function rerenderDiagPanel(){ if(state.mainView!=='diagnose') return; const el = document.getElementById('diagPanel'); if(el) el.innerHTML = renderDiagPanel(diagOrder()); }
 /* ===== Berichtsheft (Azubis): Hauptmenü → Lernwelt (Vogel) / Tätigkeiten der Woche / Tipps ===== */
 const BERICHTSHEFT_URL = 'https://app.lernwelt.vogel.de/';   // leitet selbst zur Anmeldung (SSO) weiter
-var bh = { screen:'menu', weekOffset:0 };
+var bh = { screen:'menu', weekOffset:0, date:null, drafts:{} };
+const bhIso = d => d.toLocaleDateString('en-CA');
+const bhStoreKey = date => `autoleitwerk.bh.${(state.currentUser && state.currentUser.name) || '-'}.${date}`;
+function bhTodayCount(){ const today = bhIso(new Date()); const w = bhActivities(0); const d = w.days.find(x=>bhIso(x.date)===today); return d ? d.items.length : 0; }
+// ALEX-Vorschlag vom Server holen (formuliert mit KI, sonst aus den Aufgaben); eigene Änderungen bleiben auf dem Gerät gespeichert
+async function bhLoadDraft(date, force){
+  const cur = bh.drafts[date];
+  if(cur && (cur.loading || (cur.text!==undefined && !force))) return;
+  let saved = null; try{ saved = localStorage.getItem(bhStoreKey(date)); }catch(_){}
+  if(saved && !force){ bh.drafts[date] = { text:saved, edited:true, items:null, ai:null }; }
+  bh.drafts[date] = { ...(bh.drafts[date]||{}), loading:true, error:'' }; bhRerender();
+  const r = await tabletRequest('berichtsheft_draft', { date }, 45000);
+  const d = bh.drafts[date] || {};
+  if(r.ok){
+    const keep = d.edited && !force;
+    bh.drafts[date] = { loading:false, items:r.data.items, minutes:r.data.minutes, ai:r.data.ai, text: keep ? d.text : r.data.text, edited: keep };
+    if(force){ try{ localStorage.removeItem(bhStoreKey(date)); }catch(_){} }
+  } else bh.drafts[date] = { ...d, loading:false, error: r.reason || 'Fehler' };
+  bhRerender();
+}
+function bhRerender(){ if(state.mainView==='berichtsheft') renderBerichtsheftView(document.getElementById('otherView')); }
+function bhOpenAlex(date){ bh.screen = 'alex'; bh.date = date; bhRerender(); bhLoadDraft(date); }
+async function bhCopyDraft(){
+  const box = document.getElementById('bhDraft'); const txt = box ? box.value : '';
+  if(!txt.trim()){ showUpdateToast('Noch kein Text zum Kopieren'); return; }
+  let ok = false;
+  try{ await navigator.clipboard.writeText(txt); ok = true; }catch(_){ try{ box.select(); ok = document.execCommand('copy'); }catch(__){} }
+  showUpdateToast(ok ? 'Kopiert – jetzt im Berichtsheft einfügen' : 'Kopieren nicht möglich – Text markieren und kopieren');
+}
+function renderBhAlex(){
+  const date = bh.date || bhIso(new Date()); const d = bh.drafts[date] || {};
+  const w = bhWeek(bh.weekOffset); const days = [0,1,2,3,4].map(i=>{ const x = new Date(w.mon); x.setDate(w.mon.getDate()+i); return x; });
+  const dt = new Date(date + 'T12:00:00');
+  return `<div class="bh-chips">${days.map(x=>{ const iso = bhIso(x); return `<button class="bh-chip ${iso===date?'on':''}" data-bhday="${iso}" ${x > new Date() ? 'disabled' : ''}>${x.toLocaleDateString('de-DE',{weekday:'short'})} ${x.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})}</button>`; }).join('')}</div>
+    <div class="bh-alex">
+      <div class="bh-alex-h"><span class="bh-alex-av">${alexAvatar(32)}</span><div><b>ALEX-Vorschlag für ${dt.toLocaleDateString('de-DE',{weekday:'long', day:'2-digit', month:'2-digit'})}</b>
+        <span>${d.loading ? 'ALEX sammelt deine Tätigkeiten…' : d.error ? escHtml(d.error) : d.items ? (d.items.length ? `${d.items.length} Tätigkeit${d.items.length>1?'en':''} erfasst${d.minutes ? ' · ' + minutesToLabel(d.minutes) : ''}${d.ai ? ' · von ALEX formuliert' : ''}` : 'An diesem Tag hast du am Tablet keine Aufgaben abgeschlossen.') : d.edited ? 'deine gespeicherte Fassung' : ''}</span></div></div>
+      ${d.loading && !d.text ? '<div class="dg-scan-run"><span class="dg-spin"></span>Einen Moment…</div>' : ''}
+      <textarea id="bhDraft" class="bh-draft" rows="9" placeholder="Hier erscheint der Vorschlag. Ergänze Berufsschule, Unterweisungen oder Arbeiten ohne Tablet einfach selbst.">${escHtml(d.text||'')}</textarea>
+      ${d.items && d.items.length ? `<details class="bh-src"><summary>Erfasst aus AutoLeitwerk</summary>${d.items.map(x=>`<div>${escHtml(x.title)}${x.vehicle?' · '+escHtml(x.vehicle):''}${x.kind==='mitgearbeitet'?' · mitgearbeitet':''}${x.kind==='diagnose'?' · Diagnose':''}${x.minutes?' · '+minutesToLabel(x.minutes):''}</div>`).join('')}</details>` : ''}
+      <div class="dg-bar"><button class="btn primary" id="bhCopyDraft">${iconDoc} Kopieren</button><button class="btn" id="bhOpenBtn">${iconBook} Berichtsheft öffnen</button><button class="btn" id="bhRedo" ${d.loading?'disabled':''}>Neu vorschlagen</button></div>
+      <div class="alex-hint">Vorschlag ohne Kundennamen und Kennzeichen. Bitte prüfen und ergänzen – du bist für dein Berichtsheft selbst verantwortlich.</div>
+    </div>`;
+}
+// Nachmittags-Hinweis: einmal pro Tag, nur für Nutzer, die das Berichtsheft schon einmal geöffnet haben
+function bhMaybeNudge(){
+  try{
+    if(!state.currentUser || localStorage.getItem('autoleitwerk.bhUsed.' + state.currentUser.name)!=='1') return;
+    const now = new Date(); if(now.getHours()*60 + now.getMinutes() < 15*60+30 || now.getDay()===0) return;
+    const key = 'autoleitwerk.bhNudge.' + state.currentUser.name + '.' + bhIso(now);
+    if(localStorage.getItem(key)) return;
+    const n = bhTodayCount(); if(!n) return;
+    localStorage.setItem(key, '1');
+    if(document.getElementById('bhNudge')) return;
+    const el = document.createElement('div'); el.id = 'bhNudge'; el.className = 'bh-nudge';
+    el.innerHTML = `<span class="bh-alex-av">${alexAvatar(32)}</span><div><b>ALEX</b><span>${n>1 ? `Deine ${n} Tätigkeiten von heute sind` : 'Deine Tätigkeit von heute ist'} fürs Berichtsheft vorbereitet.</span></div><button class="btn primary" id="bhNudgeGo">Ansehen</button><button class="btn" id="bhNudgeX" aria-label="Schließen">✕</button>`;
+    document.body.appendChild(el);
+  }catch(_){}
+}
+document.addEventListener('click', (e)=>{
+  if(e.target.closest('#bhNudgeX')){ const n = document.getElementById('bhNudge'); if(n) n.remove(); return; }
+  if(e.target.closest('#bhNudgeGo')){ const n = document.getElementById('bhNudge'); if(n) n.remove(); bh.weekOffset = 0; setMainView('berichtsheft'); bhOpenAlex(bhIso(new Date())); }
+});
 function bhWeek(offset){
   const now = new Date(); const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7) + offset*7);
@@ -6725,7 +6798,9 @@ function renderBerichtsheftView(ov){
   const head = `<div class="ov-head"><div><h1>Berichtsheft</h1><div class="sub">Ausbildungsnachweis führen – mit deinen Tätigkeiten aus AutoLeitwerk</div></div></div>`;
   const back = (t, ic)=>`<div class="dg-screen-h"><button class="btn" data-bh="menu">${iconArrowLeft} Hauptmenü</button><span class="dg-screen-ic">${ic}</span><b>${t}</b></div>`;
   let body = '';
-  if(bh.screen==='woche'){
+  if(bh.screen==='alex'){
+    body = `${back('Heute von ALEX', iconSpark)}${renderBhAlex()}`;
+  } else if(bh.screen==='woche'){
     const w = bhActivities(bh.weekOffset);
     const total = w.days.reduce((s,d)=>s+d.items.reduce((a,x)=>a+x.minutes,0),0);
     const n = w.days.reduce((s,d)=>s+d.items.length,0);
@@ -6737,7 +6812,7 @@ function renderBerichtsheftView(ov){
       </div>
       <div class="bh-sum"><span>${n} erledigte Aufgaben</span><span>${total ? minutesToLabel(total) + ' gebucht/geplant' : ''}</span></div>
       <div class="bh-days">${w.days.map(d=>`<div class="bh-day">
-          <div class="bh-day-h">${d.date.toLocaleDateString('de-DE',{weekday:'long'})}<span>${d.date.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})}</span></div>
+          <div class="bh-day-h">${d.date.toLocaleDateString('de-DE',{weekday:'long'})}<span>${d.date.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})}${d.items.length ? ` <button class="btn bh-day-alex" data-bhalex="${bhIso(d.date)}">${iconSpark} ALEX-Vorschlag</button>` : ''}</span></div>
           ${d.items.length ? d.items.map(x=>`<div class="bh-item"><b>${escHtml(x.title)}</b><span>${escHtml(x.vehicle||'')}</span><em>${x.minutes ? minutesToLabel(x.minutes) : ''}</em></div>`).join('') : '<div class="bh-empty">keine erledigten Aufgaben – z. B. Berufsschule, Unterweisung oder Werkstattpflege selbst eintragen</div>'}
         </div>`).join('')}</div>
       <div class="dg-bar"><button class="btn primary" id="bhCopyBtn">${iconDoc} Woche kopieren</button><button class="btn" id="bhOpenBtn">${iconBook} Berichtsheft öffnen</button></div>
@@ -6752,26 +6827,35 @@ function renderBerichtsheftView(ov){
       </div>`;
   } else {
     const tiles = [
+      ['alex', alexAvatar(34, { ring:false }), 'Heute von ALEX', 'ALEX hat deine Tätigkeiten von heute erfasst und berichtsheft-tauglich formuliert'],
       ['open', iconBook, 'Berichtsheft öffnen', 'Online-Berichtsheft in der Vogel Lernwelt – Anmeldung mit deinen Lernwelt-Zugangsdaten'],
       ['woche', iconTasks, 'Meine Tätigkeiten', 'Deine erledigten Aufgaben der Woche als Vorlage zum Eintragen'],
       ['tipps', iconInfo, 'So schreibst du es', 'Was ins Berichtsheft gehört und worauf der Ausbilder achtet'],
     ];
-    const n = bhActivities(0).days.reduce((s,d)=>s+d.items.length,0);
+    const n = bhActivities(0).days.reduce((s,d)=>s+d.items.length,0); const nToday = bhTodayCount();
     body = `<div class="dg-menu bh-menu">${tiles.map(([k,ic,t,d])=>`<button class="dg-tile" data-bh="${k}">
         <span class="dg-tile-ic">${ic}</span><span class="dg-tile-t">${t}</span><span class="dg-tile-d">${d}</span>
-        ${k==='woche' && n ? `<span class="dg-tile-b ok">${n} diese Woche</span>` : ''}${k==='open' ? '<span class="dg-tile-b">extern ↗</span>' : ''}
+        ${k==='woche' && n ? `<span class="dg-tile-b ok">${n} diese Woche</span>` : ''}${k==='alex' && nToday ? `<span class="dg-tile-b ok">${nToday} heute</span>` : ''}${k==='open' ? '<span class="dg-tile-b">extern ↗</span>' : ''}
       </button>`).join('')}</div>
       <div class="alex-hint">Das Berichtsheft öffnet sich in einem eigenen Fenster (die Lernwelt erlaubt aus Sicherheitsgründen keine Anzeige innerhalb anderer Apps). Zurück zu AutoLeitwerk: Fenster schließen bzw. „Fertig“ tippen.</div>`;
   }
   ov.innerHTML = head + `<div class="dg-view">${body}</div>`;
+  try{ if(state.currentUser) localStorage.setItem('autoleitwerk.bhUsed.' + state.currentUser.name, '1'); }catch(_){}
 }
 document.addEventListener('click', (e)=>{
   if(state.mainView!=='berichtsheft') return;
   const t = e.target;
-  const b = t.closest('[data-bh]'); if(b){ if(b.dataset.bh==='open'){ bhOpen(); return; } bh.screen = b.dataset.bh; renderBerichtsheftView(document.getElementById('otherView')); return; }
+  const b = t.closest('[data-bh]'); if(b){ if(b.dataset.bh==='open'){ bhOpen(); return; } if(b.dataset.bh==='alex'){ bh.weekOffset = 0; bhOpenAlex(bhIso(new Date())); return; } bh.screen = b.dataset.bh; renderBerichtsheftView(document.getElementById('otherView')); return; }
   const wk = t.closest('[data-bhweek]'); if(wk){ bh.weekOffset = Math.min(0, bh.weekOffset + Number(wk.dataset.bhweek)); renderBerichtsheftView(document.getElementById('otherView')); return; }
   if(t.closest('#bhCopyBtn')){ bhCopy(); return; }
   if(t.closest('#bhOpenBtn')){ bhOpen(); return; }
+  const ba = t.closest('[data-bhalex]'); if(ba){ bhOpenAlex(ba.dataset.bhalex); return; }
+  const bd = t.closest('[data-bhday]'); if(bd){ bhOpenAlex(bd.dataset.bhday); return; }
+  if(t.closest('#bhCopyDraft')){ bhCopyDraft(); return; }
+  if(t.closest('#bhRedo')){ bhLoadDraft(bh.date, true); return; }
+});
+document.addEventListener('input', (e)=>{
+  if(e.target && e.target.id==='bhDraft' && bh.date){ const d = bh.drafts[bh.date] = bh.drafts[bh.date] || {}; d.text = e.target.value; d.edited = true; try{ localStorage.setItem(bhStoreKey(bh.date), e.target.value); }catch(_){} }
 });
 function renderDiagnoseView(ov){
   if(diag.orderId && !orders.some(o=>o.id===diag.orderId)) diag.orderId = null;
