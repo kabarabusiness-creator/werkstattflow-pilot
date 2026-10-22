@@ -1255,6 +1255,9 @@
   .dg-ff{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;} .dg-ff div{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:8px;background:var(--panel);}
   .dg-ff span{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.3px;} .dg-ff b{font-size:15px;font-variant-numeric:tabular-nums;} .dg-ff i{font-style:normal;font-size:11px;color:var(--text-faint);font-weight:400;}
   .dg-proto{display:flex;justify-content:flex-end;}
+  .dg-warnbox.dg-infobox{background:rgba(124,58,237,.07);border-color:rgba(124,58,237,.3);} .dg-warnbox.dg-infobox>svg{color:var(--accent);}
+  .dg-coding{display:flex;gap:10px;align-items:baseline;font-size:12px;} .dg-coding span{color:var(--text-faint);min-width:64px;} .dg-coding code{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;word-break:break-all;line-height:1.5;}
+  .dg-coding.old code{color:var(--text-faint);text-decoration:line-through;} .dg-warn-t{color:#d97706;}
   .bh-week{display:flex;align-items:center;gap:12px;} .bh-week>div{flex:1;display:flex;flex-direction:column;align-items:center;} .bh-week b{font-size:17px;} .bh-week span{font-size:12px;color:var(--text-faint);} .bh-week .btn svg{width:16px;height:16px;}
   .bh-sum{display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-dim);padding:0 2px;}
   .bh-days{display:flex;flex-direction:column;gap:8px;}
@@ -5860,6 +5863,12 @@ function parseUdsDtcs(raw){
   }
   return { status:'ok', codes };
 }
+// ReadDataByIdentifier (22 xx xx) → Rohdaten als Hex (z. B. 0600 = Codierung)
+function parseUdsHex(raw, did){
+  const lines = elmClean(raw); if(elmNoData(lines)) return '';
+  const all = elmMessages(lines).join(''); const i = all.indexOf('62'+did); if(i<0) return '';
+  return all.slice(i+6).replace(/[^0-9A-F]/gi,'').toUpperCase().slice(0,128);
+}
 // ReadDataByIdentifier (22 xx xx) → ASCII, z. B. F187 Teilenummer, F197 Systembezeichnung
 function parseUdsAscii(raw, did){
   const lines = elmClean(raw); if(elmNoData(lines)) return '';
@@ -5972,15 +5981,15 @@ class ElmBle {
 /* --- Simulation: antwortet wie ein ELM327 an einem CAN-Fahrzeug (Benziner) --- */
 // Simulierte Steuergeräte eines Golf 7: DTC (3 Byte) + Status (09 = aktiv, 08 = sporadisch)
 const SIM_VAG = {
-  '7E0': { part:'04E906016DE', sys:'R4 1.4l TFSI' },
-  '7E1': { part:'0CW300049H', sys:'DQ200-MQB' },
-  '713': { part:'5Q0907379BA', sys:'ESC', dtcs:['40352909'], slow:true },
-  '715': { part:'5Q0959655AB', sys:'Airbag VW8', dtcs:['80011D08'] },
-  '714': { part:'5G1920741A', sys:'KOMBI', dtcs:[] },
-  '710': { part:'5Q0907530AA', sys:'GW MQB High', dtcs:['C1210008'] },
-  '70E': { part:'5Q0937084BD', sys:'BCM MQB', dtcs:[] },
-  '712': { part:'5Q0909144R', sys:'EPS_ZFLS Kl.', dtcs:[] },
-  '746': { part:'5G0907044BT', sys:'CLIMA', dtcs:['90AB7109'] },
+  '7E0': { part:'04E906016DE', sys:'R4 1.4l TFSI', sw:'4019', coding:'01170032242401082000' },
+  '7E1': { part:'0CW300049H', sys:'DQ200-MQB', sw:'4625', coding:'0014' },
+  '713': { part:'5Q0907379BA', sys:'ESC', dtcs:['40352909'], slow:true, sw:'0610', coding:'B0B2F5A3C1A4440C0C34E04B3E0410024A3D00C2B8' },
+  '715': { part:'5Q0959655AB', sys:'Airbag VW8', dtcs:['80011D08'], sw:'0602', coding:'0000312E1D04' },
+  '714': { part:'5G1920741A', sys:'KOMBI', dtcs:[], sw:'5410', coding:'2B0D0004000400000000' },
+  '710': { part:'5Q0907530AA', sys:'GW MQB High', dtcs:['C1210008'], sw:'1219', coding:'0300003F1C' },
+  '70E': { part:'5Q0937084BD', sys:'BCM MQB', dtcs:[], sw:'0254', coding:'1D1C1A47A10C1A5B7C0C2C8A51ABCA00402000441700' },
+  '712': { part:'5Q0909144R', sys:'EPS_ZFLS Kl.', dtcs:[], sw:'3060', coding:'0021' },
+  '746': { part:'5G0907044BT', sys:'CLIMA', dtcs:['90AB7109'], sw:'1012', coding:'09000000' },
 };
 const SIM_SUPPORTED = ['01','03','04','05','06','07','0B','0C','0D','0E','0F','10','11','13','1C','20','21','2F','30','31','40','42','46','5C'];
 class ElmSim {
@@ -6034,6 +6043,9 @@ class ElmSim {
       if(!ecu) return 'NO DATA\r\r>';
       if(c==='22F187') return '62F187'+[...ecu.part].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
       if(c==='22F197') return '62F197'+[...ecu.sys].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c==='22F189') return '62F189'+[...(ecu.sw||'0001')].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c==='22F191') return '62F191'+[...(ecu.hw||ecu.part)].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c==='220600') return ecu.coding ? '620600'+ecu.coding+'\r\r>' : '7F2231\r\r>';
       if(c.startsWith('1902')){
         if(ecu.slow && !this['_slow'+this.hdr]){ this['_slow'+this.hdr]=1; return '7F1978\r\r>'; }
         const list = this.hdr==='7E0' ? this.codes.map(x=>x+'0009') : (ecu.dtcs || []);
@@ -6076,7 +6088,7 @@ class ElmSim {
 }
 
 /* --- Zustand & Ablauf --- */
-var diag = { orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false, openInfo:{}, screen:'menu' };
+var diag = { codingHist:{}, orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false, openInfo:{}, screen:'menu' };
 diag.simQuiet = (()=>{ try{ return localStorage.getItem('autoleitwerk.diagSimQuiet')==='1'; }catch(_){ return false; } })();
 function diagSetSimQuiet(on){ diag.simQuiet = on; try{ localStorage.setItem('autoleitwerk.diagSimQuiet', on ? '1' : '0'); }catch(_){} rerenderDiagPanel(); }
 function diagOrder(){ return diag.orderId ? orders.find(o=>o.id===diag.orderId) || null : null; }
@@ -6290,6 +6302,82 @@ function renderBatTest(r){
     </div>
     <div class="alex-hint">Gemessen an der OBD-Buchse – liegt meist 0,1–0,2 V unter dem Wert direkt an der Batterie. Die Ruhespannung ist erst aussagekräftig, wenn das Fahrzeug einige Stunden stand. Ein Batterietester mit Lasttest ersetzt diese Messung nicht.</div>`;
 }
+/* --- Codierung sichern (VW-Konzern): nur Lesen (UDS 22), es wird nichts ins Fahrzeug geschrieben --- */
+async function diagReadCoding(){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  if(diag.isCan===false){ diag.error = 'Nur bei CAN-Fahrzeugen möglich (VW-Konzern etwa ab 2012 vollständig).'; rerenderDiagPanel(); return; }
+  const r = diagRes(o); diagStopLive();
+  diag.busy='coding'; diag.error=''; rerenderDiagPanel();
+  const send = (c,t)=>diag.conn.send(c, t||2000); const hex = n=>n.toString(16).toUpperCase();
+  const res = { at:new Date().toISOString(), voltage:null, ecus:[], saved:false };
+  try{
+    res.voltage = parseFloat(elmClean(await send('ATRV')).join('')) || null;
+    for(const c of ['ATCAF1','ATH0','ATS0']) await send(c);
+    // Wenn schon gescannt: nur Steuergeräte, die geantwortet haben
+    const list = r.ecus && r.ecus.length ? VAG_ECUS.filter(e=>r.ecus.some(x=>x.id===e.id && x.status!=='nodata')) : VAG_ECUS;
+    for(let i=0;i<list.length;i++){
+      const ecu = list[i]; const tx = hex(ecu.tx), rx = hex(ecu.rx || ecu.tx+0x6A);
+      diag.scanStep = `${i+1}/${list.length} · ${ecu.name}`; rerenderDiagPanel();
+      for(const c of ['ATSH'+tx, 'ATCRA'+rx, 'ATFCSH'+tx, 'ATFCSD300000', 'ATFCSM1']) await send(c);
+      const part = parseUdsAscii(await send('22F187', 3000), 'F187');
+      if(!part){ continue; } // nicht verbaut / keine Antwort
+      res.ecus.push({ id:ecu.id, name:ecu.name, addr:tx, part,
+        sw: parseUdsAscii(await send('22F189', 3000), 'F189'),
+        hw: parseUdsAscii(await send('22F191', 3000), 'F191'),
+        sys: parseUdsAscii(await send('22F197', 3000), 'F197'),
+        coding: parseUdsHex(await send('220600', 3000), '0600') });
+    }
+  }catch(err){ diag.error = 'Lesen abgebrochen: ' + (err && err.message || err); }
+  try{ for(const c of ['ATCRA','ATFCSM0','ATSH7DF']) await send(c); }catch(_){}
+  r.coding = res; diag.busy=''; diag.scanStep='';
+  if(res.ecus.length) showUpdateToast(`${res.ecus.length} Steuergeräte gelesen · ${res.ecus.filter(e=>e.coding).length} mit Codierung`);
+  rerenderDiagPanel();
+}
+async function diagSaveCoding(){
+  const o = diagOrder(); const r = diagRes(o);
+  if(!o){ diag.error = 'Bitte oben einen Auftrag wählen, um die Sicherung zu speichern.'; rerenderDiagPanel(); return; }
+  if(!r.coding || !r.coding.ecus.length || diag.busy) return;
+  diag.busy='save'; rerenderDiagPanel();
+  const res = await tabletRequest('coding_backup_save', { order_id:o.id, vin:r.vin, voltage:r.coding.voltage, simulated: !!(diag.conn && diag.conn.sim), ecus:r.coding.ecus }, 20000);
+  diag.busy='';
+  if(res.ok){ r.coding.saved = true; (diag.codingHist[o.id] = diag.codingHist[o.id] || []).unshift(res.data.entry); showUpdateToast('Codierung am Auftrag gesichert'); }
+  else diag.error = 'Speichern fehlgeschlagen: ' + res.reason;
+  rerenderDiagPanel();
+}
+async function loadCodingHist(o){
+  if(!o || diag.codingHist[o.id]) return;
+  diag.codingHist[o.id] = [];
+  const r = await tabletRequest('coding_backup_list', { order_id:o.id }, 15000);
+  if(r.ok){ diag.codingHist[o.id] = r.data.items || []; rerenderDiagPanel(); }
+}
+const codingBytes = h => (String(h||'').match(/../g)||[]).join(' ');
+function renderDiagCoding(o, r){
+  const c = r.coding; const hist = o ? (diag.codingHist[o.id] || []) : [];
+  // Vergleich mit der letzten Sicherung (nicht der gerade gespeicherten)
+  const ref = hist.find(h=>!c || !c.saved || h.saved_at !== hist[0].saved_at) || null;
+  const refOf = id => ref && ref.ecus.find(e=>e.id===id);
+  const v = c && c.voltage;
+  let html = `<div class="dg-warnbox dg-infobox">${iconInfo}<div><b>Nur Lesen – es wird nichts im Fahrzeug geändert.</b> Liest Codierung, Teilenummer und Software-Stand aller Steuergeräte und sichert sie am Auftrag. So lässt sich nach jeder späteren Änderung prüfen, was vorher eingestellt war.</div></div>`;
+  html += `<div class="dg-bar"><button class="btn primary" id="diagCodingBtn" ${diag.busy?'disabled':''}>${c ? 'Erneut lesen' : 'Codierungen auslesen'}</button>
+    ${c && c.ecus.length && o ? (c.saved ? `<span class="alex-done">${iconCheck} Am Auftrag gesichert</span>` : `<button class="btn" id="diagCodingSave" ${diag.busy?'disabled':''}>${iconCheck} Als Sicherung am Auftrag speichern</button>`) : ''}
+    ${c && !o ? '<span class="alex-muted">Zum Sichern oben einen Auftrag wählen.</span>' : ''}</div>`;
+  if(diag.busy==='coding') html += `<div class="dg-scan-run"><span class="dg-spin"></span>Lese ${escHtml(diag.scanStep||'')}</div>`;
+  if(c){
+    html += `<div class="dg-head"><b>${c.ecus.length} Steuergeräte gelesen</b><span>${escHtml(fmtSavedAt(c.at))}${v ? ` · Bordspannung <b class="${v<12.2?'dg-warn-t':''}">${diagFmt(v,1)} V</b>` : ''}${ref ? ` · verglichen mit Sicherung vom ${escHtml(fmtSavedAt(ref.saved_at))}` : ''}</span></div>`;
+    if(v && v<12.2) html += `<div class="alex-warn">${iconWarn} Bordspannung niedrig – für spätere Arbeiten am Steuergerät unbedingt ein Ladegerät anschließen.</div>`;
+    html += `<div class="dg-ecus">${c.ecus.map(e=>{
+      const old = refOf(e.id); const changed = old && old.coding && e.coding && old.coding !== e.coding; const swChanged = old && old.sw && e.sw && old.sw !== e.sw;
+      return `<div class="dg-ecu ${changed?'has':''}">
+        <div class="dg-ecu-h"><span class="dg-ecu-id">${escHtml(e.id)}</span><div><b>${escHtml(e.name)}</b><span>${escHtml([e.sys, e.part, e.sw && 'SW ' + e.sw, e.hw && e.hw!==e.part && 'HW ' + e.hw].filter(Boolean).join(' · '))}</span></div>
+          ${changed ? '<span class="dg-ecu-st err">Codierung geändert</span>' : old ? '<span class="dg-ecu-st ok">' + iconCheck + ' wie Sicherung</span>' : ''}</div>
+        <div class="dg-coding"><span>Codierung</span><code>${e.coding ? escHtml(codingBytes(e.coding)) : '– nicht lesbar –'}</code></div>
+        ${changed ? `<div class="dg-coding old"><span>vorher</span><code>${escHtml(codingBytes(old.coding))}</code></div>` : ''}
+        ${swChanged ? `<div class="alex-muted">Software geändert: ${escHtml(old.sw)} → ${escHtml(e.sw)}</div>` : ''}
+      </div>`; }).join('')}</div>`;
+  }
+  if(hist.length) html += `<div class="dg-hist"><b>Gespeicherte Sicherungen (Auftrag und Fahrzeug)</b>${hist.slice(0,8).map(h=>`<div class="dg-hist-row"><span>${escHtml(fmtSavedAt(h.saved_at))}${h.saved_by?' – '+escHtml(h.saved_by):''}${h.simulated?' <em class="dg-simtag">Simulation</em>':''}</span><span>${h.ecus.length} Steuergeräte${o && h.order_id && h.order_id!==o.id ? ' · früherer Auftrag' : ''}</span></div>`).join('')}</div>`;
+  return html;
+}
 async function diagLiveTick(){
   const o = diagOrder(); if(!diag.conn || !diag.liveOn) return;
   const r = diagRes(o);
@@ -6386,11 +6474,13 @@ const dgIc = {
   live: svg('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
   ready: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>'),
   freeze: svg('<path d="M12 2v20M4.9 4.9l14.2 14.2M2 12h20M4.9 19.1 19.1 4.9"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2M4 9l2 3-2 3M20 9l-2 3 2 3"/>'),
+  coding: svg('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>'),
   battery: svg('<rect x="2" y="7" width="18" height="11" rx="2"/><path d="M22 11v3M7 12.5h4M9 10.5v4M14 12.5h3"/>'),
 };
 const DIAG_SCREENS = {
   codes:     { t:'Fehlerspeicher lesen',  d:'Motor & Abgas: gespeicherte, sporadische und permanente Fehler', ic:'codes', conn:true },
   scan:      { t:'Steuergeräte-Scan',     d:'Alle Steuergeräte einzeln (VW, Audi, Skoda, Seat/Cupra)', ic:'scan', conn:true },
+  coding:    { t:'Codierung sichern',     d:'Codierung, Teilenummer und Software aller Steuergeräte lesen und am Auftrag sichern (VW-Konzern)', ic:'coding', conn:true },
   live:      { t:'Live-Daten / Istwerte', d:'Drehzahl, Temperaturen, Gemisch, Luftmasse, Drücke …', ic:'live', conn:true },
   readiness: { t:'AU-Bereitschaft',       d:'Readiness-Monitore vor AU/HU prüfen', ic:'ready', conn:true },
   freeze:    { t:'Freeze-Frame',          d:'Bedingungen beim Speichern des Fehlers', ic:'freeze', conn:true },
@@ -6410,6 +6500,7 @@ function diagBadge(key, o, r){
     case 'live': return diag.liveOn ? ['läuft', 'ok'] : null;
     case 'battery': { const b = r.battery; if(!b) return null; const v = [b.rest, b.crank, b.charge].filter(Boolean).map(x=>batVerdict(x.kind, x.v)[1]); return v.includes('err') ? ['prüfen', 'err'] : v.includes('warn') ? ['grenzwertig', 'warn'] : v.length ? ['i. O.', 'ok'] : null; }
     case 'info': return r.vin ? [r.vin.slice(-6), ''] : null;
+    case 'coding': return r.coding ? (r.coding.saved ? ['gesichert', 'ok'] : [`${r.coding.ecus.length} gelesen`, 'warn']) : null;
     case 'report': return r.saved ? ['gespeichert', 'ok'] : null;
     case 'history': return hist.length ? [`${hist.length}×`, ''] : null;
   }
@@ -6459,7 +6550,7 @@ function renderDiagSave(o, r){
       <button class="btn" id="diagPrintBtn">${iconDoc} Diagnoseprotokoll (Drucken/PDF)</button>
     </div>`;
 }
-const diagBusyText = { read:'Lese Fehlerspeicher…', clear:'Lösche…', scan:'Scan läuft…', info:'Lese Fahrzeugdaten…', bat:'Messe…', save:'Speichere…', task:'Lege Aufgabe an…' };
+const diagBusyText = { coding:'Lese Codierungen…', read:'Lese Fehlerspeicher…', clear:'Lösche…', scan:'Scan läuft…', info:'Lese Fahrzeugdaten…', bat:'Messe…', save:'Speichere…', task:'Lege Aufgabe an…' };
 function renderDiagScreen(o, r){
   const c = diag.conn; const sim = c && c.sim; const busy = diag.busy;
   const need = (fn)=> !c && DIAG_SCREENS[diag.screen].conn ? `<div class="alex-muted">Bitte zuerst das Fahrzeug verbinden.</div>` : fn();
@@ -6476,6 +6567,7 @@ function renderDiagScreen(o, r){
         ${renderDiagSave(o, r)}
         <div class="alex-hint">${sim && !diag.simQuiet ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>` : ''}`);
     case 'scan': return need(()=>renderDiagEcus(o, r));
+    case 'coding': return need(()=>renderDiagCoding(o, r));
     case 'live': return need(()=>`
       <div class="dg-bar"><button class="btn ${diag.liveOn?'':'primary'}" id="diagLiveBtn">${diag.liveOn?'Anhalten':'Starten'}</button><span class="alex-muted">${diag.liveOn ? 'Werte werden laufend aktualisiert' : 'angehalten'}</span></div>
       <div class="dg-live" id="diagLive">${renderDiagLive(r.live)}</div>
@@ -6506,6 +6598,7 @@ function renderDiagScreen(o, r){
            ['Steuergeräte', r.ecus ? r.ecus.filter(e=>e.status!=='nodata').length + ' gescannt, ' + r.ecus.reduce((s,e)=>s+e.codes.length,0) + ' Fehler' : 'nicht gescannt'],
            ['AU-Bereitschaft', r.readiness ? (r.readiness.open ? r.readiness.open + ' von ' + r.readiness.items.length + ' offen' : 'alle fertig') : '–'],
            ['Batterie & Ladung', r.battery ? [r.battery.rest && 'Ruhe '+diagFmt(r.battery.rest.v,2)+' V', r.battery.crank && 'Start min. '+diagFmt(r.battery.crank.v,1)+' V', r.battery.charge && 'Laden '+diagFmt(r.battery.charge.v,2)+' V'].filter(Boolean).join(' · ') : '–'],
+           ['Codierung', r.coding ? r.coding.ecus.length + ' Steuergeräte gelesen' + (r.coding.saved ? ', gesichert' : '') : '–'],
            ['FIN', r.vin || '–']].map(([k,v])=>`<div><span>${k}</span><b>${escHtml(v)}</b></div>`).join('')}
       </div>
       ${renderDiagSave(o, r)}`;
@@ -6541,6 +6634,7 @@ function diagOpenScreen(k){
   const r = diagRes(diagOrder());
   rerenderDiagPanel();
   const el = document.getElementById('diagPanel'); if(el && el.scrollIntoView) try{ el.scrollIntoView({ block:'start', behavior:'smooth' }); }catch(_){}
+  if(k==='coding') loadCodingHist(diagOrder());
   if(!diag.conn || diag.busy) return;
   if((k==='codes' || k==='readiness' || k==='freeze') && !r.codes) diagRead();
   else if(k==='live' && !diag.liveOn) diagToggleLive();
@@ -6894,6 +6988,8 @@ function handleDiagClick(e){
   const scr = t.closest('[data-diagscreen]'); if(scr){ diagOpenScreen(scr.dataset.diagscreen); return true; }
   const bm = t.closest('[data-batmeasure]'); if(bm){ batMeasure(bm.dataset.batmeasure); return true; }
   if(t.closest('#diagInfoBtn')){ diagReadInfo(); return true; }
+  if(t.closest('#diagCodingBtn')){ diagReadCoding(); return true; }
+  if(t.closest('#diagCodingSave')){ diagSaveCoding(); return true; }
   const inf = t.closest('[data-diaginfo]'); if(inf){ const k = inf.dataset.diaginfo; if(diag.openInfo[k]) delete diag.openInfo[k]; else diag.openInfo[k] = true; rerenderDiagPanel(); return true; }
   const tk = t.closest('[data-diagtask]'); if(tk){ diagCreateTask(tk.dataset.diagtask); return true; }
   const a = t.closest('[data-diagalex]'); if(a){ diagAskAlex(a.dataset.diagalex); return true; }

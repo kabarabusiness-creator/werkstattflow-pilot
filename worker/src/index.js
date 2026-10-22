@@ -406,6 +406,22 @@ async function loadSavedTireScan(db, env, code, orderId) {
 
 /* ---- OBD-Diagnose (Tablet liest Fehlerspeicher über ELM327-Adapter; Server speichert nur den Befund) ---- */
 const diagKey = (code, orderId) => `_diag/${code}/${orderId}`;
+// Codierungs-Sicherungen (nur gelesene Werte): je Auftrag und je FIN, damit sie dem Fahrzeug über Aufträge hinweg folgen
+const codingKey = (code, orderId) => `_coding/${code}/order/${orderId}`;
+const codingVinKey = (code, vin) => `_coding/${code}/vin/${vin}`;
+function cleanCodingBackup(b) {
+  const str = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
+  if (!Array.isArray(b.ecus) || !b.ecus.length || b.ecus.length > 40) throw new HttpError(400, 'params');
+  const ecus = b.ecus.map(e => ({
+    id: str(e && e.id, 4).toUpperCase(), name: str(e && e.name, 60), addr: str(e && e.addr, 4).toUpperCase(),
+    part: str(e && e.part, 40), sw: str(e && e.sw, 40), hw: str(e && e.hw, 40), sys: str(e && e.sys, 40),
+    coding: /^[0-9A-F]{0,128}$/i.test(String((e && e.coding) || '')) ? String(e.coding || '').toUpperCase() : '',
+  })).filter(e => /^[0-9A-F]{2}$/.test(e.id) && e.name);
+  if (!ecus.length) throw new HttpError(400, 'params');
+  const vinRaw = str(b.vin, 20).toUpperCase();
+  const v = Number(b.voltage);
+  return { ecus, vin: /^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) ? vinRaw : '', voltage: Number.isFinite(v) && v > 0 && v < 30 ? Math.round(v * 10) / 10 : null, simulated: !!b.simulated };
+}
 const DIAG_LIVE_KEYS = ['rpm', 'coolant_c', 'voltage', 'speed_kmh', 'load_pct', 'intake_c', 'fuel_pct', 'dtc_count', 'distance_mil_km', 'distance_clear_km',
   'throttle_pct', 'stft1', 'ltft1', 'stft2', 'ltft2', 'map_kpa', 'maf_gs', 'timing_deg', 'oil_c', 'rail_bar', 'ambient_c', 'ecu_v'];
 const DIAG_LIVE_LABEL = { rpm: ['Drehzahl', ' 1/min'], speed_kmh: ['Geschw.', ' km/h'], coolant_c: ['Kühlmittel', ' °C'], load_pct: ['Last', ' %'], throttle_pct: ['Drosselklappe', ' %'],
@@ -577,6 +593,34 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
       await env.PHOTOS.put(diagKey(code, order.id), JSON.stringify([entry, ...(Array.isArray(prev) ? prev : [])].slice(0, 20)));
     }
     return { ok: true, entry, vin_set, vin_mismatch };
+  }
+  if (action === 'coding_backup_save') {
+    rateLimit('coding:' + sess.employee_id, 30, 3600_000);
+    if (!env.PHOTOS) throw new HttpError(503, 'not_available', { message: 'Speicher ist noch nicht eingerichtet.' });
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    const d = cleanCodingBackup(body);
+    const entry = { ...d, order_id: order.id, saved_at: nowIso(), saved_by: emp.name };
+    const push = async key => { const prev = await env.PHOTOS.get(key, { type: 'json' }).catch(() => null); countUsage('kv_writes'); await env.PHOTOS.put(key, JSON.stringify([entry, ...(Array.isArray(prev) ? prev : [])].slice(0, 10))); };
+    await push(codingKey(code, order.id));
+    if (d.vin && !d.simulated) await push(codingVinKey(code, d.vin));
+    const lines = [`Codierungs-Sicherung (${d.simulated ? 'SIMULATION – keine echten Fahrzeugdaten' : 'aus dem Fahrzeug gelesen'}) – ${emp.name}`];
+    if (d.vin) lines.push(`FIN: ${d.vin}`); if (d.voltage) lines.push(`Bordspannung: ${String(d.voltage).replace('.', ',')} V`);
+    d.ecus.forEach(e => lines.push(`${e.id} ${e.name}: ${[e.part && 'Teil ' + e.part, e.sw && 'SW ' + e.sw, e.coding ? 'Codierung ' + e.coding : 'keine Codierung gelesen'].filter(Boolean).join(', ')}`));
+    lines.push('Nur gelesene Werte – es wurde nichts im Fahrzeug geändert.');
+    await db.create('InternalNote', { order_id: order.id, content: lines.join('\n').slice(0, 5000), author_name: emp.name, author_role: ['admin', 'serviceberater', 'mechaniker'].includes(emp.role) ? emp.role : 'mechaniker', workshop_code: code });
+    invalidate('InternalNote');
+    return { ok: true, entry };
+  }
+  if (action === 'coding_backup_list') {
+    const order = await ownRecord(db, 'Order', body.order_id, code);
+    if (!env.PHOTOS) return { ok: true, items: [] };
+    const own = await env.PHOTOS.get(codingKey(code, order.id), { type: 'json' }).catch(() => null);
+    const vin = String(order.vin || '').toUpperCase();
+    const byVin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? await env.PHOTOS.get(codingVinKey(code, vin), { type: 'json' }).catch(() => null) : null;
+    const seen = new Set(); const items = [];
+    [...(Array.isArray(own) ? own : []), ...(Array.isArray(byVin) ? byVin : [])].forEach(x => { const k = x.saved_at + x.saved_by; if (!seen.has(k)) { seen.add(k); items.push(x); } });
+    items.sort((a, b) => String(b.saved_at).localeCompare(String(a.saved_at)));
+    return { ok: true, items: items.slice(0, 15) };
   }
   if (action === 'diagnosis_list') {
     const order = await ownRecord(db, 'Order', body.order_id, code);

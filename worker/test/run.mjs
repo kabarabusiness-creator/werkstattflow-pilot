@@ -872,5 +872,25 @@ await t('Berichtsheft-Vorschlag: nur eigene Tätigkeiten des Tages, ohne Kundend
   assert.equal(r.items.length, 0); assert.equal(r.text, '');
   Date.now = realNow;
 });
+await t('Codierungs-Sicherung: speichern, Validierung, nach Auftrag und FIN laden', async () => {
+  assert.equal((await call('/tabletAction', { action: 'coding_backup_save', order_id: 'o2', ecus: [{ id: '03', name: 'ABS' }] }, token)).status, 404);
+  assert.equal((await call('/tabletAction', { action: 'coding_backup_save', order_id: 'o1', ecus: [] }, token)).status, 400);
+  db.Order.push({ id: 'oc1', workshop_code: 'AL-T1', status: 'reparatur_laeuft', vin: 'WVWZZZAUZLW000123' }, { id: 'oc2', workshop_code: 'AL-T1', status: 'fahrzeug_angenommen', vin: 'WVWZZZAUZLW000123' });
+  const r = (await call('/tabletAction', { action: 'coding_backup_save', order_id: 'oc1', vin: 'WVWZZZAUZLW000123', voltage: 12.64, ecus: [
+    { id: '09', name: 'Zentralelektrik', addr: '70e', part: '5Q0937084BD', sw: '0254', coding: '0a1b2c', evil: 1 },
+    { id: '17', name: 'Kombi', coding: 'nicht-hex' }, { id: 'zz', name: 'x' }] }, token)).data;
+  assert.equal(r.ok, true); assert.equal(r.entry.ecus.length, 2); assert.equal(r.entry.ecus[0].coding, '0A1B2C'); assert.equal(r.entry.ecus[0].addr, '70E');
+  assert.equal(r.entry.ecus[1].coding, ''); assert.equal(r.entry.ecus[0].evil, undefined); assert.equal(r.entry.voltage, 12.6);
+  const note = db.InternalNote.filter(n => n.order_id === 'oc1').pop().content;
+  assert.match(note, /^Codierungs-Sicherung \(aus dem Fahrzeug gelesen\)/); assert.match(note, /09 Zentralelektrik: Teil 5Q0937084BD, SW 0254, Codierung 0A1B2C/); assert.match(note, /nichts im Fahrzeug geändert/);
+  // anderer Auftrag, gleiches Fahrzeug → Sicherung über die FIN sichtbar
+  let list = (await call('/tabletAction', { action: 'coding_backup_list', order_id: 'oc2' }, token)).data.items;
+  assert.equal(list.length, 1); assert.equal(list[0].order_id, 'oc1');
+  // Simulation: nur am Auftrag, nicht an der FIN
+  await call('/tabletAction', { action: 'coding_backup_save', order_id: 'oc1', simulated: true, vin: 'WVWZZZAUZLW000123', ecus: [{ id: '01', name: 'Motor', coding: '00' }] }, token);
+  assert.equal((await call('/tabletAction', { action: 'coding_backup_list', order_id: 'oc2' }, token)).data.items.length, 1);
+  assert.equal((await call('/tabletAction', { action: 'coding_backup_list', order_id: 'oc1' }, token)).data.items.length, 2);
+  assert.equal((await call('/tabletAction', { action: 'coding_backup_list', order_id: 'o2' }, token)).status, 404);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
