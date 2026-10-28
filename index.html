@@ -424,7 +424,9 @@
   .upsell-card{margin-top:16px;background:linear-gradient(135deg, rgba(139,92,246,.10), rgba(139,92,246,.03));border:1px solid var(--accent);border-radius:var(--radius);padding:15px 17px;}
   .upsell-head{display:flex;align-items:center;gap:11px;}
   .upsell-head svg{width:19px;height:19px;color:var(--accent-2);flex-shrink:0;}
-  .upsell-head b{font-size:13.5px;font-weight:700;display:block;}
+  .upsell-head b{font-size:13.5px;font-weight:700;display:block;} .upsell-head>div{flex:1;min-width:0;}
+  .upsell-hide{font:inherit;font-size:11.5px;font-weight:600;padding:5px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel);color:var(--text-dim);cursor:pointer;flex-shrink:0;}
+  .upsell-show{margin-top:16px;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;font-weight:600;padding:7px 12px;border-radius:10px;border:1px dashed var(--border);background:transparent;color:var(--text-faint);cursor:pointer;} .upsell-show svg{width:15px;height:15px;}
   .upsell-head span{font-size:11px;color:var(--text-faint);display:block;margin-top:1px;}
   .upsell-items{display:flex;gap:10px;margin-top:13px;flex-wrap:wrap;}
   .upsell-item{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--border-soft);border-radius:10px;padding:10px 12px;}
@@ -3731,12 +3733,20 @@ function getRecommendations(o){
   recs.push({title:'Kühlmittel prüfen', reason:'Routineprüfung bei aktuellem Werkstattbesuch'});
   return recs.slice(0,3);
 }
+// Ein-/Ausblenden wird auf dem Gerät gemerkt (gilt für alle Aufträge)
+let upsellHidden = (()=>{ try{ return localStorage.getItem('autoleitwerk.upsellHidden')==='1'; }catch(_){ return false; } })();
+function setUpsellHidden(on){ upsellHidden = on; try{ localStorage.setItem('autoleitwerk.upsellHidden', on ? '1' : '0'); }catch(_){} renderDetail(); }
+document.addEventListener('click', (e)=>{
+  if(e.target.closest('#upsellHide')){ setUpsellHidden(true); return; }
+  if(e.target.closest('#upsellShow')){ setUpsellHidden(false); return; }
+});
 function renderRecommendationCard(o){
   const recs = getRecommendations(o);
   if(recs.length===0) return '';
+  if(upsellHidden) return `<button class="upsell-show" id="upsellShow">${iconThumbUp} Empfohlene Zusatzarbeiten (${recs.length}) einblenden</button>`;
   return `
     <div class="upsell-card">
-      <div class="upsell-head">${iconThumbUp}<div><b>Empfohlene Zusatzarbeiten</b><span>Hinweise anhand des Km-Stands – bitte am Fahrzeug prüfen</span></div></div>
+      <div class="upsell-head">${iconThumbUp}<div><b>Empfohlene Zusatzarbeiten</b><span>Hinweise anhand des Km-Stands – bitte am Fahrzeug prüfen</span></div><button class="upsell-hide" id="upsellHide" title="Ausblenden">Ausblenden</button></div>
       <div class="upsell-items">
         ${recs.map(r=>`<div class="upsell-item"><div class="upsell-item-title">${r.title}</div><div class="upsell-item-sub">${r.reason}</div></div>`).join('')}
       </div>
