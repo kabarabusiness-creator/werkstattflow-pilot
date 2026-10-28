@@ -430,7 +430,7 @@
   .upsell-head span{font-size:11px;color:var(--text-faint);display:block;margin-top:1px;}
   .upsell-items{display:flex;gap:10px;margin-top:13px;flex-wrap:wrap;}
   .upsell-item{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--border-soft);border-radius:10px;padding:10px 12px;}
-  .upsell-item-title{font-size:12.5px;font-weight:700;}
+  .upsell-item-title{font-size:12.5px;font-weight:700;overflow-wrap:anywhere;hyphens:auto;}
   .upsell-item-sub{font-size:10.5px;color:var(--text-faint);margin-top:3px;line-height:1.4;}
 
   .tabs{display:flex;gap:22px;margin-top:22px;border-bottom:1px solid var(--border-soft);overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
@@ -3724,12 +3724,34 @@ function carIcon(status){
 
 /* ---------- render detail ---------- */
 /* ---------- 5. Zusatzverkaufs-Vorschläge ---------- */
+/* Modellbezogene Hinweise (bekannte Schwachstellen je Baureihe). Werden statt der allgemeinen Km-Regeln gezeigt.
+   min = ab Km-Stand, age = ab Fahrzeugalter in Jahren. Weitere Baureihen einfach ergänzen. */
+const MODEL_RECS = [
+  { match:/\bbmw\b.*\b(e38|7[34]0i?l?|750i?l?|728i?l?|735i?l?)\b|\be38\b/i, check:o=>/e38/i.test(o.vehicle) || erstYear(o)>=1994 && erstYear(o)<=2001, label:'BMW 7er (E38)', recs:[
+    { title:'Steuerkettenführungen prüfen', reason:'V8 (M60/M62): Kunststoff-Führungsschienen verschleißen bei hoher Laufleistung – Rasseln beim Kaltstart, Ventildeckel ab und Sichtprüfung', min:150000 },
+    { title:'Kühlsystem komplett prüfen', reason:'Kühler, Ausgleichsbehälter, Thermostatgehäuse und Schläuche aus Kunststoff/Gummi werden spröde – Druckprobe, Wasserpumpe auf Spiel', min:0 },
+    { title:'Zugstreben- und Querlenkerlager VA', reason:'Bekannte Schwachstelle: Lenkradflattern beim Bremsen, Poltern – Fahrwerk vorne prüfen', min:100000 },
+    { title:'Automatikgetriebeöl wechseln', reason:'„Lebensdauerfüllung“ – bei dieser Laufleistung Ölwechsel mit Filter und Dichtung empfehlenswert, falls noch nie gemacht', min:150000 },
+    { title:'Ventildeckel- und Kerzenschachtdichtungen', reason:'Beim V8 häufig undicht – Ölnebel am Motor und in den Kerzenschächten prüfen', min:120000 },
+    { title:'Gummileitungen altersbedingt prüfen', reason:'Kraftstoff-, Brems- und Unterdruckschläuche nach über 20 Jahren auf Risse und Porosität prüfen', age:20 },
+  ]},
+];
+function erstYear(o){ const m = String(o.erst||'').match(/(\d{4})/); return m ? +m[1] : 0; }
+function modelRecsFor(o){ return MODEL_RECS.find(m=>m.match.test(o.vehicle||'') && (!m.check || m.check(o))) || null; }
 function getRecommendations(o){
   const km = parseInt((o.km||'0').replace(/\D/g,''),10) || 0;
+  const age = erstYear(o) ? new Date().getFullYear() - erstYear(o) : 0;
+  const model = modelRecsFor(o);
+  if(model){
+    const recs = model.recs.filter(r=>(r.min===undefined || km>=r.min) && (r.age===undefined || age>=r.age));
+    if(km>60000 || age>=2) recs.push({title:'Bremsflüssigkeit wechseln', reason:'Fällig alle 2 Jahre – Wassergehalt messen'});
+    return recs.slice(0,6);
+  }
   const recs = [];
-  if(km>110000) recs.push({title:'Zahnriemen &amp; Wasserpumpe', reason:'Km-Stand über Wechselintervall (i.d.R. 100–120 Tkm)'});
+  if(km>110000) recs.push({title:'Steuertrieb prüfen', reason:'Je nach Motor Zahnriemen &amp; Wasserpumpe (meist 100–120 Tkm) bzw. Steuerkette auf Längung prüfen'});
   if(km>60000) recs.push({title:'Bremsflüssigkeit wechseln', reason:'Fällig alle 2 Jahre / 60.000 km'});
   if(km>30000) recs.push({title:'Innenraumfilter prüfen', reason:'Wechsel i.d.R. jährlich bzw. alle 15–30 Tkm'});
+  if(age>=15) recs.push({title:'Gummileitungen prüfen', reason:`Fahrzeug ${age} Jahre alt – Kraftstoff-, Brems- und Kühlmittelschläuche auf Risse prüfen`});
   recs.push({title:'Kühlmittel prüfen', reason:'Routineprüfung bei aktuellem Werkstattbesuch'});
   return recs.slice(0,3);
 }
@@ -3746,7 +3768,7 @@ function renderRecommendationCard(o){
   if(upsellHidden) return `<button class="upsell-show" id="upsellShow">${iconThumbUp} Empfohlene Zusatzarbeiten (${recs.length}) einblenden</button>`;
   return `
     <div class="upsell-card">
-      <div class="upsell-head">${iconThumbUp}<div><b>Empfohlene Zusatzarbeiten</b><span>Hinweise anhand des Km-Stands – bitte am Fahrzeug prüfen</span></div><button class="upsell-hide" id="upsellHide" title="Ausblenden">Ausblenden</button></div>
+      <div class="upsell-head">${iconThumbUp}<div><b>Empfohlene Zusatzarbeiten</b><span>${(m=>m ? `Typische Punkte beim ${m.label} mit ${escHtml(o.km)} – bitte am Fahrzeug prüfen` : 'Hinweise anhand des Km-Stands – bitte am Fahrzeug prüfen')(modelRecsFor(o))}</span></div><button class="upsell-hide" id="upsellHide" title="Ausblenden">Ausblenden</button></div>
       <div class="upsell-items">
         ${recs.map(r=>`<div class="upsell-item"><div class="upsell-item-title">${r.title}</div><div class="upsell-item-sub">${r.reason}</div></div>`).join('')}
       </div>
