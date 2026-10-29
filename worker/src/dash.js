@@ -13,7 +13,7 @@
  */
 import { count as countUsage } from './usage.js';
 import { handleInvoice, INVOICE_FUNCTIONS } from './invoices.js';
-import { tireScanImages, registrationScan, capacityDays } from './ai.js';
+import { tireScanImages, registrationScan, capacityDays, alexDashboard } from './ai.js';
 
 const TOKEN_TTL_MIN = 30;
 const SLOT_LABELS = { 1: 'Reifenflanke', 2: 'Lauffläche', 3: 'Felge' };
@@ -250,6 +250,89 @@ export async function handleFunction(name, body, c) {
     });
     bg(h.mailWorkshopMessage(env, db, order, content, attachments));
     return { ok: true, message: created, email: !!(env.RESEND_API_KEY && order.email) };
+  }
+
+  /* ---- ALEX im Dashboard (vorher Base44 InvokeLLM = Integrations-Credits) ---- */
+  async function workshopOf(user) {
+    let code = user.workshop_code;
+    if (!code) { const ws = await db.list('Workshop', { owner_user_id: user.id }, { limit: 1 }); code = ws[0] ? ws[0].code : ''; }
+    return code;
+  }
+  if (name === 'alexChat') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    await h.gate(code, 'alex');
+    const [data, inventory, services] = await Promise.all([h.getData(code), db.list('InventoryItem', { workshop_code: code }).catch(() => []),
+      db.list('Service', null, { limit: 500 }).catch(() => [])]);
+    const res = await alexDashboard(db, { employee_id: 'u:' + user.id, workshop_code: code },
+      { messages: body.messages, order_id: body.order_id && data.orders.some(o => o.id === body.order_id) ? body.order_id : undefined }, env,
+      { ...data, inventory, services: services.filter(x => !x.workshop_code || x.workshop_code === code) });
+    countUsage('alex', 1, code);
+    return res;
+  }
+  if (name === 'alexExecute') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    rateLimit('alexexec:' + user.id, 60, 3600_000);
+    const d = body.draft || {};
+    const f = d.fields && typeof d.fields === 'object' ? d.fields : {};
+    const str = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
+    const actor = user.name || user.email || 'Dashboard';
+    const clean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== ''));
+    if (d.type === 'auftrag') {
+      const plate = str(f.license_plate, 20).toUpperCase();
+      if (!plate && !str(f.customer_name, 120)) throw new HttpError(400, 'params', { message: 'Bitte Kennzeichen oder Kunde angeben.' });
+      const existing = await db.list('Order', { workshop_code: code }, { limit: 5000 });
+      const used = new Set(existing.map(o => String(o.order_number)));
+      let nr = ''; for (let i = 0; i < 50 && (!nr || used.has(nr)); i++) nr = String(1000 + Math.floor(Math.random() * 9000));
+      const num = v => { const n = Number(v); return v !== '' && v != null && Number.isFinite(n) && n >= 0 && n < 5e6 ? Math.round(n) : undefined; };
+      const date = v => /^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10) : undefined;
+      const order = await db.create('Order', clean({
+        workshop_code: code, order_number: nr, customer_token: 'wf-' + randomHex(10), status: 'fahrzeug_angenommen',
+        customer_name: str(f.customer_name, 120), license_plate: plate, vehicle_brand: str(f.vehicle_brand, 60), vehicle_model: str(f.vehicle_model, 80),
+        mileage: num(f.mileage), phone: str(f.phone, 40), email: str(f.email, 120), vin: str(f.vin, 20).toUpperCase(), hsn: str(f.hsn, 8), tsn: str(f.tsn, 12),
+        next_hu: date(f.next_hu), description: str(f.description, 1000), priority: f.priority === 'eilig' ? 'eilig' : 'normal',
+        assigned_mechanic: str(f.assigned_mechanic || d.suggested_mechanic, 80),
+        planned_completion: d.planned_completion && !isNaN(new Date(d.planned_completion)) ? new Date(d.planned_completion).toISOString() : undefined,
+      }));
+      // Dienstleistungen: Aufgaben aus Vorlage + Rechnungsposition (wie „Neuer Auftrag“ im Dashboard)
+      let tasks = 0;
+      const svcIds = (Array.isArray(d.service_ids) ? d.service_ids : []).slice(0, 10);
+      if (svcIds.length) {
+        const all = await db.list('Service', null, { limit: 500 });
+        for (const id of svcIds) {
+          const sv = all.find(x => x.id === id && (!x.workshop_code || x.workshop_code === code)); if (!sv) continue;
+          const tpl = (await db.list('ServiceTaskTemplate', { service_id: id }, { limit: 200 })).sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+          for (const t of tpl) { await db.create('OrderTask', { order_id: order.id, service_id: id, title: t.title, description: t.description || '', estimated_minutes: t.estimated_minutes || 0, order_index: t.order_index || 0, status: 'offen', assigned_employee: order.assigned_mechanic || '', workshop_code: code }); tasks++; }
+          if (sv.base_price != null && sv.base_price >= 0) await db.create('InvoiceItem', { order_id: order.id, service_id: id, description: sv.name, item_type: 'leistung', quantity: 1, unit_price: sv.base_price, total: sv.base_price, workshop_code: code });
+        }
+      }
+      if (order.email) bg(h.mailPortalLink(order));
+      return { ok: true, kind: 'auftrag', order_id: order.id, order_number: order.order_number, tasks_created: tasks };
+    }
+    if (d.type === 'termin') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(f.appointment_date || '')) || !/^\d{2}:\d{2}$/.test(String(f.time_slot || ''))) throw new HttpError(400, 'params', { message: 'Bitte einen Terminvorschlag wählen.' });
+      const appt = await db.create('Appointment', clean({
+        workshop_code: code, status: 'bestaetigt', appointment_date: f.appointment_date, time_slot: f.time_slot, end_time: /^\d{2}:\d{2}$/.test(String(f.end_time || '')) ? f.end_time : undefined,
+        customer_name: str(f.customer_name, 120), license_plate: str(f.license_plate, 20).toUpperCase(), vehicle_brand: str(f.vehicle_brand, 60), vehicle_model: str(f.vehicle_model, 80),
+        phone: str(f.phone, 40), email: str(f.email, 120), service_name: str(f.service_name, 120), service_id: str(f.service_id, 40),
+        appointment_type: ['fahrzeugabgabe', 'reifenwechsel', 'inspektion', 'sonstiges'].includes(f.appointment_type) ? f.appointment_type : 'fahrzeugabgabe',
+        estimated_duration: Math.min(600, Math.max(15, Number(f.estimated_duration) || 30)),
+      }));
+      return { ok: true, kind: 'termin', appointment_id: appt.id };
+    }
+    if (d.type === 'teilebestellung') {
+      const part = str(f.part_name, 160); if (!part) throw new HttpError(400, 'params', { message: 'Bitte die Teilebezeichnung angeben.' });
+      const po = await db.create('PartOrder', clean({
+        workshop_code: code, status: 'offen', part_name: part, part_number: str(f.part_number, 60), quantity: Math.min(999, Math.max(1, Math.round(Number(f.quantity) || 1))),
+        supplier_name: str(f.supplier_name, 120), inventory_item_id: str(f.inventory_item_id, 40), related_order_id: str(f.related_order_id, 40),
+        order_date: berlinIso(0), ordered_by: actor,
+      }));
+      return { ok: true, kind: 'teilebestellung', part_order_id: po.id };
+    }
+    throw new HttpError(400, 'params');
   }
 
   if (name === 'alexRecommendations') {

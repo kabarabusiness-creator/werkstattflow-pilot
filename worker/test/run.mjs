@@ -892,5 +892,54 @@ await t('Codierungs-Sicherung: speichern, Validierung, nach Auftrag und FIN lade
   assert.equal((await call('/tabletAction', { action: 'coding_backup_list', order_id: 'oc1' }, token)).data.items.length, 2);
   assert.equal((await call('/tabletAction', { action: 'coding_backup_list', order_id: 'o2' }, token)).status, 404);
 });
+await t('Dashboard-ALEX über eigenen Server: Antwort, Rückfall ohne KI, Entwürfe, Anlegen nur eigene Werkstatt', async () => {
+  const fnU = (n, body, auth = 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  assert.equal((await fnU('alexChat', { messages: [{ role: 'user', content: 'Hallo' }] }, null)).s, 401);
+  // Antwort mit KI, ohne Markdown, Quellen mit id
+  let seen;
+  env.AI = { async run(m, input) { seen = input; return { response: '1. **Ölstand** prüfen\n2. Fehlerspeicher lesen' }; } };
+  let r = await fnU('alexChat', { messages: [{ role: 'user', content: 'Was tun bei P0401?' }] });
+  assert.equal(r.s, 200); assert.equal(r.d.answer.includes('**'), false); assert.match(r.d.answer, /Ölstand prüfen/);
+  assert.match(seen.messages[0].content, /im Dashboard von „AutoLeitwerk“/); assert.match(seen.messages[0].content, /Kein Markdown/);
+  // KI-Kontingent leer → trotzdem Antwort statt Fehler
+  env.AI = { async run() { throw new Error('4006: daily free allocation of 10,000 neurons'); } };
+  r = await fnU('alexChat', { messages: [{ role: 'user', content: 'Was steht heute an?' }] });
+  assert.equal(r.s, 200); assert.equal(r.d.fallback, true); assert.match(r.d.answer, /kontingent/i);
+  delete env.AI;
+  // Entwurf Auftrag: bekanntes Kennzeichen → Kundendaten übernommen, Dienstleistung erkannt
+  db.Order.push({ id: 'ok1', workshop_code: 'AL-T1', status: 'abgeschlossen', customer_name: 'Klara Klein', license_plate: 'AB-KK 77', vehicle_brand: 'VW', vehicle_model: 'Polo', phone: '0171', email: 'klara@example.com', created_date: '2026-09-01T10:00:00Z' });
+  db.Service.push({ id: 's2', name: 'Ölwechsel', category: 'oel_wartung', is_active: true, workshop_code: 'AL-T1', estimated_duration_minutes: 45, base_price: 89 },
+                  { id: 's9', name: 'Ölwechsel Fremd', category: 'oel_wartung', is_active: true, workshop_code: 'AL-T2', estimated_duration_minutes: 45, base_price: 1 });
+  db.ServiceTaskTemplate = [{ id: 'tp1', service_id: 's2', title: 'Öl ablassen', order_index: 1, estimated_minutes: 15 }, { id: 'tp2', service_id: 's2', title: 'Filter tauschen', order_index: 2, estimated_minutes: 10 }];
+  const realNow = Date.now; Date.now = () => realNow() + 60_000; // Server-Cache überspringen
+  r = await fnU('alexChat', { messages: [{ role: 'user', content: 'Neuer Auftrag für AB-KK 77, Ölwechsel' }] });
+  Date.now = realNow;
+  const dr = r.d.draft;
+  assert.equal(dr.type, 'auftrag'); assert.equal(dr.fields.customer_name, 'Klara Klein'); assert.equal(dr.fields.vehicle_model, 'Polo');
+  assert.deepEqual(dr.service_ids, ['s2']); assert.match(r.d.answer, /Auftrags-Entwurf/);
+  // Anlegen: Auftrag + Aufgaben aus Vorlage + Rechnungsposition, Portal-Mail
+  const mails0 = mails.length;
+  r = await fnU('alexExecute', { draft: { ...dr, service_ids: ['s2', 's9'] } });
+  assert.equal(r.s, 200); assert.equal(r.d.kind, 'auftrag'); assert.match(r.d.order_number, /^\d{4}$/);
+  const ord = db.Order.find(o => o.id === r.d.order_id);
+  assert.equal(ord.workshop_code, 'AL-T1'); assert.equal(ord.status, 'fahrzeug_angenommen'); assert.match(ord.customer_token, /^wf-/);
+  assert.deepEqual(db.OrderTask.filter(x => x.order_id === ord.id).map(x => x.title), ['Öl ablassen', 'Filter tauschen']);
+  assert.equal(db.InvoiceItem.filter(x => x.order_id === ord.id).length, 1, 'fremde Dienstleistung ignoriert');
+  assert.equal(mails.length, mails0 + 1);
+  // Termin: Vorschläge aus freien Zeiten, Anlegen
+  r = await fnU('alexChat', { messages: [{ role: 'user', content: 'Termin Ölwechsel für AB-KK 77 nächste Woche' }] });
+  assert.equal(r.d.draft.type, 'termin'); assert.ok(r.d.draft.proposals.length >= 1); assert.equal(r.d.draft.fields.estimated_duration, 45);
+  const p0 = r.d.draft.proposals[0];
+  r = await fnU('alexExecute', { draft: { ...r.d.draft, fields: { ...r.d.draft.fields, appointment_date: p0.date, time_slot: p0.time_slot, end_time: p0.end_time } } });
+  assert.equal(r.d.kind, 'termin'); const ap = db.Appointment.find(a => a.id === r.d.appointment_id); assert.equal(ap.workshop_code, 'AL-T1'); assert.equal(ap.customer_name, 'Klara Klein');
+  assert.equal((await fnU('alexExecute', { draft: { type: 'termin', fields: { appointment_date: 'morgen' } } })).s, 400);
+  // Teilebestellung
+  r = await fnU('alexChat', { messages: [{ role: 'user', content: 'Bitte 4 Stück Zündkerzen bestellen' }] });
+  assert.equal(r.d.draft.type, 'teilebestellung'); assert.equal(r.d.draft.fields.quantity, 4);
+  r = await fnU('alexExecute', { draft: r.d.draft });
+  assert.equal(r.d.kind, 'teilebestellung'); const po = db.PartOrder.find(x => x.id === r.d.part_order_id); assert.equal(po.workshop_code, 'AL-T1'); assert.equal(po.status, 'offen');
+  assert.equal((await fnU('alexExecute', { draft: { type: 'x' } })).s, 400);
+  assert.equal((await fnU('alexExecute', { draft: dr }, null)).s, 401);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

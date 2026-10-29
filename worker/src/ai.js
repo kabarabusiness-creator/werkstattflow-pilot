@@ -200,6 +200,14 @@ Regeln:
 - Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sag, dass das im Dashboard geht.
 - Aufzählungen von Aufträgen kurz halten (höchstens 5, die wichtigsten zuerst) – die Details zeigt das Tablet als Karten.`;
 
+// Dashboard: Text wird ohne Markdown angezeigt; Entwürfe legt ALEX dort selbst an (nach Bestätigung)
+const SYSTEM_DASHBOARD = SYSTEM
+  .replace('im Werkstatt-Tablet „AutoLeitwerk“', 'im Dashboard von „AutoLeitwerk“')
+  .replace('Arbeitsschritte als nummerierte Liste, wichtige Werte **fett**.', 'Arbeitsschritte als nummerierte Liste (1., 2., …). Kein Markdown, keine Sternchen.')
+  .replace('- Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sag, dass das im Dashboard geht.',
+    '- Aufträge, Termine und Teilebestellungen legst du nur als Entwurf an, wenn der Nutzer es ausdrücklich verlangt (z. B. „Neuer Auftrag für AB-CD 123, Ölwechsel“). Sonst nur antworten.')
+  .replace('die Details zeigt das Tablet als Karten', 'die Details zeigt das Dashboard als Karten');
+
 export async function alexAsk(db, sess, body, env, data) {
   limitPerHour('ask:' + sess.employee_id, ASK_PER_HOUR);
   const msgs = (Array.isArray(body.messages) ? body.messages : [])
@@ -252,7 +260,7 @@ export async function alexAsk(db, sess, body, env, data) {
   const context = `WERKSTATTDATEN:\n${facts.join('\n\n')}\n\nWISSENSEINTRÄGE:\n` +
     (kb.length ? kb.map((k, i) => `[Eintrag ${i + 1}] ${k.title}${k.brand ? ' (' + k.brand + ')' : ''}\n${String(k.content).slice(0, 1400)}`).join('\n\n') : 'keine passenden Einträge');
   const r = await runAi(env, TEXT_MODEL, {
-    messages: [{ role: 'system', content: SYSTEM + '\n\n' + context }, ...msgs],
+    messages: [{ role: 'system', content: (body.channel === 'dashboard' ? SYSTEM_DASHBOARD : SYSTEM) + '\n\n' + context }, ...msgs],
     max_tokens: 700, temperature: 0.3,
   });
   const answer = textOf(r).trim();
@@ -431,4 +439,162 @@ export async function berichtsheftDraft(env, name, data, notes, date, useAi) {
     } catch (e) { console.log('bh_ai', String((e && e.code) || e)); }
   }
   return { ...base, text: berichtsheftFallback(items), ai: false };
+}
+
+
+/* ---------- Dashboard-ALEX: Antworten + Entwürfe (Auftrag, Termin, Teilebestellung) ----------
+   Entwürfe werden ohne KI aus Text + Werkstattdaten gebaut (zuverlässig, kein Kontingent);
+   angelegt wird erst nach Bestätigung im Dashboard (alexExecute). */
+const PLATE_RE = /\b([A-ZÄÖÜ]{1,3})[-\s]([A-Z]{1,2})[-\s]?(\d{1,4}[EH]?)\b/;
+const DAY_NAMES = ['sonntag', 'montag', 'dienstag', 'mittwoch', 'donnerstag', 'freitag', 'samstag'];
+const addDaysIso = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const dow = iso => new Date(iso + 'T12:00:00Z').getUTCDay();
+const toMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; };
+const fromMin = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+export function draftIntent(question) {
+  const q = norm(question);
+  if (/(neue[rnms]?\s+auftrag|auftrag\s+(an)?legen|auftrag\s+erstellen|auftrag\s+für|auftrag\s+fuer)/.test(q)) return 'auftrag';
+  if (/(teilebestellung|nachbestell|bestell(e|en)\b|bestellung\s+(für|fuer|anlegen))/.test(q) && !/(wann|wurde|ist .* bestellt|status)/.test(q)) return 'teilebestellung';
+  if (/\btermin/.test(q) && !/(wie voll|auslast|kapazit|frei\?|welche termine|was steht)/.test(q)) return 'termin';
+  return null;
+}
+function findPlate(question) {
+  const m = String(question || '').toUpperCase().match(PLATE_RE);
+  return m ? `${m[1]}-${m[2]} ${m[3]}` : '';
+}
+function knownVehicle(plate, data) {
+  if (!plate) return null;
+  const k = plateKey(plate);
+  const hits = [...data.orders].filter(o => plateKey(o.license_plate) === k).sort((a, b) => String(b.created_date).localeCompare(String(a.created_date)));
+  if (hits[0]) return hits[0];
+  const ap = (data.appointments || []).find(a => plateKey(a.license_plate) === k);
+  return ap || null;
+}
+function matchServices(question, services) {
+  const qt = ftokens(question);
+  return services.filter(s => s.is_active !== false).filter(s => {
+    const st = ftokens(s.name).filter(w => w.length > 3);
+    return st.length && st.some(w => qt.some(x => sameStem(x, w) || (x.length >= 3 && w.startsWith(x))));
+  }).slice(0, 4);
+}
+function leastBusyMechanic(data) {
+  const mechs = data.employees.filter(e => e.is_active !== false && e.role === 'mechaniker');
+  if (!mechs.length) return '';
+  const load = n => data.orders.filter(o => OPEN(o) && o.status !== 'abholbereit' && o.assigned_mechanic === n).length;
+  return mechs.map(e => ({ n: e.name, l: load(e.name) })).sort((a, b) => a.l - b.l)[0].n;
+}
+// Freie Zeitfenster: Mo–Fr 08:00–17:00 (Sa bis 12:00), so viele parallele Termine wie Mechaniker
+export function freeSlots(question, data, duration, count = 3) {
+  const q = norm(question); const today = berlinDate(0);
+  let start = addDaysIso(today, 1), end = addDaysIso(today, 14);
+  if (/übermorgen|uebermorgen/.test(q)) { start = end = addDaysIso(today, 2); }
+  else if (/\bmorgen\b/.test(q)) { start = end = addDaysIso(today, 1); }
+  else if (/\bheute\b/.test(q)) { start = end = today; }
+  else if (/nächste woche|naechste woche|kommende woche/.test(q)) { const toMon = (8 - dow(today)) % 7 || 7; start = addDaysIso(today, toMon); end = addDaysIso(start, 5); }
+  else { const d = DAY_NAMES.findIndex(n => q.includes(n)); if (d >= 0) { let off = (d - dow(today) + 7) % 7 || 7; start = end = addDaysIso(today, off); } }
+  const mech = Math.max(1, data.employees.filter(e => e.is_active !== false && e.role !== 'serviceberater').length);
+  const appts = (data.appointments || []).filter(a => a.status !== 'storniert');
+  const nowMin = (() => { const p = new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' }).format(new Date()).split(':'); return +p[0] * 60 + +p[1]; })();
+  const out = [];
+  for (let iso = start; iso <= end && out.length < count; iso = addDaysIso(iso, 1)) {
+    const wd = dow(iso); if (wd === 0) continue;
+    const close = wd === 6 ? 12 * 60 : 17 * 60;
+    const day = appts.filter(a => a.appointment_date === iso).map(a => { const s0 = toMin(a.time_slot) ?? 8 * 60; return [s0, s0 + (Number(a.estimated_duration) || 30)]; });
+    for (let m = 8 * 60; m + duration <= close; m += 30) {
+      if (iso === today && m < nowMin + 30) continue;
+      const busy = day.filter(([a, b]) => a < m + duration && b > m).length;
+      if (busy < mech) { out.push({ date: iso, time_slot: fromMin(m), end_time: fromMin(m + duration) }); break; }
+    }
+  }
+  return out;
+}
+export function buildDraft(kind, question, data, opts = {}) {
+  const plate = findPlate(question);
+  const known = knownVehicle(plate, data);
+  const services = matchServices(question, data.services || []);
+  const warnings = [];
+  const strip = t => String(t || '').replace(PLATE_RE, ' ').replace(/(neue[rnms]?\s+auftrag|auftrag\s+(an)?legen|auftrag\s+erstellen|auftrag)\s*(für|fuer)?/ig, ' ').replace(/^[\s,:.-]+|[\s,:.-]+$/g, '').replace(/\s{2,}/g, ' ');
+  if (kind === 'auftrag') {
+    if (!plate) warnings.push('Kein Kennzeichen erkannt – bitte ergänzen.');
+    else if (!known) warnings.push('Kennzeichen noch nicht im System – Kunde und Fahrzeug bitte ergänzen.');
+    const dur = services.reduce((s, x) => s + (Number(x.estimated_duration_minutes) || 30), 0);
+    let planned = null;
+    if (dur) { const t = new Date(Date.now() + (dur + 60) * 60_000); planned = t.toISOString(); }
+    const fields = {
+      customer_name: known ? known.customer_name || '' : '', license_plate: known && known.license_plate ? known.license_plate : plate,
+      vehicle_brand: known ? known.vehicle_brand || '' : '', vehicle_model: known ? known.vehicle_model || '' : '',
+      mileage: known && known.mileage ? known.mileage : undefined, phone: known ? known.phone || '' : '', email: known ? known.email || '' : '',
+      vin: known ? known.vin || '' : '', hsn: known ? known.hsn || '' : '', tsn: known ? known.tsn || '' : '', next_hu: known ? known.next_hu || '' : '',
+      description: strip(question).slice(0, 300), priority: /eilig|dringend|sofort/i.test(question) ? 'eilig' : 'normal',
+      assigned_mechanic: leastBusyMechanic(data),
+    };
+    return { type: 'auftrag', fields, service_ids: services.map(x => x.id), services: services.map(x => ({ id: x.id, name: x.name, duration: Number(x.estimated_duration_minutes) || 30 })),
+      suggested_mechanic: fields.assigned_mechanic, planned_completion: planned, warnings };
+  }
+  if (kind === 'termin') {
+    const svc = services[0];
+    const dur = svc ? Number(svc.estimated_duration_minutes) || 60 : (/reifen|räder|raeder/i.test(question) ? 30 : 60);
+    const proposals = freeSlots(question, data, dur, 3);
+    if (!proposals.length) warnings.push('Im gewünschten Zeitraum ist nichts frei – bitte anderen Tag wählen.');
+    if (!plate && !known) warnings.push('Kein Kennzeichen erkannt – Kunde bitte ergänzen.');
+    const cat = svc ? svc.category : '';
+    const type = cat === 'reifen' || /reifen|räder|raeder/i.test(question) ? 'reifenwechsel' : cat === 'inspektion' || cat === 'oel_wartung' || /inspektion|service|öl|oel/i.test(question) ? 'inspektion' : 'fahrzeugabgabe';
+    const fields = {
+      customer_name: known ? known.customer_name || '' : '', license_plate: known && known.license_plate ? known.license_plate : plate,
+      vehicle_brand: known ? known.vehicle_brand || '' : '', vehicle_model: known ? known.vehicle_model || '' : '',
+      phone: known ? known.phone || '' : '', email: known ? known.email || '' : '',
+      service_name: svc ? svc.name : (strip(question).replace(/\btermin\b/ig, '').trim().slice(0, 80) || 'Termin'), service_id: svc ? svc.id : '',
+      appointment_type: type, estimated_duration: dur,
+    };
+    return { type: 'termin', fields, proposals, warnings };
+  }
+  // Teilebestellung
+  const qn = norm(question);
+  const qtyM = qn.match(/(\d+)\s*(x|stück|stk|satz|sätze|liter|l)\b/);
+  const inv = (data.inventory || []);
+  const qt = tokens(question).filter(w => w.length > 3 && !/bestell|nachbestell|teilebestellung|bitte/.test(w));
+  const item = inv.find(i => { const hay = norm([i.name, i.part_number].join(' ')); return qt.some(w => hay.includes(w.replace(/(en|er|e|n|s)$/, ''))); });
+  const fields = {
+    part_name: item ? item.name : question.replace(/(teilebestellung|nachbestellen|bestellen|bestelle|bestellung)\s*(für|fuer|von)?/ig, '').replace(/\d+\s*(x|stück|stk)\b/ig, '').trim().slice(0, 120),
+    part_number: item ? item.part_number || '' : '', quantity: qtyM ? +qtyM[1] : (item && item.reorder_quantity ? Number(item.reorder_quantity) : 1),
+    supplier_name: item ? item.supplier_name || '' : '', inventory_item_id: item ? item.id : '',
+    related_order_id: opts.orderId || '',
+  };
+  if (!item) warnings.push('Kein passender Lagerartikel gefunden – Teilenummer und Lieferant bitte ergänzen.');
+  return { type: 'teilebestellung', fields, warnings };
+}
+const DRAFT_TEXT = {
+  auftrag: d => `Ich habe einen Auftrags-Entwurf vorbereitet${d.fields.customer_name ? ` für ${d.fields.customer_name}` : ''}${d.services.length ? ` mit ${d.services.map(s => s.name).join(', ')}` : ''}. Bitte prüfen, bei Bedarf „Ändern“ und dann „Anlegen“.`,
+  termin: d => d.proposals.length ? `Ich habe ${d.proposals.length} freie Termine gefunden. Vorschlag wählen und mit „Anlegen“ bestätigen.` : 'Im gewünschten Zeitraum habe ich keinen freien Termin gefunden.',
+  teilebestellung: d => `Ich habe eine Teilebestellung für ${d.fields.quantity} × ${d.fields.part_name || 'Teil'} vorbereitet. Bitte prüfen und mit „Anlegen“ bestätigen.`,
+};
+
+export async function alexDashboard(db, sess, body, env, data) {
+  const msgs = (Array.isArray(body.messages) ? body.messages : []).filter(m => m && m.role === 'user' && typeof m.content === 'string');
+  const q = msgs.length ? msgs[msgs.length - 1].content.slice(0, 1500) : '';
+  if (!q.trim()) throw new AiError(400, 'params', 'Keine Frage übermittelt.');
+  const kind = draftIntent(q);
+  if (kind) {
+    const draft = buildDraft(kind, q, data, { orderId: body.order_id });
+    return { ok: true, answer: DRAFT_TEXT[kind](draft), draft, cards: [], sources: [], used_general_knowledge: false };
+  }
+  try {
+    const r = await alexAsk(db, sess, { ...body, channel: 'dashboard' }, env, data);
+    return { ...r, answer: String(r.answer).replace(/\*\*/g, '').replace(/^#+\s*/gm, ''), sources: (r.sources || []).map((s, i) => ({ id: 's' + i, ...s })) };
+  } catch (e) {
+    // KI nicht verfügbar (Tageskontingent leer, nicht eingerichtet): trotzdem helfen – Karten + Wissenseintrag
+    if (!e || !['ai_quota', 'not_available', 'ai_error'].includes(e.code)) throw e;
+    const kb = searchKb(await loadKb(db, sess.workshop_code), q, '');
+    const qn = norm(q); const cards = [];
+    if (/heute|steht.*an|zu tun|priorit|empfehl|überfällig|dringend/.test(qn)) { const rec = recommendations(data); if (rec.length) cards.push({ type: 'empfehlungen', items: rec }); }
+    if (/voll|kapazit|auslast|frei|termin|woche|morgen/.test(qn)) cards.push(...capacityDays(data.appointments, data.employees));
+    cards.push(...findCustomers(q, data));
+    if (/lager|bestand|vorrätig|vorraetig|teil|haben wir/.test(qn)) cards.push(...findParts(q, data.inventory || []));
+    const answer = kb.length
+      ? `${kb[0].title}\n\n${String(kb[0].content).replace(/\*\*/g, '').slice(0, 900)}\n\n(Das KI-Tageskontingent ist gerade aufgebraucht – Antwort aus der Wissensdatenbank.)`
+      : cards.length ? 'Hier die passenden Daten aus der Werkstatt. (Das KI-Tageskontingent ist gerade aufgebraucht – ab 2 Uhr nachts antworte ich wieder ausführlich.)'
+      : 'Das KI-Tageskontingent ist für heute aufgebraucht – ab 2 Uhr nachts bin ich wieder voll da. Fragen zu Aufträgen, Terminen, Kunden und Lager beantworte ich trotzdem mit den Werkstattdaten.';
+    return { ok: true, answer, cards, sources: kb.slice(0, 1).map((k, i) => ({ id: 's' + i, title: k.title })), used_general_knowledge: false, fallback: true };
+  }
 }

@@ -1352,7 +1352,7 @@ async function handleFetch(request, env, ctx) {
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia }, ctx });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia }, ctx });
         invalidate('Order');
         if (r instanceof Response) { const hd = new Headers(r.headers); for (const [k, v] of Object.entries(cors)) hd.set(k, v); hd.set('Access-Control-Expose-Headers', 'Content-Disposition'); return new Response(r.body, { status: r.status, headers: hd }); }
         return json(r, 200, cors);
