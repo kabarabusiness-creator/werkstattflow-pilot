@@ -2399,7 +2399,7 @@ function renderChrome(){
   const role = state.currentUser ? state.currentUser.role : state.selectedRole;
   const navItemsAll = [
     {ic:iconDashboard, label:'Dashboard', view:'dashboard'},
-    {ic:iconGrid, label:'Meine Aufträge', badge:String(orders.filter(o=>o.status!=='erledigt').length), view:'auftraege', roles:['mechaniker','meister','admin']},
+    {ic:iconGrid, label:'Meine Aufträge', badge:String(orders.filter(o=>o.status!=='erledigt').length), view:'auftraege'},
     {ic:iconList, label:'Alle Aufträge', view:'alle'},
     {ic:iconLift, label:'Hebebühnen', view:'hebebuehnen'},
     {ic:iconCalendar, label:'Termine', view:'termine'},
