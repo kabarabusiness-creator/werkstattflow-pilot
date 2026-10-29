@@ -1,0 +1,6034 @@
+/* AutoLeitwerk Tablet – Programmcode. Wird von index.html geladen. */
+const LOGO_ICON_SRC = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHhtbG5zOmMycGE9Imh0dHA6Ly9jMnBhLm9yZy9tYW5pZmVzdCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjOGI1Y2Y2Ij48L3N0b3A+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjYzAyNmQzIj48L3N0b3A+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHBvbHlnb24gcG9pbnRzPSIyNCw4IDM2LDggMjcsNDQgNTYsNDQgNTMsNTYgMTIsNTYiIGZpbGw9InVybCgjZykiPjwvcG9seWdvbj48cG9seWdvbiBwb2ludHM9IjQxLDggNTMsOCA1MCwyMCAzOCwyMCIgZmlsbD0iI2ZmZmZmZiI+PC9wb2x5Z29uPjwvc3ZnPg==';
+const LOGO_WORDMARK_SRC = 'assets/img/logo-wortmarke.png';
+
+/* ---------- Backend-API ---------- */
+// Passe dies an, wo dein Backend läuft:
+// - Backend läuft lokal auf demselben Rechner wie der Browser: 'http://localhost:8000'
+// - Tablet im selben WLAN wie dein Rechner: 'http://<Rechner-IP>:8000' (z.B. 'http://192.168.1.23:8000')
+// - Gehostetes Backend (Produktion): die echte URL, z.B. 'https://werkstattflow-api.up.railway.app'
+const API_BASE = 'https://werkstattflow-pilot-production.up.railway.app';
+
+/* ---------- Base44 Live-Daten (Tablet-Ansicht) ----------
+   Öffentlicher, unauthentifizierter Endpunkt - liefert Aufträge/Aufgaben/Mitarbeiter/
+   Zeiterfassung/Teile. Nur LESEND angebunden: es gibt (noch) keine Schreib-Endpunkte,
+   daher wirken alle Interaktionen in der App nur lokal und werden nicht zurückgeschrieben. */
+// Server-Auswahl: eigener Server (Cloudflare Worker) oder – als Rückfall – die Base44-Funktionen.
+// Zum Testen lässt sich die Adresse per ?api=<url> (wird gemerkt) bzw. ?api=reset überschreiben.
+const API_WORKER = 'https://werkstattflow-pilot.werkstattflow.workers.dev';   // z. B. 'https://autoleitwerk-api.<konto>.workers.dev' – leer = Base44-Funktionen
+const API_BASE44 = 'https://autoleitwerk.base44.app/functions';
+const SERVER_BASE = (()=>{
+  try{
+    const q = new URLSearchParams(location.search).get('api');
+    if(q === 'reset') localStorage.removeItem('autoleitwerk.apiBase');
+    else if(q && (/^https:\/\/[a-z0-9.-]+(\/[\w/-]*)?$/i.test(q) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(q))) localStorage.setItem('autoleitwerk.apiBase', q.replace(/\/+$/,''));
+    const o = localStorage.getItem('autoleitwerk.apiBase'); if(o) return o;
+  }catch(_){}
+  return API_WORKER || API_BASE44;
+})();
+const BASE44_URL = SERVER_BASE + '/getTabletData';
+const BASE44_LOGIN_URL = SERVER_BASE + '/workshopLogin';
+const BASE44_ACTION_URL = SERVER_BASE + '/tabletAction';
+
+/* ---------- Pilotbetrieb ----------
+   Bereiche, die noch mit festen Beispieldaten arbeiten, werden im Pilot ausgeblendet,
+   damit die Werkstatt nichts sieht, was nicht echt ist. Zum Vorführen auf false setzen. */
+const PILOT_HIDE_DEMO = true;
+/* Support-Kontakt, der im Tablet angezeigt wird. Leer = Karte wird ausgeblendet. */
+// Öffentliche AutoLeitwerk-Kontaktdaten (wie auf autoleitwerk.de)
+const SUPPORT_PHONE = '0151 29534820';
+const SUPPORT_EMAIL = 'info@kabaradigital.de';
+
+/* Schreibaktionen ans Backend (Base44-Funktion tabletAction, Bearer-Token wie getTabletData).
+   Solange die Funktion fehlt, bleiben Änderungen lokal auf diesem Tablet erhalten (siehe
+   carryOverLocalState) und es erscheint einmalig ein Hinweis. */
+const CREDITS_MSG = 'Monatskontingent für Uploads/KI bei Base44 aufgebraucht – bitte Admin informieren';
+function isCreditsLimit(data){ return !!data && ((data.extra_data && data.extra_data.reason==='integration_credits_limit_reached') || /limit of integrations/i.test(String(data.message||data.detail||''))); }
+const ACTION_LABELS = { tire_scan:'Reifenscan', task_update:'Aufgabe', worktime_start:'Zeiterfassung', worktime_stop:'Zeiterfassung', media_upload:'Foto', note_add:'Notiz', order_complete:'Auftragsabschluss' };
+async function tabletAction(action, payload){
+  if(state.writeSupported === false) return null;
+  if(!state.sessionToken) return null;
+  const controller = new AbortController();
+  // Foto-Upload braucht deutlich länger als die anderen Aktionen
+  const timeoutId = setTimeout(()=>controller.abort(), action==='media_upload' ? 60000 : 15000);
+  // leere Felder (z. B. task_id beim Fahrzeugfoto) gar nicht erst mitschicken
+  const body = { action };
+  Object.entries(payload||{}).forEach(([k,v])=>{ if(v!==null && v!==undefined) body[k]=v; });
+  try{
+    const res = await fetch(BASE44_ACTION_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + state.sessionToken },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(()=>({}));
+    if(res.status===401){ handleSessionExpired(); return null; }
+    if(data && data.error==='not_available'){
+      state.notAvailableShown = state.notAvailableShown || {};
+      if(!state.notAvailableShown[action]){
+        state.notAvailableShown[action] = true;
+        showUpdateToast(action==='media_upload' ? 'Fotos werden gerade nicht hochgeladen – sie bleiben auf diesem Tablet.' : `${ACTION_LABELS[action]||action} ist gerade nicht verfügbar.`);
+      }
+      return null;
+    }
+    const functionMissing = res.status===404 && /not found or not deployed/i.test(String(data.message||data.detail||''));
+    if(functionMissing || data.error==='unknown_action'){
+      if(state.writeSupported !== false){
+        state.writeSupported = false;
+        showUpdateToast('Hinweis: Speichern auf dem Server ist noch nicht aktiv – Änderungen bleiben nur auf diesem Tablet.');
+      }
+      return null;
+    }
+    if(isCreditsLimit(data)){ const err = new Error(CREDITS_MSG); err.credits = true; err.body = data; throw err; }
+    if(!res.ok){ const err = new Error(data.error || data.message || ('HTTP ' + res.status)); err.status = res.status; err.body = data; throw err; }
+    state.writeSupported = true;
+    return data;
+  } catch(e){
+    const what = ACTION_LABELS[action] || action;
+    const reason = e.credits ? CREDITS_MSG : e.name==='AbortError' ? 'Zeitüberschreitung' : (e.status ? `${e.status} ${e.message}` : 'keine Verbindung');
+    state.lastWriteError = { action, reason, body: e.body || null, at: new Date().toISOString() };
+    console.warn('Speichern fehlgeschlagen', state.lastWriteError);
+    showUpdateToast(`${what} nicht gespeichert (${reason}).`);
+    return null;
+  } finally { clearTimeout(timeoutId); }
+}
+
+/* Der 30-Sekunden-Abgleich baut alle Aufträge neu auf. Ohne diese Übernahme wären laufende
+   Timer, abgehakte Checklisten, Fotos und Sprachberichte nach spätestens 30 s weg. */
+const TIMER_FIELDS = ['timeStatus','startedAt','elapsedSec','istMin','_worktimeId'];
+const LOCAL_TASK_FIELDS = ['timeStatus','startedAt','elapsedSec','istMin','_worktimeId','_timerChangedAt','photos','voiceNote','voiceError','voiceShowManual','zusatzarbeit','aiAnalysis','_voiceParts'];
+function carryOverLocalState(prevOrders, nextOrders){
+  const prevById = new Map((prevOrders||[]).map(o=>[o.id,o]));
+  const now = Date.now(), MAX_AGE = 15*60*1000;
+  nextOrders.forEach(no=>{
+    const po = prevById.get(no.id);
+    if(po){
+      const pq = state.pendingQC && state.pendingQC[no.id];
+      if(pq) no.qc = po.qc;
+      else if(Array.isArray(po.qc) && po.qc.length && !(Array.isArray(no._serverQC) && no._serverQC.length)) no.qc = po.qc;
+      no.tasks.forEach(nt=>{
+        const pt = (po.tasks||[]).find(t=>t.id===nt.id);
+        if(!pt) return;
+        const timerFresh = pt._timerChangedAt && Date.now() - pt._timerChangedAt < 45000;
+        LOCAL_TASK_FIELDS.forEach(f=>{
+          if(pt[f]===undefined) return;
+          if(TIMER_FIELDS.includes(f) && nt._serverTimer && !timerFresh) return; // Zeit vom Server (Leitstelle/anderes Tablet) gewinnt
+          if(f==='photos' && (!pt.photos||!pt.photos.length)) return;
+          if(f==='voiceNote' && !pt.voiceNote && nt.voiceNote) return; // gespeicherter Bericht vom Server nicht mit „leer“ überschreiben
+          nt[f] = pt[f];
+        });
+      });
+    }
+    nt_pending(no, now, MAX_AGE);
+    const pend = state.pendingOrderStatus[no.id];
+    if(pend){
+      if(no.status===pend.status || now-pend.ts>MAX_AGE) delete state.pendingOrderStatus[no.id];
+      else { no.status = pend.status; no.progress = pend.progress; }
+    }
+  });
+}
+function nt_pending(no, now, MAX_AGE){
+  no.tasks.forEach(nt=>{
+    const pend = state.pendingTask[nt.id];
+    if(!pend) return;
+    if(nt.status===pend.status || now-pend.ts>MAX_AGE){ delete state.pendingTask[nt.id]; return; }
+    nt.status = pend.status;
+    nt.progress = pend.status==='done' ? 100 : 0;
+    nt.statusLabel = pend.status==='done' ? 'Erledigt' : (pend.status==='progress' ? 'In Arbeit' : 'Ausstehend');
+  });
+}
+const B44_TASK_STATUS = { open:'offen', progress:'in_arbeit', done:'erledigt' };
+function saveTaskStatus(t){
+  state.pendingTask[t.id] = { status:t.status, ts:Date.now() };
+  return tabletAction('task_update', { task_id:t.id, status:B44_TASK_STATUS[t.status]||'offen' });
+}
+const B44_STATUS_SEQUENCE = [
+  'fahrzeug_angenommen','diagnose_laeuft','kostenvoranschlag','freigabe_erforderlich',
+  'ersatzteile_bestellt','warte_auf_ersatzteile','reparatur_laeuft','qualitaetspruefung',
+  'abholbereit','abgeschlossen',
+];
+const B44_STATUS_LABELS = {
+  fahrzeug_angenommen:'Angenommen', diagnose_laeuft:'Diagnose', kostenvoranschlag:'Kostenvoranschlag',
+  freigabe_erforderlich:'Freigabe nötig', ersatzteile_bestellt:'Teile bestellt', warte_auf_ersatzteile:'Warte auf Teile',
+  reparatur_laeuft:'Reparatur', qualitaetspruefung:'Qualitätsprüfung', abholbereit:'Abholbereit', abgeschlossen:'Abgeschlossen',
+};
+function b44SimplifiedStatus(s){
+  if(s==='abgeschlossen' || s==='abholbereit') return 'erledigt'; // abholbereit = Arbeit fertig, wartet nur auf den Kunden
+  // „Wartet“: Auto steht, bis Kunde/Teile/Kostenvoranschlag da sind. Qualitätsprüfung macht der Mechaniker selbst → „In Arbeit“.
+  if(['freigabe_erforderlich','kostenvoranschlag','ersatzteile_bestellt','warte_auf_ersatzteile'].includes(s)) return 'pruefung';
+  return 'arbeit';
+}
+function b44ProgressForStatus(s){
+  const idx = B44_STATUS_SEQUENCE.indexOf(s);
+  return idx>=0 ? Math.round(((idx+1)/B44_STATUS_SEQUENCE.length)*100) : 0;
+}
+// Fortschritt: fertig gemeldete Aufträge = 100 %, sonst nach erledigten Aufgaben, ohne Aufgaben nach Status
+function b44OrderProgress(status, tasks){
+  if(status==='abholbereit' || status==='abgeschlossen') return 100;
+  if(tasks && tasks.length) return Math.round(tasks.filter(t=>t.status==='done').length / tasks.length * 100);
+  return b44ProgressForStatus(status);
+}
+function b44MapTaskStatus(s){
+  if(s==='erledigt') return 'done';
+  if(s==='offen') return 'open';
+  return 'progress';
+}
+function b44MapOrder(o, allTasks, demoImageByBrand){
+  const tasks = allTasks.filter(t=>t.order_id===o.id).sort((a,b)=>(a.order_index||0)-(b.order_index||0)).map(t=>({
+    id: t.id, title: t.title, cat: taskCategory(t), catColor: catColorFor(taskCategory(t)),
+    duration: t.estimated_minutes ? minutesToLabel(t.estimated_minutes) : '–',
+    mechanic: t.assigned_employee || 'Nicht zugewiesen',
+    status: b44MapTaskStatus(t.status),
+    statusLabel: t.status==='erledigt' ? 'Erledigt' : (t.status==='offen' ? 'Ausstehend' : 'In Arbeit'),
+    desc: t.description || '', progress: t.status==='erledigt' ? 100 : 0,
+    images: 0, photos: [], voiceNote: null, voiceError: null, voiceShowManual: false,
+    timeStatus: 'idle', startedAt: null, elapsedSec: 0, istMin: null, _voiceParts: [],
+  }));
+  return {
+    id: o.id,
+    orderNumber: o.order_number || o.id,
+    vehicle: `${o.vehicle_brand||''} ${o.vehicle_model||''}`.trim(),
+    plate: o.license_plate || '–',
+    customer: o.customer_name || '–',
+    km: o.mileage!=null ? `${o.mileage.toLocaleString('de-DE')} km` : '–',
+    erst: o.first_registration ? formatDateDE(o.first_registration) : '–',
+    status: b44SimplifiedStatus(o.status),
+    _b44Status: o.status,
+    _b44StatusLabel: B44_STATUS_LABELS[o.status] || o.status,
+    progress: b44OrderProgress(o.status, tasks),
+    dauer: o.estimated_completion_text || '–',
+    rest: '–', eta: o.estimated_completion_text || '–',
+    created: o.created_date ? formatDateTimeDE(o.created_date) : '–',
+    _serverPhoto: o.vehicle_photo || o.image_url || null,
+    image: (state.localVehiclePhoto && state.localVehiclePhoto[o.id]) || o.vehicle_photo || o.image_url || FALLBACK_CAR_IMAGE, // keine Marken-Beispielfotos mehr – sonst sieht es aus, als gäbe es schon ein echtes Foto
+    vin: o.vin || '–', farbe: o.color || '–',
+    motor: [o.power_kw ? `${o.power_kw} kW (${Math.round(o.power_kw*1.35962)} PS)` : '', o.displacement_ccm ? `${Number(o.displacement_ccm).toLocaleString('de-DE')} ccm` : ''].filter(Boolean).join(' · ') || '–',
+    kraftstoff: o.fuel_type || '–', getriebe: o.transmission || '–',
+    hsnTsn: (o.hsn || o.tsn) ? `${o.hsn||'–'} / ${o.tsn||'–'}` : '–',
+    tuev: (o.next_hu || o.tuv_next_date) ? formatDateDE(o.next_hu || o.tuv_next_date) : '–',
+    tel: o.phone || '',
+    email: o.email || '', hasPortal: !!o.has_portal,
+    desc: o.description || '',
+    qc: qcFromServer(o.qc_checklist),
+    _serverQC: o.qc_checklist || null,
+    tasks,
+  };
+}
+async function workshopLogin(code, name, pin, employeeId){
+  const controller = new AbortController();
+  const timeoutId = setTimeout(()=>controller.abort(), 8000);
+  try{
+    const res = await fetch(BASE44_LOGIN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workshop_code: code, name: name || undefined, employee_id: employeeId || undefined, pin: pin }),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok){
+      const err = new Error(data.error || `Anmeldung fehlgeschlagen (${res.status})`);
+      err.code = data.error; err.retryAt = data.retry_at; err.serverMessage = data.message || '';
+      throw err;
+    }
+    return data; // { token, expires_at, employee:{id,name,role} }
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+async function fetchBase44Data(){
+  if(!state.sessionToken){ const e = new Error('unauthorized'); e.code = 'unauthorized'; throw e; }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(()=>controller.abort(), 15000);
+  try{
+    const res = await fetch(BASE44_URL, {
+      headers: { 'Authorization': 'Bearer ' + state.sessionToken },
+      signal: controller.signal,
+    });
+    if(res.status===401){ const e = new Error('unauthorized'); e.code = 'unauthorized'; throw e; }
+    if(res.status===403 || res.status===503){
+      // Werkstatt gesperrt oder Wartungsmodus (CEO-Konsole) → abmelden und Grund zeigen
+      const d = await res.json().catch(()=>({}));
+      if(d.error==='workshop_disabled' || d.error==='maintenance'){
+        if(b44PollInterval){ clearInterval(b44PollInterval); b44PollInterval = null; }
+        state.sessionToken = null; showLoginScreen();
+        const el = document.getElementById('loginError'); if(el) el.textContent = d.message || 'Anmeldung derzeit nicht möglich.';
+        const e = new Error(d.error); e.code = d.error; throw e;
+      }
+    }
+    if(!res.ok) throw new Error(`Base44-Fehler ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+function handleSessionExpired(){
+  showLoginScreen();
+  const el = document.getElementById('loginError');
+  if(el) el.textContent = 'Sitzung abgelaufen. Bitte neu anmelden.';
+}
+let b44PollInterval = null;
+// Zeiterfassung vom Server übernehmen: laufende Zeit + bereits gebuchte Minuten je Aufgabe.
+// So sieht das Tablet Starts/Stopps aus der Leitstelle oder von einem anderen Tablet.
+function attachServerTimers(list, data){
+  const wts = Array.isArray(data.worktimes) ? data.worktimes : [];
+  if(!wts.length) return;
+  const ms = x => { const v = String(x||''); return Date.parse(/Z|[+-]\d\d:?\d\d$/.test(v) ? v : v + 'Z') || 0; };
+  list.forEach(o=>{
+    const ow = wts.filter(w=>w.order_id===o.id);
+    if(!ow.length) return;
+    o.tasks.forEach(t=>{
+      const tw = ow.filter(w=> w.task_id ? w.task_id===t.id : (t.title && w.description===t.title));
+      if(!tw.length) return;
+      let closed = 0, running = null;
+      tw.forEach(w=>{
+        if(!w.end_timestamp){ if(!running || ms(w.start_timestamp) > ms(running.start_timestamp)) running = w; return; }
+        closed += Math.max(0, (ms(w.end_timestamp) - ms(w.start_timestamp)) / 1000);
+      });
+      t._serverTimer = true;
+      t.elapsedSec = Math.round(closed);
+      if(running){ t.timeStatus = 'running'; t.startedAt = ms(running.start_timestamp); t._worktimeId = running.id; t._timerBy = running.employee_name || ''; }
+      else { t.startedAt = null; t._worktimeId = null; t.timeStatus = t.status==='done' ? 'done' : (closed > 0 ? 'paused' : 'idle'); if(t.status==='done') t.istMin = Math.max(1, Math.round(closed/60)); }
+    });
+  });
+}
+// Bereits gespeicherte Aufgaben-Fotos und Sprachberichte vom Server an die Aufgaben hängen (sonst nach Neuladen „weg“)
+function attachSavedTaskData(list, data){
+  const media = Array.isArray(data.task_media) ? data.task_media : [];
+  const notes = Array.isArray(data.task_notes) ? data.task_notes : [];
+  if(!media.length && !notes.length) return;
+  const ts = x => Date.parse(/Z|[+-]\d\d:?\d\d$/.test(String(x||'')) ? x : String(x||'') + 'Z') || 0;
+  list.forEach(o=>{
+    const om = media.filter(m=>m.order_id===o.id).sort((a,b)=>ts(a.created_date)-ts(b.created_date));
+    o.tasks.forEach(t=>{
+      // mit Aufgaben-Zuordnung; ältere Fotos ohne Zuordnung über die Beschriftung (= Aufgabentitel)
+      const ph = om.filter(m=> m.task_id ? m.task_id===t.id : (t.title && m.caption===t.title)).map(m=>m.file_url).filter(Boolean);
+      if(ph.length) t.photos = ph;
+      const n = notes.filter(x=>x.task_id===t.id).sort((a,b)=>ts(b.created_date)-ts(a.created_date))[0];
+      if(n) t.voiceNote = { bericht: n.content, kunde: '', transcript: '', fromServer: true, savedAt: n.created_date ? new Date(ts(n.created_date)).toISOString() : null };
+    });
+  });
+}
+async function loadFromBase44(){
+  const demoImageByBrand = {};
+  orders.forEach(o => {
+    const brand = (o.vehicle || '').split(' ')[0];
+    if(brand && !demoImageByBrand[brand]) demoImageByBrand[brand] = o.image;
+  });
+  const data = await fetchBase44Data();
+  state.base44Data = data;
+  try{ renderTrialBanner(); }catch(_){} // Ankündigung aus der CEO-Konsole aktuell halten
+  setTimeout(()=>{ try{ bhMaybeNudge(); }catch(_){} }, 0);
+  const prevOrders = orders;
+  orders = data.orders.map(o => b44MapOrder(o, data.tasks, demoImageByBrand));
+  attachSavedTaskData(orders, data);
+  attachServerTimers(orders, data);
+  carryOverLocalState(prevOrders, orders);
+  // fehlgeschlagene Checklisten-Speicherungen beim nächsten Abgleich erneut senden
+  Object.keys(state.pendingQC||{}).forEach(id=>{ const o = orders.find(x=>x.id===id); if(o && Date.now()-state.pendingQC[id].ts > 5000) saveQC(o); else if(!o) delete state.pendingQC[id]; });
+  state.b44Appointments = Array.isArray(data.appointments) ? data.appointments : [];
+  state.tireSets = Array.isArray(data.tire_sets) ? data.tire_sets : null; // kommt mit getTabletData-Update
+  state.apiUsers = data.employees.filter(e=>e.is_active).map(e => ({ id: e.id, name: e.name, email:'', role: e.role, active: 1 }));
+  if(Array.isArray(data.lifts)){
+    bays = data.lifts
+      .sort((a,b)=>(a.lift_number||0)-(b.lift_number||0))
+      .map(l => ({
+        n: l.lift_number,
+        orderId: l.assigned_order_id || null,
+        remainingMin: (l.remaining_minutes!=null) ? l.remaining_minutes : null,
+        offline: l.status === 'ausser_betrieb',
+      }));
+  }
+  // Wenn Base44 noch keine Lifts liefert (Function-Update ausstehend), bleiben die
+  // bisherigen lokalen Demo-Hebebühnen unverändert bestehen (kein Absturz, kein Datenverlust).
+}
+function startBase44Polling(){
+  if(b44PollInterval) clearInterval(b44PollInterval);
+  b44PollInterval = setInterval(async ()=>{
+    const active = document.activeElement;
+    if(active && (active.tagName==='INPUT' || active.tagName==='TEXTAREA')) return;
+    if(state.recognition) return;
+    try{
+      const beforeSig = snapshotOrders();
+      const beforeOrders = orders.map(o=>({id:o.id, status:o.status}));
+      const beforeBays = bays.map(b=>({...b}));
+      await loadFromBase44();
+      renderChrome();
+      setMainView(state.mainView || 'dashboard');
+      const afterSig = snapshotOrders();
+      if(beforeSig !== afterSig){
+        const messages = describeOrderChanges(beforeOrders, orders);
+        const liftChanged = JSON.stringify(beforeBays) !== JSON.stringify(bays.map(b=>({...b})));
+        if(liftChanged) messages.push('Hebebühnen-Belegung aktualisiert');
+        showUpdateToast(messages.length ? messages.join(' · ') : 'Daten wurden aktualisiert');
+      }
+    }catch(e){
+      if(e.code==='unauthorized'){ handleSessionExpired(); return; }
+      console.warn('Base44-Abgleich fehlgeschlagen:', e.message);
+    }
+  }, 60000); // 60 s – schont Server-Kontingent; nach eigenen Änderungen wird sofort lokal aktualisiert
+}
+function stopBase44Polling(){
+  if(b44PollInterval){ clearInterval(b44PollInterval); b44PollInterval = null; }
+}
+
+async function apiFetch(path, options = {}) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+  if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+  const fetchPromise = fetch(`${API_BASE}${path}`, Object.assign({}, options, { headers }));
+  const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Zeitüberschreitung (Backend nicht erreichbar)')), 5000));
+  let res;
+  try {
+    res = await Promise.race([fetchPromise, timeoutPromise]);
+  } catch (networkErr) {
+    const e = new Error('Backend nicht erreichbar: ' + networkErr.message);
+    e.isNetworkError = true;
+    throw e;
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const e = new Error(err.detail || `API-Fehler ${res.status}`);
+    e.isNetworkError = false;
+    e.status = res.status;
+    throw e;
+  }
+  return await res.json();
+}
+
+/* ---------- API-Daten <-> lokales Datenformat ---------- */
+// Leichter Platzhalter, falls ein Fahrzeug im Backend kein Foto hat (statt riesiger Base64-Daten)
+const FALLBACK_CAR_IMAGE = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260">
+     <rect width="400" height="260" fill="#1e1b2e"/>
+     <path d="M60 170 L90 120 L150 100 L250 100 L310 120 L340 170 Z" fill="#8b5cf6" opacity="0.35"/>
+     <circle cx="120" cy="180" r="22" fill="#a78bfa"/>
+     <circle cx="280" cy="180" r="22" fill="#a78bfa"/>
+   </svg>`
+);
+
+// Kategorie einer Aufgabe: aus der verknüpften Dienstleistung, sonst aus dem Aufgabentitel abgeleitet
+const SERVICE_CAT = { oel_wartung:'Wartung', inspektion:'Wartung', reifen:'Reifen', bremse:'Bremse', diagnose:'Diagnose' };
+const TASK_CAT_RULES = [
+  ['Bremse', /brems/],
+  ['Reifen', /reifen|räder|\brad\b|radwechsel|rdks|achsvermess|spur|felge|wucht|einlager/],
+  ['Klima', /klima|kondensator|kältemittel/],
+  ['Diagnose', /diagnose|fehlerspeicher|auslesen|lecksuche|live-daten|messen|prüfen|test|ursache/],
+  ['Prüfung', /\bhu\b|\bau\b|tüv|probefahrt|endkontrolle|annehm|annahme|abnahme|qualität/],
+  ['Wartung', /öl|inspektion|service|filter|zahnriemen|wasserpumpe|kühl|zündkerze|kerzen|flüssigkeit|batterie|wischer/],
+  ['Reparatur', /erneuern|tauschen|ersetzen|wechseln|reinigen|reparatur|instandsetz|montieren|einbauen/],
+];
+function taskCategory(t){
+  if(t.category && SERVICE_CAT[t.category]) return SERVICE_CAT[t.category];
+  const title = String(t.title||'').toLowerCase();
+  for(const [cat, re] of TASK_CAT_RULES) if(re.test(title)) return cat;
+  return 'Allgemein';
+}
+function catColorFor(cat){
+  const map = { Wartung:'violet', Reparatur:'blue', Prüfung:'amber', Diagnose:'teal', Bremse:'red', Reifen:'green', Klima:'blue' };
+  return map[cat] || 'violet';
+}
+function minutesToLabel(min){
+  if(min==null) return '–';
+  const h = Math.floor(min/60), m = min%60;
+  return `${h}h ${String(m).padStart(2,'0')}m`;
+}
+function formatDateDE(iso){
+  if(!iso) return '–';
+  const d = new Date(iso);
+  if(isNaN(d)) return '–';
+  return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+}
+function formatDateTimeDE(iso){
+  if(!iso) return '–';
+  const d = new Date(iso);
+  if(isNaN(d)) return '–';
+  return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} · ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function statusLabelFor(t){
+  if(t.status==='done') return t.completed_at ? formatDateTimeDE(t.completed_at) : 'Erledigt';
+  if(t.status==='progress') return 'In Arbeit';
+  return 'Ausstehend';
+}
+
+function apiOrderDetailToLocal(listItem, detail, demoImageByBrand){
+  demoImageByBrand = demoImageByBrand || {};
+  const o = detail.order;
+  const v = detail.vehicle;
+  const tasks = detail.tasks.map(t => ({
+    id: t.id,
+    title: t.title,
+    cat: t.category || '',
+    catColor: catColorFor(t.category),
+    duration: minutesToLabel(t.duration_min),
+    mechanic: 'Sie',
+    status: t.status,
+    statusLabel: statusLabelFor(t),
+    desc: t.description || '',
+    progress: t.progress || 0,
+    images: 0,
+    photos: t.photos || [],
+    voiceNote: t.voice_note ? { transcript: t.voice_note.transcript, bericht: t.voice_note.werkstattbericht, kunde: t.voice_note.kundenbeschreibung } : null,
+    voiceError: null, voiceShowManual: false,
+    timeStatus: t.timer_status || 'idle',
+    startedAt: t.timer_started_at ? new Date(t.timer_started_at).getTime() : null,
+    elapsedSec: 0,
+    istMin: t.ist_min,
+    _voiceParts: [],
+  }));
+  const qc = detail.qc_items.map(q => ({ id: q.id, label: q.label, checked: !!q.checked }));
+  return {
+    id: String(o.order_number),
+    _apiId: o.id,
+    vehicle: `${v.brand} ${v.model}`,
+    plate: v.plate,
+    customer: listItem.customer_name,
+    _customerId: listItem.customer_id,
+    km: v.mileage_km ? `${v.mileage_km.toLocaleString('de-DE')} km` : '–',
+    erst: formatDateDE(v.first_registration),
+    status: o.status,
+    progress: o.progress,
+    dauer: minutesToLabel(o.estimated_duration_min),
+    rest: '–',
+    eta: o.status === 'erledigt' ? 'Fertig' : '–',
+    created: formatDateTimeDE(o.created_at),
+    image: v.image_url || demoImageByBrand[v.brand] || FALLBACK_CAR_IMAGE,
+    vin: v.vin || '–', farbe: v.color || '–', motor: v.engine || '–',
+    kraftstoff: v.fuel_type || '–', getriebe: v.transmission || '–',
+    tuev: formatDateDE(v.tuv_valid_until), tel: '',
+    qc,
+    tasks,
+  };
+}
+
+async function loadOrdersFromApi(){
+  const demoImageByBrand = {};
+  orders.forEach(o => {
+    const brand = (o.vehicle || '').split(' ')[0];
+    if(brand && !demoImageByBrand[brand]) demoImageByBrand[brand] = o.image;
+  });
+  try{
+    const list = await apiFetch('/orders');
+    const loaded = [];
+    for(const o of list){
+      try{
+        const detail = await apiFetch(`/orders/${o.id}`);
+        loaded.push(apiOrderDetailToLocal(o, detail, demoImageByBrand));
+      } catch(e){
+        console.warn('Konnte Auftrag nicht laden:', o.id, e.message);
+      }
+    }
+    if(loaded.length){
+      orders = loaded;
+    }
+  } catch(e){
+    console.warn('Aufträge konnten nicht vom Backend geladen werden, nutze lokale Demo-Daten:', e.message);
+    state.backendAvailable = false;
+  }
+  try{
+    state.apiUsers = await apiFetch('/users');
+  } catch(e){
+    state.apiUsers = null;
+  }
+  try{
+    const lifts = await apiFetch('/lifts');
+    bays = lifts.map(l => ({ n: l.number, orderId: l.order_number ? String(l.order_number) : null }));
+  } catch(e){ /* lokale bays-Daten bleiben erhalten */ }
+  try{
+    const apiTires = await apiFetch('/tires');
+    const apiLocations = await apiFetch('/tire-locations');
+    tires = apiTires.map(t => ({
+      id: t.id, name: t.name, size: t.size, qty: t.qty,
+      season: t.season, location: t.location_name || '–',
+    }));
+    tireLocations = apiLocations.map(l => {
+      const used = tires.filter(t => t.location === l.name).reduce((s,t)=>s+t.qty, 0);
+      return { name: l.name, count: used, pct: l.capacity ? Math.min(100, Math.round(used / l.capacity * 100)) : 0 };
+    });
+  } catch(e){ /* lokale Reifenlager-Daten bleiben erhalten */ }
+  try{
+    state.apiAppointments = await apiFetch('/appointments');
+  } catch(e){ state.apiAppointments = null; /* lokale Termine-Demo-Daten bleiben erhalten */ }
+  renderChrome();
+  setMainView(state.mainView || 'dashboard');
+}
+
+/* ---------- Automatischer Hintergrund-Abgleich (kein echtes Echtzeit-Push,
+   aber alle 8s ein stiller Datenabgleich, damit man nicht manuell neu laden muss) ---------- */
+let pollInterval = null;
+function snapshotOrders(){
+  // Leichte "Signatur" des aktuellen Zustands, um echte Änderungen zu erkennen
+  return orders.map(o => `${o.id}:${o.status}:${o.progress}:${o.tasks.map(t=>t.status).join(',')}`).join('|')
+    + '||' + bays.map(b=>`${b.n}:${b.orderId}`).join(',');
+}
+function showUpdateToast(message){
+  const el = document.getElementById('updateToast');
+  if(!el) return;
+  el.innerHTML = `🔔 ${message}`;
+  el.style.display = 'flex';
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(()=>{ el.style.display = 'none'; }, 5000);
+}
+function describeOrderChanges(before, after){
+  const beforeMap = new Map(before.map(o=>[o.id, o]));
+  const messages = [];
+  let newCount = 0, statusChanged = 0;
+  after.forEach(o=>{
+    const prev = beforeMap.get(o.id);
+    if(!prev) newCount++;
+    else if(prev.status !== o.status) statusChanged++;
+  });
+  if(newCount>0) messages.push(newCount===1 ? 'Neuer Auftrag hinzugefügt' : `${newCount} neue Aufträge hinzugefügt`);
+  if(statusChanged>0) messages.push(statusChanged===1 ? 'Ein Auftragsstatus wurde geändert' : `${statusChanged} Auftragsstatus geändert`);
+  return messages;
+}
+function startPolling(){
+  if(pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(async ()=>{
+    if(!state.backendAvailable || !state.token) return;
+    if(state.recognition) return; // Sprachaufnahme läuft gerade -> nicht stören
+    const active = document.activeElement;
+    if(active && (active.tagName==='INPUT' || active.tagName==='TEXTAREA')) return; // Nutzer tippt gerade -> nicht stören
+    const beforeSig = snapshotOrders();
+    const beforeOrders = orders.map(o=>({id:o.id, status:o.status}));
+    const beforeBays = bays.map(b=>({...b}));
+    await loadOrdersFromApi();
+    const afterSig = snapshotOrders();
+    if(beforeSig !== afterSig){
+      const messages = describeOrderChanges(beforeOrders, orders);
+      const liftChanged = JSON.stringify(beforeBays) !== JSON.stringify(bays.map(b=>({...b})));
+      if(liftChanged) messages.push('Hebebühnen-Belegung aktualisiert');
+      showUpdateToast(messages.length ? messages.join(' · ') : 'Daten wurden aktualisiert');
+    }
+  }, 8000);
+}
+function stopPolling(){
+  if(pollInterval){ clearInterval(pollInterval); pollInterval = null; }
+}
+
+/* ---------- icons ---------- */
+function svg(paths, vb='0 0 24 24'){return `<svg class="icon" viewBox="${vb}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;}
+const iconGrid = svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>');
+const iconList = svg('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>');
+const iconCar = svg('<path d="M5 17h14M5 17a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm14 0a2 2 0 1 0 4 0 2 2 0 0 0-4 0zM3 17V11l2-5h14l2 5v6"/>');
+const iconCalendar = svg('<rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/>');
+const iconChat = svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>');
+const iconMail = svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>');
+const iconDoc = svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>');
+const iconGear = svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.36.15.68.4.9.72"/>');
+const iconLogout = svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>');
+const iconHome = svg('<path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>');
+const iconMore = svg('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>');
+const iconClock = svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14.5"/>');
+const iconPhone = svg('<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .8 3a2 2 0 0 1-.5 2.1L8 10.1a16 16 0 0 0 6 6l1.3-1.4a2 2 0 0 1 2.1-.5c1 .4 2 .7 3 .8a2 2 0 0 1 1.6 2z"/>');
+const iconMsg = svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>');
+const iconCheck = svg('<polyline points="20 6 9 17 4 12"/>');
+const iconChevDown = svg('<polyline points="6 9 12 15 18 9"/>');
+const iconTasks = svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>');
+const iconCheckSquare = svg('<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>');
+const iconBox = svg('<path d="M21 8 12 3 3 8l9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>');
+const iconFolder = svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>');
+const iconHistory = svg('<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/>');
+const iconCamera = svg('<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>');
+const iconPlus = svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>');
+const iconDownload = svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>');
+const iconInbox = svg('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>');
+const iconFilter = svg('<line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="var(--bg)"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="16" cy="12" r="2" fill="var(--bg)"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="11" cy="18" r="2" fill="var(--bg)"/>');
+const iconTire = svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2"/><line x1="12" y1="3" x2="12" y2="6.5"/><line x1="12" y1="17.5" x2="12" y2="21"/><line x1="3" y1="12" x2="6.5" y2="12"/><line x1="17.5" y1="12" x2="21" y2="12"/>');
+const iconObd = svg('<rect x="3" y="7" width="18" height="10" rx="2"/><circle cx="7.5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16.5" cy="12" r="1"/><line x1="7" y1="7" x2="7" y2="4"/><line x1="17" y1="7" x2="17" y2="4"/>');
+const iconSearch = svg('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>');
+const iconWarn = svg('<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>');
+const iconEuro = svg('<path d="M14 4a8 8 0 1 0 0 16"/><line x1="5" y1="10" x2="14" y2="10"/><line x1="5" y1="14" x2="12" y2="14"/>');
+const iconDrum = svg('<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14a8 3 0 0 0 16 0V5"/><path d="M4 12a8 3 0 0 0 16 0"/>');
+const iconSnowflake = svg('<line x1="12" y1="2" x2="12" y2="22"/><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="9" y2="5"/><line x1="12" y1="2" x2="15" y2="5"/><line x1="12" y1="22" x2="9" y2="19"/><line x1="12" y1="22" x2="15" y2="19"/>');
+const iconCloudRain = svg('<path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-1.8A7 7 0 1 0 4 14.9"/><line x1="8" y1="19" x2="8" y2="21"/><line x1="12" y1="19" x2="12" y2="21"/><line x1="16" y1="19" x2="16" y2="21"/>');
+const iconClose = svg('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>');
+const iconPlay = svg('<polygon points="5 3 19 12 5 21 5 3"/>');
+const iconPause = svg('<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>');
+const iconMic = svg('<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>');
+const iconSparkle = svg('<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>');
+const iconScan = svg('<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="4" y1="12" x2="20" y2="12"/>');
+const iconRoute = svg('<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8.5 19H15a4 4 0 0 0 4-4v-1a4 4 0 0 0-4-4H9a4 4 0 0 1-4-4v-.5"/>');
+const iconWifiOff = svg('<line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>');
+const iconWrench = svg('<path d="M14.7 6.3a4 4 0 1 1-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 1 1 5.4-5.4l3.3-3.3-3-3z"/>');
+const iconThumbUp = svg('<path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>');
+const iconBoxCheck = svg('<path d="M21 8 12 3 3 8l9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M9.5 12.5l2 2 3-3"/>');
+const iconDashboard = svg('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>');
+const iconLift = svg('<path d="M5 21V8l7-5 7 5v13"/><line x1="5" y1="14" x2="19" y2="14"/><rect x="9" y="14" width="6" height="7"/>');
+const iconTargetSearch = svg('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><circle cx="11" cy="11" r="2.5"/>');
+const iconDrawer = svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="10" y1="16" x2="14" y2="16"/>');
+const iconTrend = svg('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>');
+function alexAvatar(size, o){
+  o = o || {};
+  const cls = ['alex-av', o.live===false ? '' : 'live', o.speak ? 'speak' : '', o.ring===false ? 'no-ring' : ''].filter(Boolean).join(' ');
+  return `<span class="${cls}" style="--s:${size}px;width:${size}px;height:${size}px" aria-hidden="true"><span class="av-ring"><span class="av-disc"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13a9 9 0 0 1 18 0" stroke="#4ade80" stroke-width="1.7"/><rect x="2.4" y="11.4" width="3.6" height="6.2" rx="1.6" fill="#22c55e"/><rect x="18" y="11.4" width="3.6" height="6.2" rx="1.6" fill="#22c55e"/><path d="M20 17.6v.6a3.6 3.6 0 0 1-3.6 3.6H13.6" stroke="#4ade80" stroke-width="1.5"/><circle cx="13" cy="21.8" r="1.1" fill="#4ade80"/><g transform="skewX(-10)"><rect class="av-eye" x="10.6" y="10.4" width="1.9" height="4.8" rx=".95" fill="#fff"/><rect class="av-eye" x="15.2" y="10.4" width="1.9" height="4.8" rx=".95" fill="#fff"/></g></svg></span></span></span>`;
+}
+function alexFabSpeak(on){ const a = document.querySelector('#aiFabIcon .alex-av'); if(a) a.classList.toggle('speak', !!on); }
+const iconBot = svg('<rect x="4" y="8" width="16" height="12" rx="3"/><circle cx="9" cy="14" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="14" r="1.3" fill="currentColor" stroke="none"/><path d="M12 8V5"/><circle cx="12" cy="3.5" r="1.5"/><path d="M2 13v3M22 13v3"/>');
+const iconUserBadge = svg('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/>');
+const iconShield = svg('<path d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5z"/><path d="M9 12l2 2 4-4"/>');
+const iconNote = svg('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/>');
+const iconTrash = svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>');
+const iconSupport = svg('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.9" y1="4.9" x2="9.2" y2="9.2"/><line x1="14.8" y1="14.8" x2="19.1" y2="19.1"/><line x1="14.8" y1="9.2" x2="19.1" y2="4.9"/><line x1="4.9" y1="19.1" x2="9.2" y2="14.8"/>');
+const iconChevRight = svg('<polyline points="9 18 15 12 9 6"/>');
+const iconChevronsLeft = svg('<polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>');
+const iconArrowLeft = svg('<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>');
+const iconSpark = svg('<path d="M12 3l1.8 4.6L18.5 9.4 13.8 11.2 12 16l-1.8-4.8L5.5 9.4l4.7-1.8z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>');
+const iconBook = svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/>');
+const iconInfo = svg('<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.6" r=".6"/>');
+const iconBackspace = svg('<path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/>');
+
+const messages = [
+  {id:'c1', customer:'Max Mustermann', vehicle:'BMW 320d', unread:true, msgs:[
+    {from:'in', text:'Hallo, wie lange dauert die Reparatur noch ungefähr?', time:'08:52'},
+    {from:'out', text:'Guten Morgen Herr Mustermann, wir sind bei ca. 60%. Voraussichtlich fertig gegen 11:30 Uhr.', time:'08:58'},
+    {from:'in', text:'Super, danke für die Info!', time:'09:01'},
+  ]},
+  {id:'c2', customer:'Anna Müller', vehicle:'Audi A4 Avant', unread:true, msgs:[
+    {from:'in', text:'Können Sie mir Bescheid geben, sobald das Fahrzeug fertig ist?', time:'08:40'},
+    {from:'out', text:'Klar, melde mich sobald wir durch sind.', time:'08:41'},
+  ]},
+  {id:'c3', customer:'Thomas Schmidt', vehicle:'Mercedes C220', unread:false, msgs:[
+    {from:'in', text:'Ist der Turbolader das Problem oder eher der Ladedruckgeber?', time:'gestern'},
+    {from:'out', text:'Wir prüfen aktuell beides, melden uns mit dem Diagnoseergebnis.', time:'gestern'},
+  ]},
+  {id:'c4', customer:'Lisa Wagner', vehicle:'VW Golf VII', unread:false, msgs:[
+    {from:'out', text:'Ihr Fahrzeug ist fast fertig, Endkontrolle läuft gerade.', time:'gestern'},
+    {from:'in', text:'Perfekt, ich komme gegen 17 Uhr vorbei.', time:'gestern'},
+  ]},
+  {id:'c5', customer:'Paul Weber', vehicle:'Skoda Octavia', unread:false, msgs:[
+    {from:'out', text:'Ihr Fahrzeug ist abholbereit. Vielen Dank für Ihr Vertrauen!', time:'25.05.'},
+    {from:'in', text:'Danke, bin morgen früh da.', time:'25.05.'},
+  ]},
+];
+
+let tires = [
+  {id:'r1', name:'Michelin Pilot Sport 4', size:'225/45 R17 94Y', qty:24, season:'sommer', location:'Lager A-01'},
+  {id:'r2', name:'Continental WinterContact TS870', size:'205/55 R16 91H', qty:18, season:'winter', location:'Lager A-02'},
+  {id:'r3', name:'Bridgestone Turanza T005', size:'215/60 R17 96H', qty:16, season:'sommer', location:'Lager B-01'},
+  {id:'r4', name:'Michelin CrossClimate 2', size:'225/50 R17 98W', qty:12, season:'ganzjahres', location:'Lager B-02'},
+  {id:'r5', name:'Continental PremiumContact 6', size:'205/60 R16 92V', qty:18, season:'sommer', location:'Lager C-01'},
+  {id:'r6', name:'Dunlop Winter Sport 5', size:'195/65 R15 91T', qty:14, season:'winter', location:'Lager B-02'},
+  {id:'r7', name:'Goodyear Vector 4Seasons', size:'205/55 R16 91H', qty:9, season:'ganzjahres', location:'Lager C-02'},
+  {id:'r8', name:'Pirelli P Zero', size:'245/40 R18 93Y', qty:2, season:'sommer', location:'Lager A-01'},
+  {id:'r9', name:'Michelin Pilot Alpin 5', size:'225/45 R17 91H', qty:1, season:'winter', location:'Lager C-01'},
+  {id:'r10', name:'Continental AllSeasonContact', size:'205/55 R16 91V', qty:6, season:'ganzjahres', location:'Lager C-02'},
+];
+let tireLocations = [
+  {name:'Lager A-01', count:26, pct:75},
+  {name:'Lager A-02', count:18, pct:60},
+  {name:'Lager B-01', count:16, pct:53},
+  {name:'Lager B-02', count:26, pct:47},
+  {name:'Lager C-01', count:19, pct:86},
+  {name:'Lager C-02', count:15, pct:37},
+];
+const seasonLabel = {sommer:'Sommer', winter:'Winter', ganzjahres:'Ganzjahres'};
+const seasonClass = {sommer:'amber', winter:'blue', ganzjahres:'violet'};
+
+/* ---------- sidebar / bottom nav ---------- */
+function renderChrome(){
+  const role = state.currentUser ? state.currentUser.role : state.selectedRole;
+  const navItemsAll = [
+    {ic:iconDashboard, label:'Dashboard', view:'dashboard'},
+    {ic:iconGrid, label:'Meine Aufträge', badge:String(orders.filter(o=>o.status!=='erledigt').length), view:'auftraege'},
+    {ic:iconList, label:'Alle Aufträge', view:'alle'},
+    {ic:iconLift, label:'Hebebühnen', view:'hebebuehnen'},
+    {ic:iconCalendar, label:'Termine', view:'termine'},
+    {ic:iconMail, label:'Nachrichten', badge:String(messages.filter(m=>m.unread).length)||null, badgeClass:'blue', view:'nachrichten'},
+    {ic:iconDoc, label:'Dokumente', view:'dokumente'},
+    {ic:iconTire, label:'Reifenlager', view:'reifenlager'},
+    {ic:iconObd, label:'Diagnose', view:'diagnose'},
+    {ic:iconBook, label:'Berichtsheft', view:'berichtsheft'},
+    {ic:iconShield, label:'Team', view:'benutzer', roles:['admin']},
+    {ic:iconGrid, label:'Team-Auslastung', view:'auslastung', roles:['meister','serviceberater','admin']},
+    {ic:iconSupport, label:'Support', view:'support'},
+    {ic:iconGear, label:'Einstellungen', view:'einstellungen'},
+  ];
+  const DEMO_VIEWS = ['nachrichten','dokumente'];
+  const navItems = navItemsAll.filter(n=>(!n.roles || n.roles.includes(role)) && !(PILOT_HIDE_DEMO && DEMO_VIEWS.includes(n.view)));
+  document.getElementById('sidebarNav').innerHTML = navItems.map(n=>`
+    <div class="nav-item ${state.mainView===n.view?'active':''}" data-mainview="${n.view}">
+      <span class="ic">${n.ic}</span> ${n.label} ${n.badge&&n.badge!=='0'?`<span class="badge ${n.badgeClass||''}">${n.badge}</span>`:''}
+    </div>
+  `).join('');
+  document.getElementById('logoutIcon').innerHTML = iconLogout;
+  const su = document.getElementById('switchUserIcon'); if(su) su.innerHTML = svg('<path d="M16 3h5v5"/><path d="M21 3l-7 7"/><path d="M8 21H3v-5"/><path d="M3 21l7-7"/>');
+  document.getElementById('filterIcon').innerHTML = iconFilter;
+  document.getElementById('worklistCollapseBtn').innerHTML = iconChevronsLeft;
+  document.querySelector('#worklistExpandBtn .wl-rail-ic').innerHTML = iconChevRight;
+
+  if(state.currentUser){
+    document.getElementById('userIdRow').innerHTML = `
+      <div class="user-id-avatar">${initials(state.currentUser.name)}</div>
+      <div class="user-id-info">
+        <div class="user-id-name">${state.currentUser.name}</div>
+        <div class="user-id-role">${roleLabel[state.currentUser.role]}</div>
+        <div class="user-id-shift" id="shiftTimerText">${iconClock} Im Dienst seit ${formatClock(state.shiftStart)} · 0:00</div>
+      </div>
+    `;
+  }
+
+  const bnItems = [
+    {ic:iconHome, label:'Übersicht', view:'auftraege'},
+    {ic:iconGrid, label:'Aufträge', view:'alle'},
+    {ic:iconCalendar, label:'Kalender', view:'termine'},
+    {ic:iconLift, label:'Hebebühnen', view:'hebebuehnen'},
+    PILOT_HIDE_DEMO ? {ic:iconDashboard, label:'Dashboard', view:'dashboard'} : {ic:iconMail, label:'Nachrichten', badge:String(messages.filter(m=>m.unread).length)||null, view:'nachrichten'},
+    {ic:iconMore, label:'Mehr', mehr:true},
+  ];
+  document.getElementById('bottomNav').innerHTML = bnItems.map(n=>`
+    <div class="bn-item ${n.view&&state.mainView===n.view?'active':''} ${n.mehr&&['dokumente','einstellungen','dashboard','benutzer','diagnose','berichtsheft'].includes(state.mainView)?'active':''}" ${n.mehr?'data-mehr="1"':`data-mainview="${n.view}"`}>${n.ic}<span>${n.label}</span>${n.badge&&n.badge!=='0'?`<span class="bn-badge">${n.badge}</span>`:''}</div>
+  `).join('');
+
+  document.getElementById('sheetLogout').querySelector('.sheet-ic').innerHTML = iconLogout;
+  const sheetDocs = document.querySelector('#mehrOverlay .sheet-item[data-mainview="dokumente"]');
+  if(sheetDocs) sheetDocs.style.display = PILOT_HIDE_DEMO ? 'none' : '';
+  document.getElementById('mehrOverlay').querySelectorAll('.sheet-item .sheet-ic').forEach((el,i)=>{
+    const icons = [iconDashboard, iconObd, iconBook, iconFolder, iconGear];
+    if(icons[i]) el.innerHTML = icons[i];
+  });
+}
+
+/* ---------- main view switching ---------- */
+/* ---------- Fahrzeugfoto als Titelbild ----------
+   VORÜBERGEHEND: Später wird das Titelbild im Base44-Dashboard hinterlegt; dann kann dieser
+   Block samt Knöpfen (vehiclePhotoCameraBtn/GalleryBtn) wieder raus.
+   Upload über tabletAction media_upload; das Backend setzt Order.vehicle_photo. Bis die neue
+   URL vom Server zurückkommt, zeigt das Tablet das Foto lokal an (state.localVehiclePhoto). */
+function hasRealVehiclePhoto(o){ return !!(state.localVehiclePhoto[o.id] || o._serverPhoto); }
+function compressImage(file, maxSide, quality){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('Bild konnte nicht gelesen werden')); };
+    img.src = url;
+  });
+}
+async function setVehiclePhoto(o, file){
+  if(!o || !file) return;
+  let dataUrl;
+  try{ dataUrl = await compressImage(file, 1600, 0.82); }
+  catch(e){ showUpdateToast('Foto konnte nicht verarbeitet werden.'); return; }
+  state.localVehiclePhoto[o.id] = dataUrl;
+  o.image = dataUrl;
+  state.vehiclePhotoBusy = o.id;
+  renderOrderList(); renderDetail();
+  const res = await tabletAction('media_upload', {
+    order_id: o.id, task_id: null,
+    filename: `fahrzeug-${o.orderNumber}-${Date.now()}.jpg`,
+    data_url: dataUrl, caption: 'Fahrzeugfoto', set_as_vehicle_photo: true,
+  });
+  state.vehiclePhotoBusy = null;
+  if(res && res.file_url){ state.localVehiclePhoto[o.id] = res.file_url; o.image = res.file_url; showUpdateToast('Fahrzeugfoto gespeichert.'); }
+  renderOrderList(); renderDetail();
+}
+
+/* ---------- Kurze Erklärungen je Bereich (einmal pro Gerät, „Verstanden“ blendet aus) ---------- */
+const HELP_TEXTS = {
+  berichtsheft:{ t:'Dein Berichtsheft.', d:'Hier öffnest du dein Online-Berichtsheft und findest alle Aufgaben, die du diese Woche erledigt hast – als Vorlage zum Eintragen.', li:['„Meine Tätigkeiten“ zeigt deine erledigten Aufgaben pro Tag.','„Woche kopieren“ und in der Lernwelt einfügen.','Berichtsheft regelmäßig führen – dein Ausbilder zeichnet es ab.'] },
+  dashboard:{ t:'Dein Tag auf einen Blick.', d:'Erledigte Aufgaben, deine Arbeitszeit und die nächsten Termine.', li:['Die Zahlen aktualisieren sich automatisch alle 30 Sekunden.','Tippe auf einen Termin, um den Auftrag zu öffnen.'] },
+  auftraege:{ t:'Deine Aufträge.', d:'Links die Aufträge nach Status, rechts alle Details zum ausgewählten Fahrzeug.', li:['Aufgabe antippen und „Start“ drücken – die Zeit läuft bis „Fertig“ oder „Pause“.','Fotos und Sprachbericht hängst du direkt an die Aufgabe.','„Auftrag abschließen“ geht erst, wenn die Checkliste komplett ist – danach wird der Kunde automatisch informiert.'], tip:'Tipp: Unten rechts findest du Schnellnotizen und ALEX für Technikfragen.' },
+  alle:{ t:'Alle Aufträge der Werkstatt.', d:'Status und Fortschritt jedes Fahrzeugs, das gerade in der Werkstatt ist.', li:['Tippe auf eine Zeile, um den Auftrag zu öffnen.'] },
+  hebebuehnen:{ t:'Hebebühnen.', d:'Welche Bühne belegt, frei oder außer Betrieb ist.', li:['Die Belegung wird im AutoLeitwerk-Dashboard zugewiesen.','Tippe auf eine belegte Bühne, um den Auftrag zu öffnen.'] },
+  termine:{ t:'Termine.', d:'Fahrzeugannahmen und Übergaben für heute und morgen.', li:['Online-Buchungen der Kunden erscheinen hier automatisch.'] },
+  benutzer:{ t:'Team.', d:'Alle aktiven Mitarbeiter dieser Werkstatt.', li:['Mitarbeiter anlegen, Rollen und PINs ändern geht im AutoLeitwerk-Dashboard.'] },
+  auslastung:{ t:'Team-Auslastung.', d:'Verplante Zeit je Mitarbeiter, berechnet aus der geschätzten Dauer offener Aufgaben (8-Stunden-Tag).', li:['Über 100 % heißt: mehr Arbeit verplant, als an einem Tag schaffbar ist.'] },
+  diagnose:{ t:'Fehlerspeicher auslesen.', d:'Mit einem Bluetooth-OBD-Adapter liest du Fehlercodes, FIN und Messwerte direkt aus dem Fahrzeug.', li:['Auftrag wählen, Adapter einstecken, Zündung an','„Fahrzeug verbinden“ – auf dem iPad in der App Bluefy öffnen','Ergebnis am Auftrag speichern, optional fürs Kundenportal freigeben'] },
+  reifenlager:{ t:'Eingelagerte Reifen.', d:'Hier findest du jeden eingelagerten Reifensatz mit Lagerplatz.', li:['Kunde, Kennzeichen oder Größe ins Suchfeld tippen','„Prüfen“ zeigt Sätze mit zu wenig Profil','Nach dem Messen Profil und Lagerplatz direkt aktualisieren'] },
+  support:{ t:'Hilfe.', d:'ALEX beantwortet Technikfragen sofort, bei Problemen mit der App erreichst du uns per E-Mail oder Telefon.' },
+  einstellungen:{ t:'Einstellungen.', d:'Dein Profil und die App-Einstellungen auf diesem Tablet.', li:['„Erklärungen wieder anzeigen“ blendet alle Hilfe-Boxen erneut ein.'] },
+};
+function helpSeen(view){ try{ return localStorage.getItem('autoleitwerk.helpSeen.'+view)==='1'; }catch(_){ return false; } }
+function renderHelpBar(){
+  const el = document.getElementById('helpBar'); if(!el) return;
+  const h = HELP_TEXTS[state.mainView];
+  if(!state.currentUser || !h || helpSeen(state.mainView)){ el.innerHTML=''; return; }
+  el.innerHTML = `<div class="help-box">
+    <div class="hb-ic">?</div>
+    <div class="hb-body"><b>${h.t}</b> ${h.d}
+      ${h.li ? `<ul>${h.li.map(x=>`<li>${x}</li>`).join('')}</ul>` : ''}
+      ${h.tip ? `<div class="hb-tip">${h.tip}</div>` : ''}
+    </div>
+    <button class="hb-ok" id="helpOkBtn">Verstanden</button>
+  </div>`;
+}
+function resetHelp(){ try{ Object.keys(HELP_TEXTS).forEach(v=>localStorage.removeItem('autoleitwerk.helpSeen.'+v)); }catch(_){} renderHelpBar(); }
+
+/* ---------- Demo-Banner (14 Tage kostenlos) ---------- */
+const TRIAL_DAYS = 14;
+function renderTrialBanner(){
+  const el = document.getElementById('trialBanner'); if(!el) return;
+  if(!state.currentUser){ el.style.display='none'; return; }
+  const ws = (state.base44Data && state.base44Data.workshop) || {};
+  // Ankündigung aus der CEO-Konsole hat Vorrang
+  const ann = state.base44Data && state.base44Data.announcement;
+  if(ann){ el.innerHTML = `<div><b>📣 ${escHtml(ann)}</b></div>`; el.style.display='flex'; return; }
+  let headline = `Demo-Version: ${TRIAL_DAYS} Tage kostenlos testen.`;
+  if(ws.trial_ends_at){
+    const end = new Date(ws.trial_ends_at);
+    if(!isNaN(end)){
+      const left = Math.ceil((end - new Date())/86400000);
+      if(ws.subscription_status==='active'){ el.style.display='none'; return; }
+      const until = formatDateDE(ws.trial_ends_at);
+      headline = left <= 0 ? 'Testphase abgelaufen.'
+        : left > TRIAL_DAYS ? `Pilotphase: kostenlos bis ${until}.`
+        : `Testphase: noch ${left} ${left===1?'Tag':'Tage'} kostenlos (bis ${until}).`;
+    }
+  }
+  const isAdmin = state.currentUser.role==='admin';
+  el.innerHTML = `<div><b>${headline}</b> <span>Alle Funktionen frei, ohne Verpflichtung.</span></div>
+    ${isAdmin && SUPPORT_EMAIL ? `<a href="mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('AutoLeitwerk Pilot buchen – '+(state.workshopToken||''))}">Pilot buchen</a>` : ''}`;
+  el.style.display='flex';
+}
+
+/* ---------- Mitarbeiter wechseln: nur mit eigenem Namen + PIN ---------- */
+function endSession(keepWorkshopCode){
+  // laufende Zeiterfassung sauber beenden, damit keine offenen Zeiten liegen bleiben
+  (orders||[]).forEach(o=>(o.tasks||[]).forEach(t=>{
+    if(t.timeStatus==='running'){ t.elapsedSec = currentElapsed(t); t.timeStatus='paused'; t.startedAt=null; stopWorktime(t); }
+  }));
+  const code = state.workshopToken;
+  showLoginScreen();
+  state.pendingTask = {}; state.pendingOrderStatus = {}; state.writeSupported = null; state.localVehiclePhoto = {}; state.vehiclePhotoBusy = null;
+  state.selectedOrderId = null; state.selectedTaskId = null; state.base44Data = null;
+  document.getElementById('trialBanner').style.display='none';
+  document.getElementById('helpBar').innerHTML='';
+  if(keepWorkshopCode && code){
+    const c = document.getElementById('loginWorkshopCode'); if(c) c.value = code;
+    fetchProfiles(code).then(showProfileScreen).catch(()=>{});
+  }
+}
+
+function setMainView(view){
+  if(view!=='diagnose' && diag && diag.liveOn) diagStopLive();
+  state.mainView = view;
+  renderChrome();
+  renderHelpBar();
+  renderTrialBanner();
+  if(view==='auftraege'){
+    document.getElementById('auftraegeView').style.display='flex';
+    document.getElementById('otherView').style.display='none';
+    renderWorklistTabs(); renderOrderList(); renderDetail();
+  } else {
+    document.getElementById('auftraegeView').style.display='none';
+    const ov = document.getElementById('otherView');
+    ov.style.display='block';
+    renderOtherView(view);
+  }
+}
+
+function openVehicleModal(o){
+  const body = document.getElementById('vehicleModalBody');
+  body.innerHTML = `
+    <div class="vm-head">
+      <img src="${o.image}" alt="${o.vehicle}">
+      <div>
+        <h3>${o.vehicle}</h3>
+        <span class="plate-chip">${o.plate}</span>
+      </div>
+      <div class="vm-close" id="vehicleModalClose">${iconClose}</div>
+    </div>
+    <div class="vm-grid">
+      <div class="vm-field"><div class="lbl">Fahrgestellnummer (VIN)</div><div class="val">${o.vin||'—'}</div></div>
+      <div class="vm-field"><div class="lbl">Farbe</div><div class="val">${o.farbe||'—'}</div></div>
+      <div class="vm-field"><div class="lbl">Motorisierung</div><div class="val">${o.motor||'—'}</div></div>
+      <div class="vm-field"><div class="lbl">Kraftstoff</div><div class="val">${o.kraftstoff||'—'}</div></div>
+      <div class="vm-field"><div class="lbl">HSN / TSN</div><div class="val">${o.hsnTsn||'—'}</div></div>
+      <div class="vm-field"><div class="lbl">Km-Stand</div><div class="val">${o.km}</div></div>
+      <div class="vm-field"><div class="lbl">Erstzulassung</div><div class="val">${o.erst}</div></div>
+      <div class="vm-field"><div class="lbl">TÜV gültig bis</div><div class="val">${o.tuev||'—'}</div></div>
+    </div>
+    <div class="vm-cust-row">
+      <span class="avatar">${initials(o.customer)}</span>
+      <div>
+        <div style="font-size:13px;font-weight:700;">${o.customer}</div>
+        <div style="font-size:11.5px;color:var(--text-faint);">${o.tel||''}</div>
+      </div>
+    </div>
+  `;
+  document.getElementById('vehicleModal').style.display='flex';
+}
+
+function openCloseOrderModal(o){
+  const open = o.tasks.filter(t=>t.status!=='done').length;
+  const qcOpen = o.qc.filter(q=>!q.checked).length;
+  const body = document.getElementById('closeOrderModalBody');
+  if(qcOpen>0){
+    body.innerHTML = `
+      <h3>Qualitätskontrolle unvollständig</h3>
+      <p>Es sind noch <b>${qcOpen} von ${o.qc.length}</b> Prüfpunkten der digitalen Qualitätskontrolle offen. Ein Auftrag kann erst abgeschlossen werden, wenn alle Punkte bestätigt sind.</p>
+      <div class="modal-actions">
+        <div class="btn" id="closeOrderCancel">Schließen</div>
+        <div class="btn primary" id="goToQcBtn">${iconCheckSquare} Zur Checkliste</div>
+      </div>
+    `;
+    document.getElementById('closeOrderModal').style.display='flex';
+    return;
+  }
+  body.innerHTML = `
+    <h3>Auftrag #${o.orderNumber} abschließen?</h3>
+    <p>${open>0
+      ? `Es sind noch <b>${open} offene Aufgabe${open>1?'n':''}</b> vorhanden. Beim Abschließen werden alle Aufgaben automatisch als erledigt markiert und der Auftrag wandert nach „Erledigt".`
+      : `Alle Aufgaben und die Qualitätskontrolle sind abgeschlossen. Der Auftrag wird als abgeschlossen markiert und wandert nach „Erledigt".`}</p>
+    <div class="modal-actions">
+      <div class="btn" id="closeOrderCancel">Abbrechen</div>
+      <div class="btn primary" id="closeOrderConfirm">${iconCheck} Abschließen</div>
+    </div>
+  `;
+  document.getElementById('closeOrderModal').style.display='flex';
+}
+
+async function completeOrder(o){
+  // Checkliste als Qualitätsbericht mitsenden (Backend legt daraus einen WorkshopLog an).
+  tabletAction('order_complete', {
+    order_id: o.id,
+    qc: (o.qc||[]).map(q=>({ label:q.label, checked:!!q.checked })),
+  });
+  state.pendingOrderStatus[o.id] = { status:'erledigt', progress:100, ts:Date.now() };
+  o.tasks.forEach(t=>{ state.pendingTask[t.id] = { status:'done', ts:Date.now() }; });
+  o.tasks.forEach(t=>{ t.status='done'; t.progress=100; t.statusLabel = t.statusLabel==='Ausstehend'||t.statusLabel==='In Arbeit' ? 'heute' : t.statusLabel; });
+  o.status='erledigt';
+  o.progress=100;
+  o.rest='0h 00m';
+  o.eta='Fertig';
+  document.getElementById('closeOrderModal').style.display='none';
+  state.worklistTab='erledigt';
+  renderWorklistTabs(); renderOrderList(); renderDetail(); renderChrome();
+}
+
+function addPhotoToCurrentTask(files){
+  const o = getSelectedOrder();
+  const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
+  if(!o||!t) return;
+  if(!t.photos) t.photos=[];
+  const readers = Array.from(files).map(file=>new Promise(res=>{
+    const reader = new FileReader();
+    reader.onload = ()=>res(reader.result);
+    reader.readAsDataURL(file);
+  }));
+  Promise.all(readers).then(results=>{
+    t.photos.push(...results);
+    // KI-Fotoerkennung deaktiviert
+    // t.aiAnalysis = analyzePhoto();
+    // t.zusatzarbeit = undefined;
+    renderTaskDetail(t);
+    results.forEach((dataUrl, i)=>{
+      tabletAction('media_upload', { order_id:o.id, task_id:t.id, filename:`auftrag-${o.orderNumber}-${Date.now()}-${i}.jpg`, data_url:dataUrl, caption:t.title });
+    });
+  });
+}
+
+
+function jumpToOrder(orderId){
+  setMainView('auftraege');
+  const o = orders.find(x=>x.id===orderId);
+  if(o){
+    state.worklistTab = o.status;
+    state.selectedOrderId = o.id;
+    state.detailTab = 'aufgaben';
+    state.selectedTaskId = o.tasks[0]?.id;
+  }
+  renderWorklistTabs(); renderOrderList(); renderDetail();
+}
+
+function renderOtherView(view){
+  const ov = document.getElementById('otherView');
+  if(view==='dashboard') return renderDashboardView(ov);
+  if(view==='alle') return renderAlleAuftraege(ov);
+  if(view==='hebebuehnen') return renderHebebuehnenView(ov);
+  if(view==='termine') return renderTermineView(ov);
+  if(view==='nachrichten') return renderNachrichtenView(ov);
+  if(view==='dokumente') return renderDokumenteView(ov);
+  if(view==='reifenlager') return renderReifenlagerView(ov);
+  if(view==='diagnose') return renderDiagnoseView(ov);
+  if(view==='berichtsheft') return renderBerichtsheftView(ov);
+  if(view==='benutzer') return renderBenutzerView(ov);
+  if(view==='auslastung') return renderAuslastungView(ov);
+  if(view==='support') return renderSupportView(ov);
+  if(view==='einstellungen') return renderEinstellungenView(ov);
+}
+
+function renderAlleAuftraege(ov){
+  ov.innerHTML = `
+    <div class="ov-head">
+      <div><h1>Alle Aufträge</h1><div class="sub">${orders.length} Aufträge insgesamt</div></div>
+    </div>
+    <div class="aa-row head"><span>Nr.</span><span>Fahrzeug</span><span>Kunde</span><span>Status</span><span>Fortschritt</span><span>Erstellt</span></div>
+    ${orders.map(o=>{
+      const sm = statusMeta[o.status];
+      return `
+      <div class="aa-row" data-order="${o.id}">
+        <span class="aa-num">#${o.orderNumber}</span>
+        <div class="aa-veh"><img src="${o.image}" alt="${o.vehicle}"><div class="aa-veh-info"><div class="aa-veh-name">${o.vehicle}</div><div class="aa-veh-plate">${o.plate}</div></div></div>
+        <span class="aa-cust">${o.customer}</span>
+        <span class="status-pill dot ${sm.cls}">${statusText(o)}</span>
+        <div><div class="aa-progress-bar"><div class="aa-progress-fill" style="width:${o.progress}%;background:${progressColor(o.progress)}"></div></div></div>
+        <span class="aa-date">${o.created.split(' · ')[0]}</span>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+function renderFahrzeugeView(ov){
+  ov.innerHTML = `
+    <div class="ov-head">
+      <div><h1>Fahrzeuge</h1><div class="sub">${orders.length} Fahrzeuge in der Werkstatt</div></div>
+    </div>
+    <div class="fz-grid">
+      ${orders.map(o=>`
+        <div class="fz-card" data-order="${o.id}">
+          <img src="${o.image}" alt="${o.vehicle}">
+          <div class="fz-card-body">
+            <div class="fz-card-title">${o.vehicle}</div>
+            <div class="fz-card-plate">${o.plate}</div>
+            <div class="fz-card-meta"><span>${o.km}</span><span>EZ ${o.erst}</span></div>
+            <div class="fz-card-cust"><span class="avatar">${initials(o.customer)}</span>${o.customer}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// Termine kommen jetzt aus getTabletData (data.appointments, bereits nach Werkstatt gefiltert).
+/* Dashboard „Anstehende Termine“: Filter Heute / Diese Woche / Nächste Woche (Mo–So) */
+const DASH_APPT_RANGES = [ { key:'heute', label:'Heute' }, { key:'woche', label:'Diese Woche' }, { key:'naechste', label:'Nächste Woche' } ];
+function dashApptRange(){
+  if(!state.dashApptRange){ try{ state.dashApptRange = localStorage.getItem('al_dash_appt_range') || 'heute'; }catch(_){ state.dashApptRange = 'heute'; } }
+  return DASH_APPT_RANGES.some(r=>r.key===state.dashApptRange) ? state.dashApptRange : 'heute';
+}
+function isoDay(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function apptDayLabel(iso){
+  const [y,m,d] = iso.split('-').map(Number); const dt = new Date(y, m-1, d);
+  const today = isoDay(new Date()); const tm = new Date(); tm.setDate(tm.getDate()+1);
+  const wd = ['So','Mo','Di','Mi','Do','Fr','Sa'][dt.getDay()];
+  const prefix = iso===today ? 'Heute · ' : iso===isoDay(tm) ? 'Morgen · ' : '';
+  return `${prefix}${wd}, ${String(d).padStart(2,'0')}.${String(m).padStart(2,'0')}.`;
+}
+function apptsInRange(range){
+  const now = new Date(); const todayISO = isoDay(now);
+  let from = todayISO, to = todayISO;
+  if(range!=='heute'){
+    const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay()+6)%7));
+    if(range==='naechste') monday.setDate(monday.getDate()+7);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+    from = range==='woche' ? todayISO : isoDay(monday); // diese Woche: ab heute (Vergangenes ist nicht mehr „anstehend“)
+    to = isoDay(sunday);
+  }
+  const nowHM = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  const typeLabel = t => String(t||'Termin').replace(/_/g,' ').replace(/^./, c=>c.toUpperCase());
+  return (state.b44Appointments || []).filter(a=>{
+    if(a.status==='storniert') return false;
+    const d = String(a.appointment_date||'').slice(0,10);
+    return d >= from && d <= to;
+  }).map(a=>{
+    const date = String(a.appointment_date||'').slice(0,10);
+    const tm = String(a.time_slot||'').match(/\d{1,2}:\d{2}/);
+    const time = tm ? tm[0].padStart(5,'0') : (a.time_slot || '–');
+    const order = a.order_id ? orders.find(o => o.id === a.order_id) : null;
+    return {
+      date, time,
+      title: a.service_name || typeLabel(a.appointment_type),
+      sub: [a.customer_name, order ? ('Auftrag #'+order.orderNumber) : null].filter(Boolean).join(' · ') || 'Kein Kunde verknüpft',
+      badge: a.status==='bestaetigt' ? 'Bestätigt' : (a.status==='abgeschlossen' ? 'Erledigt' : 'Geplant'),
+      cls: 'arbeit',
+      order: order ? String(order.orderNumber) : null,
+      past: a.status==='abgeschlossen' || (date===todayISO && tm && time < nowHM),
+    };
+  }).sort((x,y)=> (x.date+x.time).localeCompare(y.date+y.time));
+}
+function getAppointmentsData(){
+  const heute = [], morgen = [];
+  const now = new Date();
+  const tomorrow = new Date(); tomorrow.setDate(now.getDate()+1);
+  const fmtISO = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const todayISO = fmtISO(now), tomorrowISO = fmtISO(tomorrow);
+  const typeLabel = t => String(t||'Termin').replace(/_/g,' ').replace(/^./, c=>c.toUpperCase());
+  (state.b44Appointments || []).forEach(a=>{
+    if(a.status==='storniert') return;
+    const date = String(a.appointment_date||'').slice(0,10);
+    const tm = String(a.time_slot||'').match(/\d{1,2}:\d{2}/);
+    const time = tm ? tm[0].padStart(5,'0') : (a.time_slot || '–');
+    const order = a.order_id ? orders.find(o => o.id === a.order_id) : null;
+    const item = {
+      time,
+      title: a.service_name || typeLabel(a.appointment_type),
+      sub: [a.customer_name, order ? ('Auftrag #'+order.orderNumber) : null].filter(Boolean).join(' · ') || 'Kein Kunde verknüpft',
+      badge: a.status==='bestaetigt' ? 'Bestätigt' : (a.status==='abgeschlossen' ? 'Erledigt' : 'Geplant'),
+      cls: 'arbeit',
+      order: order ? String(order.orderNumber) : null,
+    };
+    if(date===todayISO) heute.push(item);
+    else if(date===tomorrowISO) morgen.push(item);
+  });
+  heute.sort((x,y)=>x.time.localeCompare(y.time));
+  morgen.sort((x,y)=>x.time.localeCompare(y.time));
+  return { heute, morgen };
+}
+function renderTermineView(ov){
+  const {heute, morgen} = getAppointmentsData();
+  function list(items){
+    return items.map(i=>`
+      <div class="tm-item" ${i.order?`data-order="${i.order}"`:''}>
+        <div class="tm-time">${i.time}</div>
+        <div class="tm-line"></div>
+        <div class="tm-body"><div class="tm-title">${i.title}</div><div class="tm-sub">${i.sub}</div></div>
+        <span class="status-pill dot ${i.cls} tm-badge">${i.badge}</span>
+      </div>
+    `).join('');
+  }
+  const MONATE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  const now = new Date(); const tomorrow = new Date(); tomorrow.setDate(now.getDate()+1);
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Termine</h1><div class="sub">Deine geplanten Aufträge und Übergaben</div></div></div>
+    <div class="tm-day-label">Heute, ${now.getDate()}. ${MONATE[now.getMonth()]}</div>
+    ${heute.length ? list(heute) : '<div class="td-empty">Keine Termine heute.</div>'}
+    <div class="tm-day-label">Morgen, ${tomorrow.getDate()}. ${MONATE[tomorrow.getMonth()]}</div>
+    ${morgen.length ? list(morgen) : '<div class="td-empty">Keine Termine morgen.</div>'}
+  `;
+}
+
+function renderNachrichtenView(ov){
+  const conv = messages.find(c=>c.id===state.selectedConvId) || messages[0];
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Nachrichten</h1><div class="sub">Kommunikation mit deinen Kunden</div></div></div>
+    <div class="msg-shell" style="height:calc(100% - 56px)">
+      <div class="msg-list">
+        ${messages.map(c=>`
+          <div class="msg-conv ${c.id===conv.id?'active':''}" data-conv="${c.id}">
+            <span class="avatar">${initials(c.customer)}</span>
+            <div class="msg-conv-body">
+              <div class="msg-conv-name"><span>${c.customer}</span><span class="t">${c.msgs[c.msgs.length-1].time}</span></div>
+              <div class="msg-conv-prev">${c.msgs[c.msgs.length-1].text}</div>
+            </div>
+            ${c.unread?'<span class="msg-dot"></span>':''}
+          </div>
+        `).join('')}
+      </div>
+      <div class="msg-thread">
+        <div class="msg-thread-head">
+          <span class="avatar">${initials(conv.customer)}</span>
+          <div><div class="msg-thread-name">${conv.customer}</div><div class="msg-thread-veh">${conv.vehicle}</div></div>
+        </div>
+        <div class="msg-thread-body" id="msgThreadBody">
+          ${conv.msgs.map(m=>`<div class="msg-bubble ${m.from}">${m.text}<div class="msg-time">${m.time}</div></div>`).join('')}
+        </div>
+        <div class="msg-input-row">
+          <input class="msg-input" id="msgInput" placeholder="Nachricht schreiben…">
+          <button class="msg-send" id="msgSendBtn">${svg('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>')}</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const body = document.getElementById('msgThreadBody');
+  if(body) body.scrollTop = body.scrollHeight;
+}
+
+function renderDokumenteView(ov){
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Dokumente</h1><div class="sub">Alle Dokumente über alle Aufträge</div></div></div>
+    ${orders.map(o=>`
+      <div class="tm-day-label">${o.vehicle} · #${o.orderNumber}</div>
+      <div class="doc-row" data-order="${o.id}">
+        <div class="doc-ic">${iconDoc}</div>
+        <div><div class="doc-name">Kostenvoranschlag_${o.id}.pdf</div><div class="doc-meta">hochgeladen ${o.created.split(' · ')[0]}</div></div>
+        <div class="doc-dl">${iconDownload}</div>
+      </div>
+      <div class="doc-row" data-order="${o.id}">
+        <div class="doc-ic">${iconDoc}</div>
+        <div><div class="doc-name">Fahrzeugschein_${o.id}.jpg</div><div class="doc-meta">hochgeladen ${o.created.split(' · ')[0]}</div></div>
+        <div class="doc-dl">${iconDownload}</div>
+      </div>
+    `).join('')}
+  `;
+}
+
+/* ---------- Reifenlager (eingelagerte Kunden-Reifensätze aus Base44 TireSet) ---------- */
+const TS_SEASON = { sommer:{l:'Sommer', c:'amber'}, winter:{l:'Winter', c:'blue'}, ganzjahr:{l:'Ganzjahr', c:'violet'} };
+const TS_CONDITION = { neu:'Neu', gut:'Gut', mittel:'Mittel', abgefahren:'Abgefahren' };
+function tsPlace(t){
+  const parts = [t.storage_hall && `Halle ${t.storage_hall}`, t.storage_rack && `Regal ${t.storage_rack}`, t.storage_level && `Ebene ${t.storage_level}`, t.storage_compartment && `Fach ${t.storage_compartment}`].filter(Boolean);
+  return parts.length ? parts.join(' · ') : (t.storage_location || 'Kein Lagerplatz');
+}
+function tsCheckReason(t){
+  const d = Number(t.tread_depth);
+  if(t.condition==='abgefahren') return 'abgefahren';
+  if(d && d < 1.6) return `nur ${d.toLocaleString('de-DE')} mm – unter Minimum`;
+  if(d && t.season==='winter' && d < 4) return `${d.toLocaleString('de-DE')} mm – Winter unter 4 mm`;
+  if(d && d < 3) return `${d.toLocaleString('de-DE')} mm – unter 3 mm`;
+  return null;
+}
+function tsAll(){ return Array.isArray(state.tireSets) ? state.tireSets : []; }
+function tsFiltered(){
+  const q = (state.tireSearch||'').toLowerCase().replace(/[\s-]/g,'');
+  return tsAll().filter(t=>{
+    const f = state.tireFilter || 'alle';
+    if(f==='pruefen' && !tsCheckReason(t)) return false;
+    if(['sommer','winter','ganzjahr'].includes(f) && t.season!==f) return false;
+    if(state.selectedLocation && (t.storage_hall||'–')!==state.selectedLocation) return false;
+    if(q){
+      const hay = [t.customer_name,t.license_plate,t.vehicle_brand,t.vehicle_model,t.brand,t.model,t.size,t.storage_location,t.qr_code].join(' ').toLowerCase().replace(/[\s-]/g,'');
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  }).sort((a,b)=>String(a.customer_name||'').localeCompare(String(b.customer_name||''),'de'));
+}
+function tsListHtml(list){
+  if(!list.length) return `<div class="placeholder">${iconInbox}<b>Keine Treffer</b><p>Für diese Suche/diesen Filter ist kein Reifensatz eingelagert.</p></div>`;
+  return list.map(t=>{
+    const s = TS_SEASON[t.season] || {l:t.season||'–', c:'violet'};
+    const warn = tsCheckReason(t);
+    return `<div class="rl-tire ${t.id===state.selectedTireId?'selected':''}" data-tireset="${escHtml(t.id)}">
+      <div class="rl-tire-ic">${iconTire}</div>
+      <div class="rl-tire-info">
+        <div class="rl-tire-name">${escHtml(t.customer_name||'Ohne Kunde')}</div>
+        <div class="rl-tire-size">${escHtml([t.license_plate, t.size].filter(Boolean).join(' · ')||'–')}</div>
+        <span class="cat-chip ${s.c}">${s.l}</span>${warn?` <span class="cat-chip red">prüfen</span>`:''}
+      </div>
+      <div class="rl-tire-right"><div class="rl-tire-qty">${t.quantity||4}x</div><div class="rl-tire-loc">${escHtml(t.storage_hall?`H${t.storage_hall}·R${t.storage_rack||'–'}`:(t.storage_location||'–'))}</div></div>
+    </div>`;
+  }).join('');
+}
+function tsDetailHtml(t){
+  if(!t) return `<div class="placeholder" style="padding:40px 10px">${iconTire}<b>Reifensatz auswählen</b><p>Links einen Kunden antippen – hier siehst du Lagerplatz, Profil und kannst Werte aktualisieren.</p></div>`;
+  const s = TS_SEASON[t.season] || {l:t.season||'–', c:'violet'};
+  const warn = tsCheckReason(t);
+  const plateKey = String(t.license_plate||'').replace(/[\s-]/g,'').toUpperCase();
+  const order = plateKey ? orders.find(o=>String(o.plate||'').replace(/[\s-]/g,'').toUpperCase()===plateKey) : null;
+  const month = new Date().getMonth()+1;
+  const seasonHint = (month>=9 || month<=1) && t.season==='winter' ? 'Saison: Winterreifen jetzt montieren – Kunde für den Wechsel anrufen.'
+    : (month>=3 && month<=5 && t.season==='sommer') ? 'Saison: Sommerreifen jetzt montieren – Kunde für den Wechsel anrufen.' : '';
+  const age = t.storage_date ? Math.floor((Date.now()-new Date(t.storage_date))/86400000) : null;
+  const ed = state.tireEdit && state.tireEdit.id===t.id ? state.tireEdit : null;
+  const inp = (k,l,v,type)=>`<label class="ts-in"><span>${l}</span><input data-tsfield="${k}" type="text" ${type==='number'?'inputmode="decimal" placeholder="z. B. 4,5"':''} value="${escHtml(v==null?'':v)}"></label>`;
+  return `<div class="tsd">
+    <div class="tsd-head">
+      <div><h3>${escHtml(t.customer_name||'Ohne Kunde')}</h3><div class="tsd-sub">${escHtml([t.vehicle_brand,t.vehicle_model].filter(Boolean).join(' ')||'Fahrzeug unbekannt')}${t.license_plate?` · <span class="plate-chip">${escHtml(t.license_plate)}</span>`:''}</div></div>
+      <span class="cat-chip ${s.c}">${s.l}</span>
+    </div>
+    <div class="tsd-place">${iconRoute}<div><span>Lagerplatz</span><b>${escHtml(tsPlace(t))}</b></div></div>
+    ${warn?`<div class="alex-warn">${iconWarn} Profil prüfen: ${escHtml(warn)}</div>`:''}
+    ${seasonHint?`<div class="tsd-hint">${iconCalendar} ${seasonHint}</div>`:''}
+    <div class="tsd-grid">
+      <div><span>Reifen</span><b>${escHtml([t.brand,t.model].filter(Boolean).join(' ')||'–')}</b></div>
+      <div><span>Größe</span><b>${escHtml(t.size||'–')}</b></div>
+      <div><span>Profiltiefe</span><b>${t.tread_depth!=null&&t.tread_depth!==''?`${Number(t.tread_depth).toLocaleString('de-DE')} mm`:'–'}</b></div>
+      <div><span>Zustand</span><b>${escHtml(TS_CONDITION[t.condition]||t.condition||'–')}</b></div>
+      <div><span>Anzahl</span><b>${t.quantity||4} Stück</b></div>
+      <div><span>Eingelagert</span><b>${t.storage_date?formatDateDE(t.storage_date):'–'}${age!=null?` <small>(${age} Tage)</small>`:''}</b></div>
+    </div>
+    ${order?`<button class="btn" data-tsorder="${escHtml(order.id)}">${iconCar} Auftrag #${escHtml(order.orderNumber)} öffnen</button>`:''}
+    ${ed ? `<div class="tsd-edit">
+      <div class="tsd-edit-t">Werte aktualisieren</div>
+      <div class="tsd-edit-grid">
+        ${inp('tread_depth','Profiltiefe (mm)',ed.tread_depth===''||ed.tread_depth==null?'':String(ed.tread_depth).replace('.',','),'number')}
+        <label class="ts-in"><span>Zustand</span><select data-tsfield="condition">${Object.entries(TS_CONDITION).map(([k,l])=>`<option value="${k}" ${ed.condition===k?'selected':''}>${l}</option>`).join('')}</select></label>
+        <label class="ts-in"><span>Saison</span><select data-tsfield="season">${Object.entries(TS_SEASON).map(([k,v])=>`<option value="${k}" ${ed.season===k?'selected':''}>${v.l}</option>`).join('')}</select></label>
+        ${inp('storage_hall','Halle',ed.storage_hall)}${inp('storage_rack','Regal',ed.storage_rack)}${inp('storage_level','Ebene',ed.storage_level)}${inp('storage_compartment','Fach',ed.storage_compartment)}
+      </div>
+      ${ed.error?`<div class="alex-warn">${iconWarn} ${escHtml(ed.error)}</div>`:''}
+      <div class="alex-draft-actions"><button class="btn primary" id="tsSaveBtn" ${ed.busy?'disabled':''}>${iconCheck} ${ed.busy?'Speichert…':'Speichern'}</button><button class="btn" id="tsCancelBtn">Abbrechen</button></div>
+    </div>` : `<button class="btn primary" id="tsEditBtn">${iconWrench} Profil / Lagerplatz aktualisieren</button>`}
+  </div>`;
+}
+function renderReifenlagerView(ov){
+  const all = tsAll();
+  const loaded = Array.isArray(state.tireSets);
+  const cnt = s => all.filter(t=>t.season===s).length;
+  const check = all.filter(t=>tsCheckReason(t)).length;
+  const halls = {};
+  all.forEach(t=>{ const h = t.storage_hall || '–'; halls[h] = (halls[h]||0) + 1; });
+  const list = tsFiltered();
+  if(state.selectedTireId && !all.some(t=>t.id===state.selectedTireId)) state.selectedTireId = null;
+  const sel = all.find(t=>t.id===state.selectedTireId) || null;
+  const f = state.tireFilter || 'alle';
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Reifenlager</h1><div class="sub">Eingelagerte Reifensätze deiner Kunden – Lagerplatz finden, Profil prüfen.</div></div></div>
+    ${!loaded ? `<div class="alex-general" style="margin-bottom:14px;">Die Reifendaten kommen mit dem nächsten Server-Update. Bis dahin ist die Liste leer – eingelagerte Sätze siehst du im Base44-Dashboard.</div>` : ''}
+    <div class="rl-stats">
+      <div class="rl-stat"><div class="rl-stat-ic gray">${iconDrum}</div><div><div class="rl-stat-top">Eingelagert</div><div class="rl-stat-val">${all.length}</div><div class="rl-stat-lbl">Reifensätze</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic amber">${iconTire}</div><div><div class="rl-stat-top">Sommer</div><div class="rl-stat-val">${cnt('sommer')}</div><div class="rl-stat-lbl">Sätze</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic blue">${iconSnowflake}</div><div><div class="rl-stat-top">Winter</div><div class="rl-stat-val">${cnt('winter')}</div><div class="rl-stat-lbl">Sätze</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic violet">${iconCloudRain}</div><div><div class="rl-stat-top">Ganzjahr</div><div class="rl-stat-val">${cnt('ganzjahr')}</div><div class="rl-stat-lbl">Sätze</div></div></div>
+      <div class="rl-stat"><div class="rl-stat-ic ${check?'amber':'green'}">${iconWarn}</div><div><div class="rl-stat-top">Profil prüfen</div><div class="rl-stat-val">${check}</div><div class="rl-stat-lbl">Sätze</div></div></div>
+    </div>
+    ${Object.keys(halls).length>1 ? `<div class="rl-filter-row" style="margin:-8px 0 14px;">${Object.entries(halls).sort().map(([h,n])=>`<div class="rl-filter-chip ${state.selectedLocation===h?'active':''}" data-tshall="${escHtml(h)}">${h==='–'?'Ohne Halle':'Halle '+escHtml(h)} · ${n}</div>`).join('')}</div>` : ''}
+    <div class="rl-body">
+      <div class="rl-left">
+        <div class="rl-search-box">${iconSearch}<input id="tireSearchInput" placeholder="Kunde, Kennzeichen, Größe…" value="${escHtml(state.tireSearch||'')}"></div>
+        <div class="rl-filter-row">
+          ${[['alle','Alle'],['sommer','Sommer'],['winter','Winter'],['ganzjahr','Ganzjahr'],['pruefen','Prüfen']].map(([k,l])=>`<div class="rl-filter-chip ${f===k?'active':''}" data-tirefilter="${k}">${l}</div>`).join('')}
+        </div>
+        <div class="rl-list-head">Reifensätze <span>${list.length}</span></div>
+        <div class="rl-list">${tsListHtml(list)}</div>
+      </div>
+      <div class="rl-right">${tsDetailHtml(sel)}</div>
+    </div>`;
+}
+function rerenderReifenlager(){ const ov = document.getElementById('otherView'); if(ov && state.mainView==='reifenlager') renderReifenlagerView(ov); }
+async function saveTireSetEdit(){
+  const ed = state.tireEdit; if(!ed || ed.busy) return;
+  const t = tsAll().find(x=>x.id===ed.id); if(!t) return;
+  const fields = {};
+  ['tread_depth','condition','season','storage_hall','storage_rack','storage_level','storage_compartment'].forEach(k=>{
+    let v = ed[k]; if(k==='tread_depth'){ if(v===''||v==null) return; v = Number(String(v).replace(',','.')); if(!(v>=0 && v<=12)){ ed.error='Profiltiefe zwischen 0 und 12 mm eingeben.'; return; } }
+    if(String(v??'') !== String(t[k]??'')) fields[k] = v;
+  });
+  if(ed.error){ rerenderReifenlager(); ed.error=null; return; }
+  if(!Object.keys(fields).length){ state.tireEdit = null; rerenderReifenlager(); return; }
+  if(fields.storage_hall!==undefined || fields.storage_rack!==undefined || fields.storage_level!==undefined || fields.storage_compartment!==undefined){
+    fields.storage_location = [ed.storage_hall, ed.storage_rack, ed.storage_level, ed.storage_compartment].filter(Boolean).join('-');
+  }
+  ed.busy = true; ed.error = null; rerenderReifenlager();
+  const r = await tabletRequest('tire_update', Object.assign({ id: t.id }, fields), 15000);
+  ed.busy = false;
+  if(r.ok){ Object.assign(t, fields); state.tireEdit = null; showUpdateToast('Reifensatz aktualisiert'); }
+  else ed.error = r.missing ? 'Speichern ist auf dem Server noch nicht freigeschaltet.' : `Nicht gespeichert (${r.reason}).`;
+  rerenderReifenlager();
+}
+function handleReifenlagerClick(e){
+  if(state.mainView!=='reifenlager') return false;
+  const chip = e.target.closest('[data-tirefilter]');
+  if(chip){ state.tireFilter = chip.dataset.tirefilter; rerenderReifenlager(); return true; }
+  const hall = e.target.closest('[data-tshall]');
+  if(hall){ state.selectedLocation = state.selectedLocation===hall.dataset.tshall ? null : hall.dataset.tshall; rerenderReifenlager(); return true; }
+  const row = e.target.closest('[data-tireset]');
+  if(row){ state.selectedTireId = row.dataset.tireset; state.tireEdit = null; rerenderReifenlager(); return true; }
+  const ord = e.target.closest('[data-tsorder]');
+  if(ord){ state.selectedOrderId = ord.dataset.tsorder; state.detailTab = 'aufgaben'; setMainView('auftraege'); return true; }
+  if(e.target.closest('#tsEditBtn')){
+    const t = tsAll().find(x=>x.id===state.selectedTireId);
+    if(t) state.tireEdit = { id:t.id, tread_depth:t.tread_depth??'', condition:t.condition||'gut', season:t.season||'sommer', storage_hall:t.storage_hall||'', storage_rack:t.storage_rack||'', storage_level:t.storage_level||'', storage_compartment:t.storage_compartment||'' };
+    rerenderReifenlager(); return true;
+  }
+  if(e.target.closest('#tsCancelBtn')){ state.tireEdit = null; rerenderReifenlager(); return true; }
+  if(e.target.closest('#tsSaveBtn')){ saveTireSetEdit(); return true; }
+  return false;
+}
+document.addEventListener('input', (e)=>{
+  const f = e.target.closest && e.target.closest('[data-tsfield]');
+  if(f && state.tireEdit) state.tireEdit[f.dataset.tsfield] = f.value;
+});
+document.addEventListener('change', (e)=>{
+  const f = e.target.closest && e.target.closest('[data-tsfield]');
+  if(f && state.tireEdit) state.tireEdit[f.dataset.tsfield] = f.value;
+});
+
+/* ---------- 12. Mechaniker-Dashboard ---------- */
+function renderDashboardView(ov){
+  const allTasks = orders.flatMap(o=>o.tasks);
+  const doneToday = allTasks.filter(t=>t.status==='done').length;
+  const openTasks = allTasks.filter(t=>t.status!=='done').length;
+  const totalPhotos = allTasks.reduce((s,t)=>s+((t.photos||[]).length)+(t.images||0),0);
+  const zusatzverkaeufe = allTasks.filter(t=>t.zusatzarbeit===true).length;
+  const istTimes = allTasks.filter(t=>t.istMin).map(t=>t.istMin);
+  const avgRepairTime = istTimes.length ? Math.round(istTimes.reduce((a,b)=>a+b,0)/istTimes.length) : null;
+  const totalActiveSec = allTasks.reduce((s,t)=>s+(t.timeStatus==='running'?currentElapsed(t):(t.elapsedSec||0)),0);
+  const productivity = Math.min(100, Math.round((doneToday/(allTasks.length||1))*100));
+
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Mechaniker-Dashboard</h1><div class="sub">Deine Leistung im Überblick · heute</div></div></div>
+    <div class="dash-grid">
+      <div class="dash-card"><div class="dash-ic accent">${iconCheck}</div><div><div class="dash-val">${doneToday}</div><div class="dash-lbl">Aufgaben erledigt</div></div></div>
+      <div class="dash-card"><div class="dash-ic blue">${iconClock}</div><div><div class="dash-val">${formatSecs(totalActiveSec)}</div><div class="dash-lbl">Aktive Arbeitszeit</div></div></div>
+      <div class="dash-card"><div class="dash-ic amber">${iconWarn}</div><div><div class="dash-val">${openTasks}</div><div class="dash-lbl">Offene Aufgaben</div></div></div>
+      <div class="dash-card"><div class="dash-ic violet">${iconTrend}</div><div><div class="dash-val">${productivity}%</div><div class="dash-lbl">Produktivität</div></div></div>
+      <div class="dash-card"><div class="dash-ic green">${iconCamera}</div><div><div class="dash-val">${totalPhotos}</div><div class="dash-lbl">Fotos erstellt</div></div></div>
+      <div class="dash-card"><div class="dash-ic accent">${iconThumbUp}</div><div><div class="dash-val">${zusatzverkaeufe}</div><div class="dash-lbl">Zusatzverkäufe</div></div></div>
+    </div>
+
+    <div class="dash-row">
+      <div class="dash-panel">
+        <div class="dash-panel-head">Ø Reparaturzeit vs. Soll</div>
+        ${avgRepairTime===null ? `<div class="placeholder" style="padding:24px 10px">${iconClock}<p>Noch keine abgeschlossenen Zeiterfassungen vorhanden.</p></div>` : `
+          <div class="dash-bigstat">${avgRepairTime} Min</div>
+          <div class="dash-bars">
+            ${allTasks.filter(t=>t.istMin).slice(0,5).map(t=>{
+              const soll = parseDurationToMinutes(t.duration);
+              const pct = Math.min(100, Math.round((t.istMin/Math.max(soll,1))*100));
+              return `<div class="dash-bar-row"><span>${t.title}</span><div class="dash-bar-track"><div class="dash-bar-fill ${t.istMin>soll?'over':''}" style="width:${pct}%"></div></div><span class="dash-bar-val">${t.istMin}/${soll} Min</span></div>`;
+            }).join('')}
+          </div>
+        `}
+      </div>
+      <div class="dash-panel">
+        <div class="dash-panel-head">Aufträge nach Status</div>
+        <div class="dash-status-list">
+          ${['arbeit','pruefung','erledigt'].map(s=>{
+            const n = orders.filter(o=>o.status===s).length;
+            return `<div class="dash-status-row"><span class="status-pill dot ${s}">${statusMeta[s].label}</span><b>${n}</b></div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-panel" style="margin-top:14px;">
+      <div class="dash-panel-head dash-appt-head">Anstehende Termine
+        <div class="dash-appt-filter">${DASH_APPT_RANGES.map(r=>`<button type="button" class="dash-appt-chip ${dashApptRange()===r.key?'active':''}" data-apptrange="${r.key}">${r.label}<span>${apptsInRange(r.key).length}</span></button>`).join('')}</div>
+      </div>
+      <div class="dash-timeline dash-appt-list">
+        ${(()=>{
+          const range = dashApptRange();
+          const items = apptsInRange(range);
+          if(!items.length) return `<div class="dash-appt-empty">${range==='heute' ? 'Heute keine Termine.' : range==='woche' ? 'Diese Woche keine weiteren Termine.' : 'Nächste Woche noch keine Termine.'}</div>`;
+          let lastDay = '';
+          return items.map(a=>{
+            const dayHead = range!=='heute' && a.date!==lastDay ? `<div class="dash-appt-day">${escHtml(apptDayLabel(a.date))}</div>` : '';
+            lastDay = a.date;
+            return `${dayHead}
+            <div class="dash-tl-item ${a.past?'past':''}" ${a.order?`data-order="${a.order}"`:''}>
+              <div class="dash-tl-time">${a.time}</div>
+              <div class="dash-tl-dot ${a.cls}"></div>
+              <div class="dash-tl-body">
+                <div class="dash-tl-title">${escHtml(a.title)}</div>
+                <div class="dash-tl-sub">${escHtml(a.sub)}</div>
+              </div>
+              <span class="status-pill dot ${a.cls} tm-badge">${a.badge}</span>
+            </div>`;
+          }).join('');
+        })()}
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- 10. Live-Hebebühnen-Übersicht ---------- */
+let bays = [
+  {n:1, orderId:'10072'},
+  {n:2, orderId:'10071'},
+  {n:3, orderId:'10070'},
+  {n:4, orderId:'10069'},
+  {n:5, orderId:null},
+  {n:6, orderId:null},
+];
+function renderHebebuehnenView(ov){
+  const belegt = bays.filter(b=>!b.offline && b.orderId && orders.some(x=>x.id===b.orderId)).length;
+  const offline = bays.filter(b=>b.offline).length;
+  const frei = bays.length - belegt - offline;
+  ov.innerHTML = `
+    <div class="ov-head">
+      <div><h1>Hebebühnen-Übersicht</h1><div class="sub">Alle Hebebühnen auf einen Blick</div></div>
+      <div class="bay-stat-row">
+        <div class="bay-stat"><b>${bays.length}</b><span>Hebebühnen</span></div>
+        <div class="bay-stat"><b>${belegt}</b><span>Belegt</span></div>
+        <div class="bay-stat"><b>${frei}</b><span>Frei</span></div>
+      </div>
+    </div>
+    <div class="bay-grid">
+      ${bays.map(b=>{
+        const o = b.orderId ? orders.find(x=>x.id===b.orderId) : null;
+        const sm = o ? statusMeta[o.status] : null;
+        const restText = (b.remainingMin!=null) ? `${b.remainingMin} Min.` : (o ? o.rest : '–');
+        if(b.offline){
+          return `
+        <div class="bay-card ausser-betrieb">
+          <div class="bay-card-head"><span class="bay-num">${b.n}</span><span class="status-pill dot pruefung">Außer Betrieb</span></div>
+          <div class="bay-empty">${iconLift}<span>Nicht verfügbar</span></div>
+        </div>`;
+        }
+        return `
+        <div class="bay-card ${o?o.status:'frei'}" ${o?`data-order="${o.id}"`:''}>
+          <div class="bay-card-head">
+            <span class="bay-num">${b.n}</span>
+            ${o ? `<span class="status-pill dot ${sm.cls}">${statusText(o)}</span>` : `<span class="status-pill dot frei">Frei</span>`}
+          </div>
+          ${o ? `
+            <img src="${o.image}" alt="${o.vehicle}">
+            <div class="bay-card-body">
+              <div class="bay-card-veh">${o.vehicle}</div>
+              <div class="bay-card-sub">Auftrag #${o.orderNumber} · ${o.customer}</div>
+              <div class="bay-progress-bar"><div class="bay-progress-fill" style="width:${o.progress}%;background:${progressColor(o.progress)}"></div></div>
+              <div class="bay-card-foot"><span>${o.progress}%</span><span>${iconClock} ${restText}</span></div>
+            </div>
+          ` : `
+            <div class="bay-empty">${iconLift}<span>Bereit für den nächsten Auftrag</span></div>
+          `}
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+/* ---------- 9. Werkzeug-Finder ---------- */
+const toolCatalog = [
+  {name:'Bremskolbenrücksteller', wagen:'Werkzeugwagen 4', fach:'Schublade 2', verfuegbar:true},
+  {name:'Drehmomentschlüssel 40-200 Nm', wagen:'Werkzeugwagen 1', fach:'Schublade 1', verfuegbar:true},
+  {name:'Federspanner-Satz', wagen:'Werkzeugwagen 2', fach:'Schublade 4', verfuegbar:false, ausgeliehenAn:'Thomas Schmidt'},
+  {name:'OBD-Diagnosegerät', wagen:'Diagnosewagen', fach:'Fach 1', verfuegbar:true},
+  {name:'Ölwechsel-Set', wagen:'Werkzeugwagen 3', fach:'Schublade 1', verfuegbar:true},
+  {name:'Reifenmontiereisen', wagen:'Reifenwerkstatt', fach:'Wandhalterung', verfuegbar:false, ausgeliehenAn:'Max Mustermann'},
+];
+function renderWerkzeugView(ov){
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Werkzeug-Finder</h1><div class="sub">Finde sofort, wo ein Werkzeug liegt</div></div></div>
+    <div class="rl-search-box" style="max-width:420px;">${iconSearch}<input id="toolSearchInput" placeholder="z.B. Bremskolbenrücksteller"></div>
+    <div class="tool-list" id="toolListResults" style="margin-top:16px;">
+      ${toolCatalog.map(renderToolRow).join('')}
+    </div>
+  `;
+}
+function renderToolRow(tool){
+  return `
+    <div class="tool-row">
+      <div class="tool-ic">${iconWrench}</div>
+      <div class="tool-info">
+        <div class="tool-name">${tool.name}</div>
+        <div class="tool-loc"><span>${iconDrawer} ${tool.wagen}</span><span>${tool.fach}</span></div>
+      </div>
+      <span class="tool-status ${tool.verfuegbar?'ok':'bad'}">${tool.verfuegbar?'Verfügbar':'Ausgeliehen'}${tool.ausgeliehenAn?` · ${tool.ausgeliehenAn}`:''}</span>
+    </div>`;
+}
+
+/* ---------- Benutzerverwaltung (Admin-only, Rollen) ---------- */
+function renderAuslastungView(ov){
+  const data = state.base44Data;
+  if(!data){
+    ov.innerHTML = `<div class="ov-head"><div><h1>Team-Auslastung</h1><div class="sub">Keine Live-Daten verfügbar.</div></div></div>`;
+    return;
+  }
+  const orderStatusById = {};
+  (data.orders||[]).forEach(o => orderStatusById[o.id] = o.status);
+  const employees = (data.employees||[]).filter(e=>e.is_active);
+  const SHIFT_MIN = 480; // angenommener 8-Stunden-Arbeitstag
+  const rows = employees.map(emp => {
+    const minutes = (data.tasks||[])
+      .filter(t => t.assigned_employee === emp.name)
+      .filter(t => t.status !== 'erledigt')
+      .filter(t => orderStatusById[t.order_id] !== 'abgeschlossen')
+      .reduce((sum,t) => sum + (t.estimated_minutes||0), 0);
+    const pct = Math.round((minutes/SHIFT_MIN)*100);
+    return { name: emp.name, role: emp.role, minutes, pct };
+  }).sort((a,b)=>b.pct-a.pct);
+
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Team-Auslastung</h1><div class="sub">Verplante Arbeitszeit heute je Mitarbeiter (Basis: 8-Std.-Schicht)</div></div></div>
+    <div class="auslastung-list">
+      ${rows.length ? rows.map(r => {
+        const h = Math.floor(r.minutes/60), m = r.minutes%60;
+        const over = r.pct > 100;
+        return `
+        <div class="auslastung-row">
+          <div class="auslastung-name">${r.name}<span class="auslastung-role">${roleLabel[r.role]||r.role}</span></div>
+          <div class="auslastung-bar-bg"><div class="auslastung-bar-fill ${over?'over':''}" style="width:${Math.min(100,r.pct)}%;"></div></div>
+          <div class="auslastung-val ${over?'over':''}">${h}:${String(m).padStart(2,'0')} Std. · ${r.pct}%</div>
+        </div>`;
+      }).join('') : '<div class="td-empty">Keine aktiven Mitarbeiter gefunden.</div>'}
+    </div>
+  `;
+}
+
+function renderBenutzerView(ov){
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Team</h1><div class="sub">Aktive Mitarbeiter dieser Werkstatt</div></div></div>
+    <div class="team-list">
+      ${(state.apiUsers||[]).map(m=>`
+        <div class="team-row">
+          <div class="avatar" style="width:36px;height:36px;font-size:13px;">${initials(m.name||'?')}</div>
+          <div class="team-info">
+            <div class="team-name">${m.name||''}</div>
+            <div class="team-email">${roleLabel[m.role]||m.role||''}</div>
+          </div>
+        </div>
+      `).join('') || '<div class="td-empty">Keine aktiven Mitarbeiter gefunden.</div>'}
+    </div>
+    <div class="team-note">${iconShield} Mitarbeiter, Rollen und PINs werden im AutoLeitwerk-Dashboard verwaltet.</div>
+  `;
+}
+
+/* ---------- Support ---------- */
+const faqData = [
+  {q:'Wie starte ich die Zeiterfassung für eine Aufgabe?', a:'Öffne die Aufgabe in "Meine Aufträge" → Tab "Aufgaben" und tippe auf "Start" im Zeiterfassungs-Feld. Die Uhr läuft, bis du auf "Fertig" oder "Pause" tippst.'},
+  {q:'Wie füge ich ein Foto zu einer Aufgabe hinzu?', a:'In der Aufgabendetail-Ansicht auf "Hinzufügen" bei "Bilder & Notizen" tippen. Das Foto wird dem Auftrag zugeordnet.'},
+  {q:'Warum kann ich einen Auftrag nicht abschließen?', a:'Vor dem Abschluss muss die digitale Qualitätskontrolle (Tab "Checkliste") vollständig abgehakt sein. Der Abschließen-Button zeigt dir, wie viele Punkte noch offen sind.'},
+  {q:'Was passiert, wenn ich offline bin?', a:'Ein Banner zeigt dir an, wenn die Verbindung weg ist. Ohne Verbindung kann nichts gespeichert werden – arbeite weiter und prüfe nach der Rückkehr des WLANs, ob deine Änderungen angekommen sind.'},
+  {q:'Wie ändere ich meine Rolle oder die eines Kollegen?', a:'Nur Admins können das unter "Benutzerverwaltung" in der Sidebar Rollen für Teammitglieder ändern.'},
+];
+let supportTicketState = { openFaq:null };
+// Live-Chat mit dem AutoLeitwerk-Support (gleiche Chats wie im Base44-Dashboard / in der CEO-Konsole)
+const supportChat = { tab:'hilfe', sessions:null, activeId:null, messages:null, creating:false, busy:false, error:'', poll:null };
+function fmtChatTime(iso){ if(!iso) return ''; const v=String(iso); const d=new Date(/Z|[+-]\d\d:?\d\d$/.test(v)?v:v+'Z'); if(isNaN(d)) return ''; const today = new Date().toDateString()===d.toDateString(); return today ? d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+function renderSupportChat(){
+  const sc = supportChat;
+  const stLabel = { offen:'Offen', in_bearbeitung:'In Bearbeitung', abgeschlossen:'Abgeschlossen' };
+  if(sc.sessions===null) return `<div class="sup-empty">Chats werden geladen…</div>`;
+  const list = `<div class="sup-list">
+      <button type="button" class="btn primary sup-new" data-supnew="1">${iconPlus} Neue Anfrage</button>
+      ${sc.sessions.length ? sc.sessions.map(x=>`<div class="sup-item ${sc.activeId===x.id?'active':''}" data-supchat="${escHtml(x.id)}">
+          <div class="sup-item-top">${x.unread?'<span class="sup-dot"></span>':''}<b>${escHtml(x.subject||'Ohne Betreff')}</b><span class="sup-st ${escHtml(x.status)}">${escHtml(stLabel[x.status]||x.status)}</span></div>
+          <div class="sup-item-sub">${x.last_sender==='admin'?'Support: ':''}${escHtml(x.last_message||'')}</div>
+          <div class="sup-item-meta">${escHtml(fmtChatTime(x.last_message_at))}</div>
+        </div>`).join('') : `<div class="sup-empty">Noch keine Anfragen. Starte oben eine neue.</div>`}
+    </div>`;
+  let pane;
+  if(sc.creating){
+    pane = `<div class="sup-pane"><div class="sup-pane-head"><b>Neue Anfrage an AutoLeitwerk</b></div>
+      <div class="login-field"><label>Betreff</label><input id="supNewSubject" maxlength="200" placeholder="Worum geht es?"></div>
+      <div class="login-field"><label>Nachricht</label><textarea id="supNewMsg" rows="4" placeholder="Beschreibe kurz dein Anliegen…"></textarea></div>
+      ${sc.error?`<div class="alex-warn">${escHtml(sc.error)}</div>`:''}
+      <div class="sup-actions"><button type="button" class="btn" data-supcancel="1">Abbrechen</button><button type="button" class="btn primary" data-supstart="1" ${sc.busy?'disabled':''}>${sc.busy?'Sendet…':'Chat starten'}</button></div>
+      <div class="sup-hint">Das Team wird sofort per E-Mail benachrichtigt und antwortet hier.</div></div>`;
+  } else if(sc.activeId){
+    const sess = (sc.sessions||[]).find(x=>x.id===sc.activeId) || {};
+    pane = `<div class="sup-pane"><div class="sup-pane-head"><button type="button" class="btn sup-back" data-supback="1">${iconArrowLeft}</button><b>${escHtml(sess.subject||'Chat')}</b><span class="sup-st ${escHtml(sess.status||'')}">${escHtml(stLabel[sess.status]||'')}</span></div>
+      <div class="sup-msgs" id="supMsgs">${sc.messages===null ? '<div class="sup-empty">Lädt…</div>' : sc.messages.map(m=>`<div class="sup-bubble ${m.sender==='admin'?'admin':'me'}">${escHtml(m.content)}${(m.attachments||[]).map(a=>`<br><a href="${escHtml(a.url)}" target="_blank" rel="noopener">📎 ${escHtml(a.name||'Anhang')}</a>`).join('')}<small>${escHtml(m.sender==='admin' ? (m.author_name||'AutoLeitwerk Support') : (m.author_name||'Du'))} · ${escHtml(fmtChatTime(m.created_date))}</small></div>`).join('')}</div>
+      ${sc.error?`<div class="alex-warn">${escHtml(sc.error)}</div>`:''}
+      <div class="sup-reply"><textarea id="supReply" rows="2" placeholder="Nachricht schreiben…"></textarea><button type="button" class="btn primary" data-supsend="1" ${sc.busy?'disabled':''}>${sc.busy?'…':'Senden'}</button></div></div>`;
+  } else {
+    pane = `<div class="sup-pane sup-pane-empty"><div class="sup-empty">${iconChat}<br>Wähle links eine Anfrage oder starte eine neue.</div></div>`;
+  }
+  return `<div class="sup-chat ${sc.activeId||sc.creating?'has-pane':''}">${list}${pane}</div>`;
+}
+function rerenderSupportChat(keepDraft){
+  if(state.mainView!=='support' || supportChat.tab!=='chat') return;
+  const draft = keepDraft ? ((document.getElementById('supReply')||{}).value||'') : '';
+  const ns = keepDraft ? ((document.getElementById('supNewSubject')||{}).value||'') : '';
+  const nm = keepDraft ? ((document.getElementById('supNewMsg')||{}).value||'') : '';
+  const el = document.getElementById('supChat'); if(!el) return;
+  const box = document.getElementById('supMsgs'); const atBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  el.innerHTML = renderSupportChat();
+  if(keepDraft){ const r=document.getElementById('supReply'); if(r) r.value=draft; const a=document.getElementById('supNewSubject'); if(a) a.value=ns; const b=document.getElementById('supNewMsg'); if(b) b.value=nm; }
+  const m = document.getElementById('supMsgs'); if(m && atBottom) m.scrollTop = m.scrollHeight;
+  // Badge im Tab aktualisieren
+  const t = document.querySelector('[data-suptab="chat"]'); if(t){ const n=(supportChat.sessions||[]).filter(x=>x.unread).length; t.innerHTML = `${iconChat} Live-Chat${n?` <span class="sup-n">${n}</span>`:''}`; }
+}
+async function loadSupportChats(){
+  const r = await tabletRequest('chat_list', {}, 15000);
+  if(r.ok && r.data) supportChat.sessions = r.data.sessions || [];
+  else if(supportChat.sessions===null){ supportChat.sessions = []; supportChat.error = r.reason ? 'Chats nicht erreichbar: ' + r.reason : ''; }
+  if(supportChat.activeId){
+    const m = await tabletRequest('chat_get', { id: supportChat.activeId }, 15000);
+    if(m.ok && m.data){ supportChat.messages = m.data.messages || []; const x = supportChat.sessions.find(y=>y.id===supportChat.activeId); if(x){ x.unread=false; x.status=m.data.session.status; } }
+  }
+  rerenderSupportChat(true);
+}
+function startSupportChatPoll(){
+  if(supportChat.sessions===null) loadSupportChats();
+  if(supportChat.poll) return;
+  supportChat.poll = setInterval(()=>{
+    if(state.mainView!=='support' || supportChat.tab!=='chat' || document.hidden){ if(state.mainView!=='support'){ clearInterval(supportChat.poll); supportChat.poll=null; } return; }
+    loadSupportChats();
+  }, 15000);
+}
+function handleSupportClick(e){
+  const tab = e.target.closest('[data-suptab]');
+  if(tab){ supportChat.tab = tab.dataset.suptab; supportChat.error=''; renderOtherView('support'); if(supportChat.tab==='chat') loadSupportChats(); return true; }
+  const item = e.target.closest('[data-supchat]');
+  if(item){ supportChat.activeId = item.dataset.supchat; supportChat.creating=false; supportChat.messages=null; supportChat.error=''; rerenderSupportChat(); loadSupportChats(); return true; }
+  if(e.target.closest('[data-supnew]')){ supportChat.creating=true; supportChat.activeId=null; supportChat.error=''; rerenderSupportChat(); const f=document.getElementById('supNewSubject'); if(f) f.focus(); return true; }
+  if(e.target.closest('[data-supcancel]') || e.target.closest('[data-supback]')){ supportChat.creating=false; supportChat.activeId=null; supportChat.error=''; rerenderSupportChat(); return true; }
+  if(e.target.closest('[data-supstart]')){
+    const subject = ((document.getElementById('supNewSubject')||{}).value||'').trim(), content = ((document.getElementById('supNewMsg')||{}).value||'').trim();
+    if(!subject || !content){ supportChat.error='Bitte Betreff und Nachricht eingeben.'; rerenderSupportChat(true); return true; }
+    supportChat.busy=true; supportChat.error=''; rerenderSupportChat(true);
+    tabletRequest('chat_send', { subject, content }, 20000).then(r=>{
+      supportChat.busy=false;
+      if(r.ok && r.data){ supportChat.creating=false; supportChat.activeId=r.data.id; supportChat.messages=null; loadSupportChats(); showUpdateToast('Anfrage gesendet – das Team wurde benachrichtigt'); }
+      else { supportChat.error = 'Nicht gesendet: ' + (r.reason||'Fehler'); rerenderSupportChat(true); }
+    });
+    return true;
+  }
+  if(e.target.closest('[data-supsend]')){
+    const box = document.getElementById('supReply'); const content = (box && box.value || '').trim(); if(!content) return true;
+    supportChat.busy=true; supportChat.error=''; rerenderSupportChat(true);
+    tabletRequest('chat_send', { id: supportChat.activeId, content }, 20000).then(r=>{
+      supportChat.busy=false;
+      if(r.ok){ const b=document.getElementById('supReply'); if(b) b.value=''; (supportChat.messages=supportChat.messages||[]).push({ sender:'user', author_name:(state.currentUser||{}).name||'Du', content, created_date:new Date().toISOString() }); rerenderSupportChat(); loadSupportChats(); }
+      else { supportChat.error = 'Nicht gesendet: ' + (r.reason||'Fehler'); rerenderSupportChat(true); }
+    });
+    return true;
+  }
+  return false;
+}
+function renderSupportView(ov){
+  const sc = supportChat;
+  const unread = (sc.sessions||[]).filter(x=>x.unread).length;
+  const tabs = `<div class="sup-tabs">
+      <button type="button" class="sup-tab ${sc.tab!=='chat'?'active':''}" data-suptab="hilfe">${iconMail} Hilfe &amp; Ticket</button>
+      <button type="button" class="sup-tab ${sc.tab==='chat'?'active':''}" data-suptab="chat">${iconChat} Live-Chat${unread?` <span class="sup-n">${unread}</span>`:''}</button>
+    </div>`;
+  if(sc.tab==='chat'){
+    ov.innerHTML = `<div class="ov-head"><div><h1>Support &amp; Hilfe</h1><div class="sub">Schreib direkt mit dem AutoLeitwerk-Team – Antworten kommen hier im Chat.</div></div></div>${tabs}<div id="supChat">${renderSupportChat()}</div>`;
+    startSupportChatPoll();
+    const m = document.getElementById('supMsgs'); if(m) m.scrollTop = m.scrollHeight;
+    return;
+  }
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Support &amp; Hilfe</h1><div class="sub">Wir helfen dir schnell weiter</div></div></div>
+    ${tabs}
+
+    <div class="support-contact-row">
+      ${SUPPORT_PHONE ? `<a class="support-contact-card" href="tel:${SUPPORT_PHONE.replace(/\s/g,'')}" style="color:inherit;text-decoration:none;">
+        <div class="sc-ic">${iconPhone}</div>
+        <div><div class="sc-title">Telefon</div><div class="sc-sub">${SUPPORT_PHONE}</div><div class="sc-meta">AutoLeitwerk-Support</div></div>
+      </a>` : ''}
+      ${SUPPORT_EMAIL ? `<a class="support-contact-card" href="mailto:${SUPPORT_EMAIL}" style="color:inherit;text-decoration:none;">
+        <div class="sc-ic">${iconMail}</div>
+        <div><div class="sc-title">E-Mail</div><div class="sc-sub">${SUPPORT_EMAIL}</div><div class="sc-meta">AutoLeitwerk-Support</div></div>
+      </a>` : ''}
+      <div class="support-contact-card" id="openAiFromSupport" style="cursor:pointer;">
+        <div class="sc-ic" style="background:none">${alexAvatar(38)}</div>
+        <div><div class="sc-title">ALEX</div><div class="sc-sub">AutoLeitwerk Expert eXchange – Sofort-Hilfe im Chat</div><div class="sc-meta">Rund um die Uhr</div></div>
+      </div>
+    </div>
+
+    <div class="support-section-title">Häufige Fragen</div>
+    <div class="faq-list">
+      ${faqData.map((f,i)=>`
+        <div class="faq-item ${supportTicketState.openFaq===i?'open':''}" data-faq="${i}">
+          <div class="faq-q">${f.q}<span class="faq-chev">${iconChevRight}</span></div>
+          <div class="faq-a">${f.a}</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="support-section-title">Ticket erstellen</div>
+    <div class="ticket-card" id="ticketCard">
+      <div class="login-field"><label>Betreff</label><input id="ticketSubject" placeholder="z.B. Fehler beim Foto-Upload"></div>
+      <div class="login-field"><label>Nachricht</label><textarea id="ticketMessage" rows="4" placeholder="Beschreibe kurz dein Problem…"></textarea></div>
+      <div class="btn primary" id="ticketSendBtn">${iconCheck} Ticket senden</div>
+      <div class="sup-hint">Geht direkt an das AutoLeitwerk-Team (${escHtml(SUPPORT_EMAIL||'info@autoleitwerk.de')}) – kein Mailprogramm nötig.</div>
+    </div>
+  `;
+}
+
+function renderEinstellungenView(ov){
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Einstellungen</h1><div class="sub">Profil &amp; App-Einstellungen</div></div></div>
+    <div class="set-card">
+      <div class="set-profile">
+        <div class="set-avatar">${initials((state.currentUser||{}).name||'?')}</div>
+        <div><div class="set-name">${(state.currentUser||{}).name||''}</div><div class="set-role">${roleLabel[(state.currentUser||{}).role]||''} · Werkstatt ${state.workshopToken||''}</div></div>
+      </div>
+    </div>
+    ${PILOT_HIDE_DEMO ? '' : `<div class="set-section-title">Benachrichtigungen</div>
+    <div class="set-card">
+      <div class="set-row">
+        <div><div class="set-row-label">Push-Benachrichtigungen</div><div class="set-row-sub">Neue Aufgaben und Nachrichten sofort erhalten</div></div>
+        <div class="toggle ${state.settings.push?'on':''}" data-toggle="push"></div>
+      </div>
+      <div class="set-row">
+        <div><div class="set-row-label">E-Mail-Benachrichtigungen</div><div class="set-row-sub">Tageszusammenfassung per E-Mail</div></div>
+        <div class="toggle ${state.settings.email?'on':''}" data-toggle="email"></div>
+      </div>
+    </div>
+`}
+    <div class="set-section-title">App</div>
+    <div class="set-card"><a class="set-row" href="impressum.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;"><div><div class="set-row-label">Impressum</div></div></a><a class="set-row" href="datenschutz.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;"><div><div class="set-row-label">Datenschutzerklärung</div></div></a></div>
+    <div class="set-card"><div class="set-row" id="resetHelpBtn" style="cursor:pointer;"><div><div class="set-row-label">Erklärungen wieder anzeigen</div><div class="set-row-sub">Blendet die Hilfe-Boxen in allen Bereichen erneut ein</div></div></div></div>
+    <div class="set-card">
+      <div class="set-row theme-row">
+        <div><div class="set-row-label">Erscheinungsbild</div><div class="set-row-sub">Automatisch folgt der Einstellung des Geräts</div></div>
+        ${themeSegHtml()}
+      </div>
+      <div class="set-row">
+        <div><div class="set-row-label">Sprache</div><div class="set-row-sub">Deutsch</div></div>
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- data ---------- */
+function task(id,title,cat,catColor,duration,status,statusLabel,desc,progress,images){
+  return {id,title,cat,catColor,duration,mechanic:'Sie',status,statusLabel,desc,progress,images:images||0};
+}
+
+// Haken sofort speichern; bei mehreren schnellen Klicks nur den letzten Stand senden
+const qcSaveTimers = {};
+function saveQC(o){
+  state.pendingQC = state.pendingQC || {};
+  state.pendingQC[o.id] = { qc: o.qc.map(q=>({ label:q.label, checked:!!q.checked, by:q.by||'' })), ts: Date.now() };
+  clearTimeout(qcSaveTimers[o.id]);
+  qcSaveTimers[o.id] = setTimeout(async ()=>{
+    const pend = (state.pendingQC||{})[o.id]; if(!pend) return;
+    const r = await tabletAction('qc_save', { order_id:o.id, qc: pend.qc.map(q=>({ label:q.label, checked:q.checked })) });
+    if(r && state.pendingQC && state.pendingQC[o.id] === pend) delete state.pendingQC[o.id]; // sonst beim nächsten Abgleich lokal behalten
+  }, 600);
+}
+// Gespeicherte Checkliste vom Server übernehmen (Punkte der Standardliste behalten ihre Reihenfolge)
+function qcFromServer(list){
+  const base = defaultQC();
+  if(!Array.isArray(list) || !list.length) return base;
+  const out = base.map(b=>{ const s = list.find(x=>x && x.label===b.label); return s ? { label:b.label, checked:!!s.checked, by:s.by||'', at:s.at||'' } : b; });
+  list.forEach(x=>{ if(x && x.label && !out.some(q=>q.label===x.label)) out.push({ label:x.label, checked:!!x.checked, by:x.by||'', at:x.at||'' }); });
+  return out;
+}
+function defaultQC(){
+  return [
+    {label:'Drehmoment geprüft', checked:false},
+    {label:'Ölstand geprüft', checked:false},
+    {label:'Probefahrt durchgeführt', checked:false},
+    {label:'Fehlerspeicher gelöscht', checked:false},
+    {label:'Werkzeug entfernt', checked:false},
+    {label:'Motorraum sauber', checked:false},
+  ];
+}
+
+let orders = [
+  {
+    id:'10072', vehicle:'BMW 320d', plate:'AB · CD 123', customer:'Max Mustermann',
+    km:'125.430 km', erst:'05.05.2019', status:'arbeit', progress:60,
+    dauer:'3h 30m', rest:'1h 15m', eta:'2h 15m', created:'26.05.2024 · 08:15',
+    qc:defaultQC(),
+    image:'assets/img/demo-bmw-320d.webp',
+    vin:'WBA8E9106K7654321', farbe:'Saphirschwarz metallic', motor:'2.0L Diesel, 140 kW (190 PS)', kraftstoff:'Diesel', getriebe:'8-Gang Automatik', tuev:'05.2027', tel:'+49 176 55512345',
+    tasks:[
+      task('t1','Ölwechsel durchführen','Wartung','violet','0h 30m','done','26.05 · 08:45','Motoröl und Ölfilter wechseln, Füllstand und Dichtigkeit anschließend prüfen.',100),
+      task('t2','Bremsbeläge vorne wechseln','Reparatur','blue','1h 00m','done','26.05 · 09:30','Vordere Bremsbeläge demontieren, neue Beläge einbauen und Bremsleistung testen.',100),
+      task('t3','Bremsscheiben prüfen','Prüfung','amber','0h 30m','progress','In Arbeit','Vordere Bremsscheiben auf Verschleiß und Beschädigungen prüfen.',50,3),
+      task('t4','Luftfilter ersetzen','Wartung','violet','0h 20m','open','Ausstehend','Alten Luftfilter entfernen und durch neuen Filter ersetzen.',0),
+      task('t5','Fahrzeugdiagnose','Diagnose','teal','0h 20m','open','Ausstehend','Fehlerspeicher auslesen und Ergebnisse dokumentieren.',0),
+    ]
+  },
+  {
+    id:'10071', vehicle:'Audi A4 Avant', plate:'AB · EF 456', customer:'Anna Müller',
+    km:'88.210 km', erst:'12.03.2020', status:'arbeit', progress:40,
+    dauer:'2h 30m', rest:'1h 30m', eta:'1h 30m', created:'26.05.2024 · 08:50',
+    qc:defaultQC(),
+    image:'assets/img/demo-audi-a4.jpg',
+    vin:'WAUZZZ8W9LA123456', farbe:'Gletscherweiß metallic', motor:'2.0L TDI, 110 kW (150 PS)', kraftstoff:'Diesel', getriebe:'7-Gang S tronic', tuev:'09.2026', tel:'+49 152 33367890',
+    tasks:[
+      task('t1','Klimaanlage befüllen','Wartung','violet','0h 45m','done','26.05 · 09:05','Kältemittel prüfen und Klimaanlage neu befüllen.',100),
+      task('t2','Zahnriemen prüfen','Reparatur','blue','1h 15m','progress','In Arbeit','Zustand des Zahnriemens und der Spannrolle kontrollieren.',35,2),
+      task('t3','Achsvermessung','Prüfung','amber','0h 30m','open','Ausstehend','Achsvermessung nach Fahrwerksarbeiten durchführen.',0),
+    ]
+  },
+  {
+    id:'10070', vehicle:'Mercedes C220', plate:'AB · GH 789', customer:'Thomas Schmidt',
+    km:'142.900 km', erst:'22.11.2018', status:'arbeit', progress:20,
+    dauer:'4h 30m', rest:'3h 45m', eta:'3h 45m', created:'26.05.2024 · 07:40',
+    qc:defaultQC(),
+    image:'assets/img/demo-mercedes-c220.jpg',
+    vin:'WDD2050421F123789', farbe:'Iridiumsilber metallic', motor:'2.1L Diesel, 125 kW (170 PS)', kraftstoff:'Diesel', getriebe:'9-Gang Automatik', tuev:'11.2025', tel:'+49 160 78823456',
+    tasks:[
+      task('t1','Fehlerdiagnose Motor','Diagnose','teal','1h 00m','done','26.05 · 08:20','Motorkontrollleuchte ausgelesen, Fehlerspeicher dokumentiert.',100),
+      task('t2','Turbolader prüfen','Reparatur','blue','2h 00m','progress','In Arbeit','Turbolader auf Ladedruckverlust und Lagerspiel prüfen.',15,1),
+      task('t3','Ölwechsel durchführen','Wartung','violet','0h 30m','open','Ausstehend','Motoröl und Ölfilter wechseln.',0),
+      task('t4','Probefahrt','Prüfung','amber','1h 00m','open','Ausstehend','Probefahrt zur Kontrolle des Fahrverhaltens nach Reparatur.',0),
+    ]
+  },
+  {
+    id:'10069', vehicle:'VW Golf VII', plate:'AB · IJ 101', customer:'Lisa Wagner',
+    km:'65.430 km', erst:'08.06.2021', status:'pruefung', progress:80,
+    dauer:'1h 15m', rest:'0h 45m', eta:'0h 45m', created:'26.05.2024 · 09:10',
+    qc:defaultQC(),
+    image:'assets/img/demo-vw-golf.svg',
+    vin:'WVWZZZAUZKW123654', farbe:'Tornadorot', motor:'1.5L TSI, 96 kW (130 PS)', kraftstoff:'Benzin', getriebe:'6-Gang manuell', tuev:'03.2027', tel:'+49 171 44498765',
+    tasks:[
+      task('t1','Reifen wechseln','Wartung','violet','0h 40m','done','26.05 · 09:35','Sommerreifen montiert, Reifendruck geprüft.',100),
+      task('t2','Bremsflüssigkeit prüfen','Wartung','violet','0h 20m','done','26.05 · 09:55','Füllstand und Zustand der Bremsflüssigkeit geprüft.',100),
+      task('t3','Endkontrolle','Prüfung','amber','0h 15m','progress','In Prüfung','Abschließende Sichtprüfung vor Fahrzeugübergabe.',70),
+    ]
+  },
+  {
+    id:'10068', vehicle:'Skoda Octavia', plate:'AB · KL 202', customer:'Paul Weber',
+    km:'34.120 km', erst:'19.01.2023', status:'erledigt', progress:100,
+    dauer:'1h 20m', rest:'0h 00m', eta:'Fertig', created:'25.05.2024 · 15:20',
+    qc:defaultQC(),
+    image:'assets/img/demo-skoda-octavia.svg',
+    vin:'TMBJJ9NE0N0123987', farbe:'Racing Blau metallic', motor:'2.0L TDI, 110 kW (150 PS)', kraftstoff:'Diesel', getriebe:'7-Gang DSG', tuev:'01.2026', tel:'+49 157 66612378',
+    tasks:[
+      task('t1','Inspektion durchführen','Wartung','violet','1h 00m','done','25.05 · 16:10','Jahresinspektion nach Herstellervorgabe durchgeführt.',100),
+      task('t2','Software-Update','Diagnose','teal','0h 20m','done','25.05 · 16:30','Steuergeräte-Software auf aktuellen Stand gebracht.',100),
+    ]
+  },
+];
+
+const statusMeta = {
+  arbeit:{label:'In Arbeit', cls:'arbeit'},
+  pruefung:{label:'Wartet', cls:'pruefung'},
+  erledigt:{label:'Erledigt', cls:'erledigt'},
+};
+const catColorMap = {violet:'#8b5cf6', blue:'#4f9eff', amber:'#f5a524', teal:'#2dd4bf', red:'#f87171', green:'#4ade80'};
+
+let state = {
+  mainView:'auftraege',
+  worklistTab:'arbeit',
+  selectedOrderId:'10072',
+  detailTab:'aufgaben',
+  selectedTaskId:'t3',
+  selectedConvId:'c1',
+  settings:{push:true, email:false},
+  tireFilter:'alle',
+  tireSearch:'',
+  selectedTireId:'r1',
+  selectedLocation:null,
+  routeTireId:null,
+  currentUser:null,
+  selectedRole:'mechaniker',
+  worklistCollapsed:false,
+  recognition:null,
+  voiceTimeout:null,
+  voiceSession:0,
+  token:null,
+  apiProfiles:null,
+  pendingProfile:null,
+  backendAvailable:false,
+  shiftId:null,
+  workshopToken:null, workshopName:null,
+  sessionToken:null, sessionExpires:null, pendingLogin:null, pinBusy:false, b44Appointments:null,
+  writeSupported:null, pendingTask:{}, pendingOrderStatus:{}, localVehiclePhoto:{}, vehiclePhotoBusy:null,
+};
+
+const roles = [
+  {key:'mechaniker', label:'Mechaniker', ic:iconWrench},
+  {key:'meister', label:'Meister', ic:iconBoxCheck},
+  {key:'serviceberater', label:'Serviceberater', ic:iconUserBadge},
+  {key:'admin', label:'Admin', ic:iconShield},
+];
+const roleLabel = Object.fromEntries(roles.map(r=>[r.key, r.label]));
+const team = [
+  {name:'Max Mustermann', role:'meister', email:'max.mustermann@werkstattflow.de'},
+  {name:'Mert Kabara', role:'mechaniker', email:'mert.kabara@werkstattflow.de'},
+  {name:'Anna Berger', role:'serviceberater', email:'anna.berger@werkstattflow.de'},
+  {name:'Sinem Demirelli', role:'admin', email:'sinem.demirelli@werkstattflow.de'},
+];
+
+/* ---------- render worklist tabs ---------- */
+function counts(){
+  return {
+    arbeit: orders.filter(o=>o.status==='arbeit').length,
+    pruefung: orders.filter(o=>o.status==='pruefung').length,
+    erledigt: orders.filter(o=>o.status==='erledigt').length,
+  };
+}
+function renderWorklistTabs(){
+  const c = counts();
+  const tabs = [
+    {key:'arbeit', label:'In Arbeit', n:c.arbeit},
+    {key:'pruefung', label:'Wartet', n:c.pruefung},
+    {key:'erledigt', label:'Erledigt', n:c.erledigt},
+  ];
+  document.getElementById('worklistTabs').innerHTML = tabs.map(t=>`
+    <div class="wtab ${state.worklistTab===t.key?'active':''}" data-wtab="${t.key}">${t.label} ${t.n?`<span class="n">${t.n}</span>`:''}</div>
+  `).join('');
+}
+
+/* ---------- render order list ---------- */
+function renderOrderList(){
+  const list = orders.filter(o=>o.status===state.worklistTab);
+  const scroll = document.getElementById('orderScroll');
+  if(list.length===0){
+    scroll.innerHTML = `<div class="placeholder">${iconInbox}<b>Keine Aufträge</b><p>In dieser Kategorie gibt es aktuell nichts zu tun.</p></div>`;
+    return;
+  }
+  scroll.innerHTML = list.map(o=>`
+    <div class="order-card ${o.id===state.selectedOrderId?'selected':''}" data-order="${o.id}">
+      <div class="oc-top">
+        <div class="oc-thumb"><img src="${o.image}" alt="${o.vehicle}" loading="lazy" onerror="this.parentElement.innerHTML=carIcon(&quot;${o.status}&quot;)"></div>
+        <div class="oc-info">
+          <div class="oc-row1">
+            <span class="oc-num">#${o.orderNumber}</span>
+            <span class="oc-time">${iconClock} ${o.rest}</span>
+          </div>
+          <div class="oc-model">${o.vehicle}</div>
+          <div class="oc-plate">${o.plate}</div>
+        </div>
+      </div>
+      <div class="oc-cust"><span class="avatar">${initials(o.customer)}</span>${o.customer}</div>
+      ${o.status==='pruefung' && o._b44StatusLabel ? `<div class="oc-wait">${iconClock} Wartet: ${escHtml(o._b44StatusLabel)}</div>` : ''}
+      <div class="oc-progress-wrap">
+        <div class="oc-progress-bar"><div class="oc-progress-fill" style="width:${o.progress}%;background:${progressColor(o.progress)}"></div></div>
+        <span class="oc-progress-pct">${o.progress}%</span>
+      </div>
+    </div>
+  `).join('');
+}
+// Bei wartenden Aufträgen den Grund zeigen (z. B. „Wartet · Freigabe nötig“)
+function statusText(o){
+  const sm = statusMeta[o.status] || { label:'' };
+  return o.status==='pruefung' && o._b44StatusLabel ? `Wartet · ${escHtml(o._b44StatusLabel)}` : sm.label;
+}
+function initials(name){return name.split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();}
+function progressColor(p){ if(p>=100) return 'var(--success)'; if(p>=50) return 'var(--accent)'; return 'var(--warning)'; }
+function carIcon(status){
+  const color = status==='erledigt' ? 'var(--success)' : (status==='pruefung' ? 'var(--warning)' : 'var(--accent)');
+  return `<svg width="34" height="22" viewBox="0 0 34 22" fill="none"><path d="M2 16h30M4 16a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zm26 0a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0zM1 16v-5.5L5 5h24l4 5.5V16" style="stroke:${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+/* ---------- render detail ---------- */
+/* ---------- 5. Zusatzverkaufs-Vorschläge ---------- */
+/* Modellbezogene Hinweise (bekannte Schwachstellen je Baureihe). Werden statt der allgemeinen Km-Regeln gezeigt.
+   min = ab Km-Stand, age = ab Fahrzeugalter in Jahren. Weitere Baureihen einfach ergänzen. */
+const MODEL_RECS = [
+  { match:/\bbmw\b.*\b(e38|7[34]0i?l?|750i?l?|728i?l?|735i?l?)\b|\be38\b/i, check:o=>/e38/i.test(o.vehicle) || erstYear(o)>=1994 && erstYear(o)<=2001, label:'BMW 7er (E38)', recs:[
+    { title:'Steuerkettenführungen prüfen', reason:'V8 (M60/M62): Kunststoff-Führungsschienen verschleißen bei hoher Laufleistung – Rasseln beim Kaltstart, Ventildeckel ab und Sichtprüfung', min:150000 },
+    { title:'Kühlsystem komplett prüfen', reason:'Kühler, Ausgleichsbehälter, Thermostatgehäuse und Schläuche aus Kunststoff/Gummi werden spröde – Druckprobe, Wasserpumpe auf Spiel', min:0 },
+    { title:'Zugstreben- und Querlenkerlager VA', reason:'Bekannte Schwachstelle: Lenkradflattern beim Bremsen, Poltern – Fahrwerk vorne prüfen', min:100000 },
+    { title:'Automatikgetriebeöl wechseln', reason:'„Lebensdauerfüllung“ – bei dieser Laufleistung Ölwechsel mit Filter und Dichtung empfehlenswert, falls noch nie gemacht', min:150000 },
+    { title:'Ventildeckel- und Kerzenschachtdichtungen', reason:'Beim V8 häufig undicht – Ölnebel am Motor und in den Kerzenschächten prüfen', min:120000 },
+    { title:'Gummileitungen altersbedingt prüfen', reason:'Kraftstoff-, Brems- und Unterdruckschläuche nach über 20 Jahren auf Risse und Porosität prüfen', age:20 },
+  ]},
+];
+function erstYear(o){ const m = String(o.erst||'').match(/(\d{4})/); return m ? +m[1] : 0; }
+function modelRecsFor(o){ return MODEL_RECS.find(m=>m.match.test(o.vehicle||'') && (!m.check || m.check(o))) || null; }
+function getRecommendations(o){
+  const km = parseInt((o.km||'0').replace(/\D/g,''),10) || 0;
+  const age = erstYear(o) ? new Date().getFullYear() - erstYear(o) : 0;
+  const model = modelRecsFor(o);
+  if(model){
+    const recs = model.recs.filter(r=>(r.min===undefined || km>=r.min) && (r.age===undefined || age>=r.age));
+    if(km>60000 || age>=2) recs.push({title:'Bremsflüssigkeit wechseln', reason:'Fällig alle 2 Jahre – Wassergehalt messen'});
+    return recs.slice(0,6);
+  }
+  const recs = [];
+  if(km>110000) recs.push({title:'Steuertrieb prüfen', reason:'Je nach Motor Zahnriemen &amp; Wasserpumpe (meist 100–120 Tkm) bzw. Steuerkette auf Längung prüfen'});
+  if(km>60000) recs.push({title:'Bremsflüssigkeit wechseln', reason:'Fällig alle 2 Jahre / 60.000 km'});
+  if(km>30000) recs.push({title:'Innenraumfilter prüfen', reason:'Wechsel i.d.R. jährlich bzw. alle 15–30 Tkm'});
+  if(age>=15) recs.push({title:'Gummileitungen prüfen', reason:`Fahrzeug ${age} Jahre alt – Kraftstoff-, Brems- und Kühlmittelschläuche auf Risse prüfen`});
+  recs.push({title:'Kühlmittel prüfen', reason:'Routineprüfung bei aktuellem Werkstattbesuch'});
+  return recs.slice(0,3);
+}
+// Ein-/Ausblenden wird auf dem Gerät gemerkt (gilt für alle Aufträge)
+let upsellHidden = (()=>{ try{ return localStorage.getItem('autoleitwerk.upsellHidden')==='1'; }catch(_){ return false; } })();
+function setUpsellHidden(on){ upsellHidden = on; try{ localStorage.setItem('autoleitwerk.upsellHidden', on ? '1' : '0'); }catch(_){} renderDetail(); }
+document.addEventListener('click', (e)=>{
+  if(e.target.closest('#upsellHide')){ setUpsellHidden(true); return; }
+  if(e.target.closest('#upsellShow')){ setUpsellHidden(false); return; }
+});
+function renderRecommendationCard(o){
+  const recs = getRecommendations(o);
+  if(recs.length===0) return '';
+  if(upsellHidden) return `<button class="upsell-show" id="upsellShow">${iconThumbUp} Empfohlene Zusatzarbeiten (${recs.length}) einblenden</button>`;
+  return `
+    <div class="upsell-card">
+      <div class="upsell-head">${iconThumbUp}<div><b>Empfohlene Zusatzarbeiten</b><span>${(m=>m ? `Typische Punkte beim ${m.label} mit ${escHtml(o.km)} – bitte am Fahrzeug prüfen` : 'Hinweise anhand des Km-Stands – bitte am Fahrzeug prüfen')(modelRecsFor(o))}</span></div><button class="upsell-hide" id="upsellHide" title="Ausblenden">Ausblenden</button></div>
+      <div class="upsell-items">
+        ${recs.map(r=>`<div class="upsell-item"><div class="upsell-item-title">${r.title}</div><div class="upsell-item-sub">${r.reason}</div></div>`).join('')}
+      </div>
+    </div>`;
+}
+
+
+
+function getSelectedOrder(){ return orders.find(o=>o.id===state.selectedOrderId); }
+
+function renderDetail(){
+  const o = getSelectedOrder();
+  const panel = document.getElementById('detailPanel');
+  if(!o){ panel.innerHTML = `<div class="placeholder">${iconInbox}<b>Kein Auftrag ausgewählt</b></div>`; return; }
+  const sm = statusMeta[o.status];
+
+  panel.innerHTML = `
+    <div class="detail-head">
+      <div class="dh-left">
+        <h2>Auftrag #${o.orderNumber} <span class="status-pill dot ${sm.cls}">${statusText(o)}</span></h2>
+        <div class="created">Erstellt: ${o.created}</div>
+      </div>
+      <div class="dh-right">
+        ${PILOT_HIDE_DEMO ? '' : `<div class="btn">${iconMsg} Nachricht</div>`}
+        <div class="btn" id="askAlexOrderBtn">${alexAvatar(20, { live:false, ring:false })} ALEX fragen</div>
+        <div class="btn" id="diagOrderBtn">${iconObd} Diagnose</div>
+        ${o.hasPortal && alexCanWrite() ? `<div class="btn" id="sendPortalBtn" title="${o.email ? 'Link an '+escHtml(o.email)+' senden' : 'Keine E-Mail-Adresse hinterlegt'}">${iconMail} Portal-Link senden</div>` : ''}
+        <div class="btn" id="vehicleDetailsBtn">${iconCar} Fahrzeugdetails</div>
+        <div class="btn primary" id="closeOrderBtn">${iconCheck} Auftrag abschließen ${iconChevDown}</div>
+      </div>
+    </div>
+    <div class="detail-body">
+      <div class="vehicle-card">
+        <div class="v-photo ${state.vehiclePhotoBusy===o.id?'uploading':''}">
+          <img src="${o.image}" alt="${o.vehicle}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{innerHTML:carIcon(&quot;${o.status}&quot;)}))">
+          <div class="v-photo-actions">
+            <button class="v-photo-btn primary" id="vehiclePhotoCameraBtn" title="Fahrzeug fotografieren">${iconCamera} ${hasRealVehiclePhoto(o)?'Neu':'Foto'}</button>
+            <button class="v-photo-btn" id="vehiclePhotoGalleryBtn" title="Foto aus der Galerie wählen">Galerie</button>
+          </div>
+        </div>
+        <div class="v-info">
+          <div class="v-title-row">
+            <h3>${o.vehicle}</h3>
+            <span class="plate-chip">${o.plate}</span>
+          </div>
+          <div class="v-cust">
+            <span class="avatar">${initials(o.customer)}</span>
+            <span class="v-cust-name">${o.customer}</span>
+            <button class="call-btn" title="Anrufen">${iconPhone}</button>
+          </div>
+          <div class="v-meta">
+            <div><span class="lbl">Km-Stand</span><span class="val">${o.km}</span></div>
+            <div><span class="lbl">Erstzulassung</span><span class="val">${o.erst}</span></div>
+          </div>
+        </div>
+        <div class="progress-card">
+          <div class="plbl">Fortschritt</div>
+          <div class="ppct">${o.progress}%</div>
+          <div class="pbar"><div class="pbar-fill" style="width:${o.progress}%"></div></div>
+          <div class="prow"><span>Geschätzte Dauer</span><b>${o.dauer}</b></div>
+          <div class="prow"><span>Verbleibende Zeit</span><b>${o.rest}</b></div>
+        </div>
+      </div>
+
+      ${o.desc ? `
+      <div class="order-desc-card" style="background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin:14px 0;">
+        <div style="font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-faint); margin-bottom:6px;">📋 Auftragsbeschreibung</div>
+        <div style="font-size:14px; line-height:1.5;">${o.desc}</div>
+      </div>
+      ` : ''}
+
+      ${renderRecommendationCard(o)}
+
+      <div class="tabs">
+        <div class="tab ${state.detailTab==='aufgaben'?'active':''}" data-dtab="aufgaben">${iconTasks} Aufgaben</div>
+        <div class="tab ${state.detailTab==='checkliste'?'active':''}" data-dtab="checkliste">${iconCheckSquare} Checkliste</div>
+        <div class="tab ${state.detailTab==='reifen'?'active':''}" data-dtab="reifen">${iconTire} Reifenscan</div>
+        ${PILOT_HIDE_DEMO ? '' : `<div class="tab ${state.detailTab==='teile'?'active':''}" data-dtab="teile">${iconBox} Teile &amp; Material</div>
+        <div class="tab ${state.detailTab==='dokumente'?'active':''}" data-dtab="dokumente">${iconFolder} Dokumente</div>
+        <div class="tab ${state.detailTab==='verlauf'?'active':''}" data-dtab="verlauf">${iconHistory} Verlauf</div>`}
+      </div>
+
+      <div class="tab-panel" id="tabPanel"></div>
+    </div>
+  `;
+  renderTabPanel();
+}
+
+function renderTabPanel(){
+  const o = getSelectedOrder();
+  const el = document.getElementById('tabPanel');
+  if(state.detailTab==='reifen'){ el.innerHTML = renderTireScanPanel(o); return; }
+  if(state.detailTab==='aufgaben'){
+    const done = o.tasks.filter(t=>t.status==='done').length;
+    const selectedTask = o.tasks.find(t=>t.id===state.selectedTaskId) || o.tasks[0];
+    el.innerHTML = `
+      <div class="aufgaben-row">
+        <div class="task-col">
+          <h4>Aufgaben (${done} / ${o.tasks.length})</h4>
+          <div class="task-list">
+            ${o.tasks.map(t=>`
+              <div class="task-row ${t.id===selectedTask.id?'selected':''}" data-task="${t.id}">
+                <div class="check ${t.status}" data-checktoggle="${t.id}">${t.status==='done'?iconCheck:''}</div>
+                <div class="t-main">
+                  <div class="t-title-row">
+                    <span class="t-title">${t.title}</span>
+                    <span class="t-status ${t.status}">${t.statusLabel}</span>
+                  </div>
+                  <div class="t-tags">
+                    <span class="cat-chip ${t.catColor}">${t.cat}</span>
+                    <span class="t-mech">${t.mechanic}</span>
+                    <span class="t-dur">${iconClock} ${t.duration}</span>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div class="task-detail" id="taskDetail"></div>
+      </div>
+    `;
+    renderTaskDetail(selectedTask);
+  } else if(state.detailTab==='checkliste'){
+    const done = o.qc.filter(q=>q.checked).length;
+    el.innerHTML = `
+      <div class="qc-head">
+        <div class="qc-head-txt"><b>Digitale Qualitätskontrolle</b><span>${done} von ${o.qc.length} Punkten erledigt · Pflicht vor Auftragsabschluss</span></div>
+        <div class="qc-ring"><svg viewBox="0 0 36 36"><circle class="qc-ring-bg" cx="18" cy="18" r="15.5"/><circle class="qc-ring-fill" cx="18" cy="18" r="15.5" style="stroke-dasharray:${(done/o.qc.length*97.4).toFixed(1)} 97.4"/></svg><span>${Math.round(done/o.qc.length*100)}%</span></div>
+      </div>
+      ${o.qc.map((q,i)=>`
+        <div class="checklist-item ${q.checked?'checked':''}">
+          <div class="check ${q.checked?'done':''}" data-qccheck="${i}">${q.checked?iconCheck:''}</div>
+          <span class="lab">${escHtml(q.label)}${q.checked && q.by ? `<em class="qc-by">${escHtml(q.by)}</em>` : ''}</span>
+        </div>
+      `).join('')}
+    `;
+  } else if(state.detailTab==='teile'){
+    const parts = [
+      {name:'Motoröl 5W-30, 5L', menge:'1x', preis:'34,90 €', status:'lager'},
+      {name:'Ölfilter', menge:'1x', preis:'9,50 €', status:'lager'},
+      {name:'Bremsbeläge vorne (Satz)', menge:'1x', preis:'68,00 €', status:'lager'},
+      {name:'Luftfilter', menge:'1x', preis:'14,20 €', status:'bestellt'},
+    ];
+    el.innerHTML = `
+      <div class="teile-head">
+        <span></span>
+        <div class="btn" id="openScanBtn">${iconScan} Ersatzteil scannen</div>
+      </div>
+      <div class="part-row head"><span>Bezeichnung</span><span>Menge</span><span>Preis</span><span>Status</span></div>
+      ${parts.map(p=>`
+        <div class="part-row">
+          <span class="part-name">${p.name}</span>
+          <span>${p.menge}</span>
+          <span>${p.preis}</span>
+          <span class="part-status ${p.status}">${p.status==='lager'?'Auf Lager':'Bestellt'}</span>
+        </div>
+      `).join('')}
+      <div class="missing-part-note">
+        ${iconWarn}
+        <div><b>Luftfilter nicht auf Lager</b><span>Lieferung heute, voraussichtlich 14:30 Uhr</span></div>
+        <div class="btn small">Nachbestellen</div>
+      </div>
+    `;
+  } else if(state.detailTab==='dokumente'){
+    const docs = [
+      {name:'Kostenvoranschlag.pdf', meta:'214 KB · hochgeladen 26.05.', ic:iconDoc},
+      {name:'Fahrzeugschein_Kopie.jpg', meta:'1,1 MB · hochgeladen 26.05.', ic:iconDoc},
+      {name:'Diagnoseprotokoll.pdf', meta:'88 KB · hochgeladen 26.05.', ic:iconDoc},
+    ];
+    el.innerHTML = docs.map(d=>`
+      <div class="doc-row">
+        <div class="doc-ic">${d.ic}</div>
+        <div>
+          <div class="doc-name">${d.name}</div>
+          <div class="doc-meta">${d.meta}</div>
+        </div>
+        <div class="doc-dl">${iconDownload}</div>
+      </div>
+    `).join('');
+  } else if(state.detailTab==='verlauf'){
+    const events = [
+      {text:'Auftrag erstellt', who:'Rezeption', when:o.created},
+      {text:'Fahrzeug angenommen', who:'Sie', when:o.created},
+      {text:'Erste Aufgabe abgeschlossen', who:'Sie', when:'heute'},
+    ];
+    el.innerHTML = events.map(e=>`
+      <div class="verlauf-item">
+        <div class="v-dot"></div>
+        <div>
+          <div class="v-text"><b>${e.text}</b> · ${e.who}</div>
+          <div class="v-when">${e.when}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+}
+
+function renderTaskDetail(t){
+  const el = document.getElementById('taskDetail');
+  if(!t){ el.innerHTML = `<div class="td-empty">Aufgabe auswählen, um Details zu sehen.</div>`; return; }
+  el.innerHTML = `
+    <div class="td-head">
+      <h5>${t.title}</h5>
+      <span class="td-status-chip ${t.status}">${t.statusLabel}</span>
+    </div>
+    <div class="td-desc-label">Beschreibung</div>
+    <div class="td-desc">${t.desc}</div>
+    <div class="td-stats">
+      <div><div class="lbl">Dauer (geschätzt)</div><div class="val">${t.duration}</div></div>
+      <div><div class="lbl">Fortschritt</div><div class="val">${t.progress}%</div></div>
+    </div>
+    <div class="td-mini-bar"><div class="td-mini-fill" style="width:${t.progress}%"></div></div>
+
+    ${renderTimerBlock(t)}
+    ${renderVoiceBlock(t)}
+
+    <div class="td-images-head">
+      <span>Bilder &amp; Notizen</span>
+      <div class="td-img-actions">
+        <span class="td-add" id="cameraBtn">${iconCamera} Kamera</span>
+        <span class="td-add" id="addPhotoBtn">${iconPlus} Hinzufügen</span>
+      </div>
+    </div>
+    <div class="td-images">
+      ${Array.from({length:t.images||0}).map(()=>`<div class="td-img">${iconCamera}</div>`).join('')}
+      ${(t.photos||[]).map((src,i)=> String(src).startsWith('data:')
+        ? `<div class="td-img has-photo" data-removephoto="${i}"><img src="${src}" alt="Foto"><span class="td-img-remove">${iconClose}</span></div>`
+        : `<div class="td-img has-photo" title="Am Auftrag gespeichert"><img src="${escHtml(src)}" alt="Foto"></div>`).join('')}
+      ${(!t.images && (!t.photos||t.photos.length===0)) ? `<div class="td-img" style="opacity:.5">${iconCamera}</div>` : ''}
+    </div>
+    ${'' /* KI-Fotoerkennung deaktiviert: renderAiAnalysisBlock(t) */}
+
+    <button class="td-btn" id="markDoneBtn" ${t.status==='done'?'disabled':''}>
+      ${t.status==='done'?iconCheck+' Erledigt' : iconCheck+' Als erledigt markieren'}
+    </button>
+  `;
+}
+
+/* ---------- 1. Zeiterfassung ---------- */
+function parseDurationToMinutes(str){
+  const hMatch = str.match(/(\d+)h/);
+  const mMatch = str.match(/(\d+)m/);
+  return (hMatch?parseInt(hMatch[1],10)*60:0) + (mMatch?parseInt(mMatch[1],10):0);
+}
+function formatSecs(secs){
+  secs = Math.max(0, Math.floor(secs));
+  const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = secs%60;
+  return h>0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+}
+function formatClock(ts){
+  const d = new Date(ts);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function currentElapsed(t){
+  return (t.elapsedSec||0) + (t.timeStatus==='running' && t.startedAt ? (Date.now()-t.startedAt)/1000 : 0);
+}
+function renderTimerBlock(t){
+  const sollMin = parseDurationToMinutes(t.duration);
+  if(t.status==='done'){
+    const istMin = t.istMin || sollMin;
+    const diff = istMin - sollMin;
+    return `
+      <div class="td-timer done">
+        <div class="td-timer-row"><span class="td-timer-label">Benötigte Zeit</span><span class="td-timer-big">${istMin} Min</span></div>
+        <div class="td-timer-sub ${diff<=0?'good':'bad'}">Soll: ${sollMin} Min · ${diff===0?'genau im Soll':diff<0?`${Math.abs(diff)} Min unter Soll`:`${diff} Min über Soll`}</div>
+      </div>`;
+  }
+  if(t.timeStatus==='running'){
+    return `
+      <div class="td-timer running">
+        <div class="td-timer-row"><span class="td-timer-label">Läuft seit ${formatClock(t.startedAt)}${t._timerBy && state.currentUser && t._timerBy!==state.currentUser.name ? ` · ${escHtml(t._timerBy)}` : ''}</span><span class="td-timer-big" id="liveTimerText">${formatSecs(currentElapsed(t))}</span></div>
+        <div class="td-timer-sub">Soll: ${sollMin} Min</div>
+        <div class="td-timer-actions">
+          <button class="td-timer-btn" data-timeraction="pause">${iconPause} Pause</button>
+          <button class="td-timer-btn primary" data-timeraction="finish">${iconCheck} Fertig</button>
+        </div>
+      </div>`;
+  }
+  if(t.timeStatus==='paused'){
+    return `
+      <div class="td-timer paused">
+        <div class="td-timer-row"><span class="td-timer-label">Pausiert</span><span class="td-timer-big">${formatSecs(t.elapsedSec||0)}</span></div>
+        <div class="td-timer-sub">Soll: ${sollMin} Min</div>
+        <div class="td-timer-actions">
+          <button class="td-timer-btn" data-timeraction="resume">${iconPlay} Fortsetzen</button>
+          <button class="td-timer-btn primary" data-timeraction="finish">${iconCheck} Fertig</button>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="td-timer idle">
+      <div class="td-timer-row"><span class="td-timer-label">Zeiterfassung</span><span class="td-timer-big">Nicht gestartet</span></div>
+      <div class="td-timer-sub">Soll: ${sollMin} Min</div>
+      <div class="td-timer-actions">
+        <button class="td-timer-btn primary" data-timeraction="start">${iconPlay} Start</button>
+      </div>
+    </div>`;
+}
+function startTimer(t){
+  if(t.timeStatus==='running') return;
+  t.timeStatus='running'; t.startedAt=Date.now(); t._timerChangedAt=Date.now();
+  if(t.status==='open'){ t.status='progress'; t.statusLabel='In Arbeit'; }
+  renderTabPanel();
+  startWorktime(t);
+  if(t.status==='progress') saveTaskStatus(t);
+}
+function startWorktime(t){
+  const o = getSelectedOrder();
+  tabletAction('worktime_start', { order_id: o ? o.id : null, task_id:t.id, description:t.title })
+    .then(data=>{
+      if(!data || !data.worktime_id) return;
+      // Schon wieder pausiert/fertig, bevor der Server geantwortet hat → sofort beenden, sonst läuft die Zeit dort weiter
+      if(t.timeStatus!=='running'){ tabletAction('worktime_stop', { worktime_id:data.worktime_id }); return; }
+      t._worktimeId = data.worktime_id;
+    });
+}
+function stopWorktime(t){
+  if(!t._worktimeId) return;
+  const id = t._worktimeId; t._worktimeId = null;
+  tabletAction('worktime_stop', { worktime_id:id });
+}
+function pauseTimer(t){
+  if(t.timeStatus!=='running') return;
+  t.elapsedSec = currentElapsed(t);
+  t.timeStatus='paused'; t.startedAt=null; t._timerChangedAt=Date.now();
+  renderTabPanel();
+  stopWorktime(t);
+}
+function resumeTimer(t){
+  t.timeStatus='running'; t.startedAt=Date.now(); t._timerChangedAt=Date.now();
+  renderTabPanel();
+  startWorktime(t);
+}
+function finishTimer(o,t){
+  t.elapsedSec = currentElapsed(t);
+  t.timeStatus='done'; t.startedAt=null; t._timerChangedAt=Date.now();
+  t.istMin = Math.max(1, Math.round(t.elapsedSec/60));
+  stopWorktime(t);
+  completeTask(o,t);
+}
+setInterval(()=>{
+  if(state.currentUser && state.shiftStart){
+    const shiftEl = document.getElementById('shiftTimerText');
+    if(shiftEl){
+      const secs = (Date.now()-state.shiftStart)/1000;
+      const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
+      shiftEl.innerHTML = `${iconClock} Im Dienst seit ${formatClock(state.shiftStart)} · ${h}:${String(m).padStart(2,'0')}`;
+    }
+  }
+  if(state.mainView!=='auftraege' || state.detailTab!=='aufgaben') return;
+  const o = getSelectedOrder();
+  const t = o && o.tasks.find(x=>x.id===state.selectedTaskId);
+  if(t && t.timeStatus==='running'){
+    const elText = document.getElementById('liveTimerText');
+    if(elText) elText.textContent = formatSecs(currentElapsed(t));
+  }
+}, 1000);
+
+/* ---------- 2. Spracheingabe ---------- */
+function renderVoiceBlock(t){
+  return `
+    <div class="td-voice">
+      <div class="td-voice-row">
+        <button class="td-mic-btn ${t.voiceRecording?'recording':''}" data-voiceaction="toggle">${iconMic}</button>
+        <div class="td-voice-txt">
+          <div class="td-voice-title">${t.voiceRecording?'Aufnahme läuft…':'Sprachnotiz aufnehmen'}</div>
+          <div class="td-voice-sub">${t.voiceRecording?'Tippen zum Beenden':'z.B. „Bremsbeläge vorne verschlissen, Bremsscheiben in Ordnung"'}</div>
+        </div>
+        ${!t.voiceRecording && !t.voiceNote ? `<span class="td-voice-typelink" id="voiceShowManual">oder tippen</span>` : ''}
+      </div>
+      ${(t.voiceError || (t.voiceShowManual && !t.voiceNote)) ? `
+        <div class="td-voice-error ${t.voiceError?'':'plain'}">
+          ${t.voiceError ? `<div class="td-voice-error-msg">${iconWarn} ${t.voiceError}</div>` : ''}
+          <div class="td-voice-manual">
+            <textarea id="voiceManualInput" rows="2" placeholder="Beobachtung eintippen…"></textarea>
+            <div class="btn small" id="voiceManualBtn">${iconCheck} Bericht erstellen</div>
+          </div>
+        </div>` : ''}
+      ${t.voiceNote ? `
+        <div class="td-voice-result">
+          <div class="td-voice-result-head">${iconBot} ${t.voiceNote.fromServer ? `Gespeicherter Bericht${t.voiceNote.savedAt ? ' · ' + escHtml(formatDateTimeDE(t.voiceNote.savedAt)) : ''}` : 'KI-Dokumentation erstellt'}</div>
+          <div class="td-voice-field"><span class="k">Werkstattbericht</span><span class="v">${escHtml(t.voiceNote.bericht||'')}</span></div>
+          ${t.voiceNote.kunde ? `<div class="td-voice-field"><span class="k">Kundenbeschreibung</span><span class="v">${escHtml(t.voiceNote.kunde)}</span></div>` : ''}
+          ${t.voiceNote.transcript ? `<div class="td-voice-field"><span class="k">Original-Aufnahme</span><span class="v muted">"${escHtml(t.voiceNote.transcript)}"</span></div>` : ''}
+        </div>` : ''}
+    </div>`;
+}
+function toggleVoiceRecording(o,t){
+  t.voiceError = null;
+
+  // Sichere Verbindung (HTTPS) nötig - bei lokal geöffneter Datei (content://, file://) funktioniert
+  // die Cloud-Spracherkennung des Browsers grundsätzlich nicht. Statt "leise" fehlzuschlagen, sofort
+  // auf die Text-Alternative hinweisen.
+  if(!window.isSecureContext){
+    t.voiceRecording = false;
+    t.voiceError = 'Spracherkennung benötigt eine sichere Verbindung (HTTPS) und Internet – bei einer lokal geöffneten Datei nicht verfügbar.';
+    renderTaskDetail(t);
+    return;
+  }
+  if(!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)){
+    t.voiceRecording = false;
+    t.voiceError = 'Dieser Browser unterstützt keine Spracherkennung.';
+    renderTaskDetail(t);
+    return;
+  }
+
+  const errorMessages = {
+    'not-allowed': 'Mikrofon-Zugriff wurde nicht erlaubt. Bitte in den Browser-Einstellungen freigeben.',
+    'service-not-allowed': 'Mikrofon-Zugriff wurde blockiert (Browser- oder Systemeinstellung).',
+    'network': 'Keine Verbindung zum Spracherkennungsdienst – Internet erforderlich.',
+    'no-speech': 'Keine Sprache erkannt. Bitte erneut versuchen und deutlich sprechen.',
+    'audio-capture': 'Kein Mikrofon gefunden.',
+    'aborted': null, // manuell gestoppt, kein Fehler anzeigen
+  };
+
+  // ZWEITER KLICK: diese Aufgabe nimmt gerade auf -> Aufnahme beenden und Ergebnis zusammenfassen
+  if(t.voiceRecording && state.recognition){
+    try{ state.recognition.stop(); }catch(e){}
+    return; // finish() wird über onend aufgerufen und wertet t._voiceParts aus
+  }
+
+  // Falls eine andere Aufgabe gerade aufnimmt: sauber stoppen statt zweite Instanz zu starten
+  if(state.recognition){
+    try{ state.recognition.onend = null; state.recognition.onerror = null; state.recognition.stop(); }catch(e){}
+    state.recognition = null;
+  }
+  if(state.voiceTimeout){ clearTimeout(state.voiceTimeout); state.voiceTimeout = null; }
+
+  // ERSTER KLICK: Aufnahme starten - läuft durchgehend weiter, bis erneut getippt wird
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const rec = new Rec();
+  rec.lang='de-DE';
+  rec.continuous=true;      // NICHT nach der ersten Sprechpause automatisch beenden
+  rec.interimResults=false;
+  state.recognition = rec;
+  const sessionId = ++state.voiceSession;
+  t.voiceRecording=true;
+  t._voiceParts = [];
+  renderTaskDetail(t);
+
+  const finish = (errorCode)=>{
+    if(sessionId !== state.voiceSession) return; // veraltete Session, ignorieren
+    if(state.voiceTimeout){ clearTimeout(state.voiceTimeout); state.voiceTimeout = null; }
+    state.recognition = null;
+    t.voiceRecording = false;
+    const fullText = (t._voiceParts||[]).join(' ').trim();
+    delete t._voiceParts;
+    if(fullText){
+      t.voiceNote = simulateVoiceReport(fullText);
+      t.voiceError = null;
+      syncVoiceNoteToApi(t);
+    } else if(errorCode && errorMessages[errorCode] !== null){
+      t.voiceError = errorMessages[errorCode] || `Spracherkennung fehlgeschlagen (${errorCode}).`;
+    } else if(!errorCode){
+      t.voiceError = 'Keine Sprache erkannt. Bitte erneut versuchen und deutlich sprechen.';
+    }
+    renderTaskDetail(t);
+  };
+
+  rec.onresult = (ev)=>{
+    if(sessionId !== state.voiceSession) return;
+    for(let i=ev.resultIndex; i<ev.results.length; i++){
+      if(ev.results[i].isFinal){ t._voiceParts.push(ev.results[i][0].transcript); }
+    }
+  };
+  rec.onerror = (ev)=> finish(ev && ev.error);
+  rec.onend = ()=> finish();
+
+  // Sicherheitsnetz: falls vergessen wird zu stoppen oder der Browser hängt -> nach 90s automatisch beenden
+  state.voiceTimeout = setTimeout(()=>{
+    if(sessionId !== state.voiceSession) return;
+    try{ rec.stop(); }catch(e){}
+    finish('timeout');
+  }, 90000);
+
+  try{ rec.start(); }catch(e){ finish('start-failed'); }
+}
+function createManualVoiceNote(o,t){
+  const input = document.getElementById('voiceManualInput');
+  if(!input || !input.value.trim()) return;
+  t.voiceNote = simulateVoiceReport(input.value.trim());
+  t.voiceError = null;
+  renderTaskDetail(t);
+  syncVoiceNoteToApi(t);
+}
+function syncVoiceNoteToApi(t){
+  if(!t.id || !t.voiceNote) return;
+  const o = getSelectedOrder();
+  tabletAction('note_add', { order_id: o ? o.id : null, task_id:t.id, content: t.voiceNote.bericht || t.voiceNote.transcript || '' });
+}
+function simulateVoiceReport(transcript){
+  const sentences = transcript.split(/[.!?]\s*/).filter(Boolean);
+  return {
+    transcript,
+    bericht: sentences.map(s=>'• '+s.charAt(0).toUpperCase()+s.slice(1)).join(' '),
+    kunde: sentences.length ? `Im Rahmen der Durchsicht wurde festgestellt: ${sentences[0].toLowerCase()}.` : transcript,
+  };
+}
+
+/* ---------- 3. KI-Fotoanalyse ---------- */
+const AI_FINDINGS_POOL = [
+  {text:'Ölverlust erkannt', level:'warn'},
+  {text:'Bremsbelag ca. 20% Restdicke', level:'warn'},
+  {text:'Riss im Reifen sichtbar', level:'bad'},
+  {text:'Korrosion erkannt', level:'warn'},
+  {text:'Bauteil augenscheinlich in Ordnung', level:'ok'},
+  {text:'Verschleißgrenze noch nicht erreicht', level:'ok'},
+];
+function analyzePhoto(){
+  const n = 1 + Math.floor(Math.random()*2);
+  const shuffled = [...AI_FINDINGS_POOL].sort(()=>Math.random()-0.5);
+  const findings = shuffled.slice(0,n);
+  return { findings, severity: findings.some(f=>f.level==='bad') ? 'bad' : findings.some(f=>f.level==='warn') ? 'warn' : 'ok' };
+}
+function renderAiAnalysisBlock(t){
+  if(!t.aiAnalysis) return '';
+  const a = t.aiAnalysis;
+  return `
+    <div class="td-ai-panel ${a.severity}">
+      <div class="td-ai-head">${iconBot} KI-Analyse</div>
+      <div class="td-ai-findings">
+        ${a.findings.map(f=>`<div class="td-ai-finding ${f.level}">${f.level==='ok'?iconCheck:iconWarn}<span>${f.text}</span></div>`).join('')}
+      </div>
+      ${a.severity!=='ok' ? `
+        <div class="td-ai-rec">
+          <span>Zusatzarbeit empfehlen?</span>
+          <div class="td-ai-rec-btns">
+            <button class="td-ai-rec-btn ${t.zusatzarbeit===true?'active yes':''}" data-zusatzarbeit="ja">Ja</button>
+            <button class="td-ai-rec-btn ${t.zusatzarbeit===false?'active no':''}" data-zusatzarbeit="nein">Nein</button>
+          </div>
+        </div>` : ''}
+    </div>`;
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', (e)=>{
+  const wtab = e.target.closest('[data-wtab]');
+  if(wtab){
+    state.worklistTab = wtab.dataset.wtab;
+    const first = orders.find(o=>o.status===state.worklistTab);
+    if(first){ state.selectedOrderId = first.id; state.detailTab='aufgaben'; state.selectedTaskId = first.tasks[0]?.id; }
+    renderWorklistTabs(); renderOrderList(); renderDetail();
+    return;
+  }
+  const ocard = e.target.closest('.order-card[data-order]');
+  if(ocard){
+    state.selectedOrderId = ocard.dataset.order;
+    state.detailTab='aufgaben';
+    const o = getSelectedOrder();
+    state.selectedTaskId = o.tasks[0]?.id;
+    renderOrderList(); renderDetail();
+    return;
+  }
+  const dtab = e.target.closest('[data-dtab]');
+  if(dtab){
+    state.detailTab = dtab.dataset.dtab;
+    renderDetail();
+    return;
+  }
+  const trow = e.target.closest('[data-task]');
+  if(trow && !e.target.closest('[data-checktoggle]')){
+    state.selectedTaskId = trow.dataset.task;
+    renderTabPanel();
+    return;
+  }
+  const ctoggle = e.target.closest('[data-checktoggle]');
+  if(ctoggle){
+    const o = getSelectedOrder();
+    const t = o.tasks.find(tk=>tk.id===ctoggle.dataset.checktoggle);
+    toggleTask(o, t);
+    return;
+  }
+  const markBtn = e.target.closest('#markDoneBtn');
+  if(markBtn && !markBtn.disabled){
+    const o = getSelectedOrder();
+    const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
+    if(t){ (t.timeStatus==='running'||t.timeStatus==='paused') ? finishTimer(o,t) : completeTask(o,t); }
+    return;
+  }
+  const timerBtn = e.target.closest('[data-timeraction]');
+  if(timerBtn){
+    const o = getSelectedOrder();
+    const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
+    if(t){
+      const action = timerBtn.dataset.timeraction;
+      if(action==='start') startTimer(t);
+      else if(action==='pause') pauseTimer(t);
+      else if(action==='resume') resumeTimer(t);
+      else if(action==='finish') finishTimer(o,t);
+    }
+    return;
+  }
+  const micBtn = e.target.closest('[data-voiceaction]');
+  if(micBtn){
+    const o = getSelectedOrder();
+    const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
+    if(t) toggleVoiceRecording(o,t);
+    return;
+  }
+  if(e.target.closest('#voiceManualBtn')){
+    const o = getSelectedOrder();
+    const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
+    if(t) createManualVoiceNote(o,t);
+    return;
+  }
+  if(e.target.closest('#voiceShowManual')){
+    const o = getSelectedOrder();
+    const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
+    if(t){ t.voiceShowManual = true; renderTaskDetail(t); }
+    return;
+  }
+  const zusatzBtn = e.target.closest('[data-zusatzarbeit]');
+  if(zusatzBtn){
+    const o = getSelectedOrder();
+    const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
+    if(t){ t.zusatzarbeit = zusatzBtn.dataset.zusatzarbeit==='ja'; renderTaskDetail(t); }
+    return;
+  }
+  const apptChip = e.target.closest('[data-apptrange]');
+  if(apptChip){
+    state.dashApptRange = apptChip.dataset.apptrange;
+    try{ localStorage.setItem('al_dash_appt_range', state.dashApptRange); }catch(_){}
+    renderOtherView('dashboard');
+    return;
+  }
+  const qccheck = e.target.closest('[data-qccheck]');
+  if(qccheck){
+    const o = getSelectedOrder();
+    const i = parseInt(qccheck.dataset.qccheck,10);
+    o.qc[i].checked = !o.qc[i].checked;
+    o.qc[i].by = o.qc[i].checked && state.currentUser ? state.currentUser.name : '';
+    saveQC(o);
+    renderTabPanel();
+    return;
+  }
+
+  /* --- main nav (sidebar + bottom nav) --- */
+  const navEl = e.target.closest('[data-mainview]');
+  if(navEl){
+    document.getElementById('mehrOverlay').style.display='none';
+    setMainView(navEl.dataset.mainview);
+    return;
+  }
+  const mehrBtn = e.target.closest('[data-mehr]');
+  if(mehrBtn){
+    document.getElementById('mehrOverlay').style.display='flex';
+    return;
+  }
+  if(e.target.id==='mehrOverlay' || e.target.id==='sheetCancel'){
+    document.getElementById('mehrOverlay').style.display='none';
+    return;
+  }
+
+  /* --- jump-to-order links from other views --- */
+  const jumpEl = e.target.closest('.aa-row[data-order], .fz-card[data-order], .tm-item[data-order], .doc-row[data-order], .bay-card[data-order], .dash-tl-item[data-order]');
+  if(jumpEl){
+    jumpToOrder(jumpEl.dataset.order);
+    return;
+  }
+
+  /* --- nachrichten --- */
+  const convEl = e.target.closest('[data-conv]');
+  if(convEl){
+    state.selectedConvId = convEl.dataset.conv;
+    const c = messages.find(m=>m.id===state.selectedConvId);
+    if(c) c.unread = false;
+    renderChrome();
+    renderNachrichtenView(document.getElementById('otherView'));
+    return;
+  }
+  if(e.target.closest('#msgSendBtn')){
+    sendMessage();
+    return;
+  }
+
+  /* --- einstellungen toggles --- */
+  const toggleEl = e.target.closest('[data-toggle]');
+  if(toggleEl && !toggleEl.classList.contains('disabled')){
+    const key = toggleEl.dataset.toggle;
+    state.settings[key] = !state.settings[key];
+    toggleEl.classList.toggle('on');
+    return;
+  }
+
+  /* --- reifenlager --- */
+  if(handleReifenlagerClick(e)) return;
+
+  /* --- pdf viewer modal --- */
+  if(e.target.closest('#pdfModalClose') || e.target.id==='pdfModal'){
+    closePdfModal();
+    return;
+  }
+
+  /* --- vehicle details modal --- */
+  if(e.target.closest('#vehicleDetailsBtn')){
+    openVehicleModal(getSelectedOrder());
+    return;
+  }
+  if(e.target.closest('#vehicleModalClose') || e.target.id==='vehicleModal'){
+    document.getElementById('vehicleModal').style.display='none';
+    return;
+  }
+
+  /* --- auftrag abschließen --- */
+  if(e.target.closest('#closeOrderBtn')){
+    openCloseOrderModal(getSelectedOrder());
+    return;
+  }
+  if(e.target.closest('#closeOrderCancel') || e.target.id==='closeOrderModal'){
+    document.getElementById('closeOrderModal').style.display='none';
+    return;
+  }
+  if(e.target.closest('#closeOrderConfirm')){
+    completeOrder(getSelectedOrder());
+    return;
+  }
+  if(e.target.closest('#goToQcBtn')){
+    document.getElementById('closeOrderModal').style.display='none';
+    state.detailTab='checkliste';
+    renderDetail();
+    return;
+  }
+
+  /* --- add / remove photo --- */
+  if(e.target.closest('#addPhotoBtn')){
+    document.getElementById('photoFileInput').click();
+    return;
+  }
+  if(e.target.closest('#cameraBtn')){
+    document.getElementById('cameraFileInput').click();
+    return;
+  }
+  const removePhoto = e.target.closest('[data-removephoto]');
+  if(removePhoto){
+    const o = getSelectedOrder();
+    const t = o.tasks.find(tk=>tk.id===state.selectedTaskId);
+    if(t && t.photos){
+      t.photos.splice(parseInt(removePhoto.dataset.removephoto,10),1);
+      renderTaskDetail(t);
+    }
+    return;
+  }
+
+  /* --- logout flow --- */
+  /* --- ersatzteil scanner --- */
+  if(e.target.closest('#openScanBtn')){
+    openScannerModal();
+    return;
+  }
+  if(e.target.closest('#scanConfirmBtn')){
+    runScan();
+    return;
+  }
+
+  /* --- ki-assistent --- */
+  if(e.target.closest('#aiFabBtn')){
+    const panel = document.getElementById('aiPanel');
+    const isOpen = panel.style.display==='flex';
+    if(isOpen){ panel.style.display='none'; }
+    else { document.getElementById('notePanel').style.display='none'; renderAiPanel(); panel.style.display='flex'; }
+    return;
+  }
+  if(e.target.closest('#aiPanelClose')){
+    document.getElementById('aiPanel').style.display='none';
+    return;
+  }
+  if(e.target.closest('#aiSendBtn')){
+    aiAsk();
+    return;
+  }
+  if(e.target.closest('#sendPortalBtn')){ sendPortalLink(); return; }
+  if(handleAlexClick(e)) return;
+  if(handleTireScanClick(e)) return;
+  if(handleDiagClick(e)) return;
+
+  /* --- schnellnotiz --- */
+  if(e.target.closest('#noteFabBtn')){
+    const panel = document.getElementById('notePanel');
+    const isOpen = panel.style.display==='flex';
+    if(isOpen){ panel.style.display='none'; }
+    else { document.getElementById('aiPanel').style.display='none'; renderNotePanel(); panel.style.display='flex'; }
+    return;
+  }
+  if(e.target.closest('#notePanelClose')){
+    document.getElementById('notePanel').style.display='none';
+    return;
+  }
+  if(e.target.closest('#noteSendBtn')){
+    addQuickNote();
+    return;
+  }
+  const delNote = e.target.closest('[data-delnote]');
+  if(delNote){
+    deleteQuickNote(delNote.dataset.delnote);
+    return;
+  }
+
+  /* --- auftragsliste ein-/ausklappen --- */
+  if(e.target.closest('#worklistCollapseBtn') || e.target.closest('#worklistExpandBtn')){
+    state.worklistCollapsed = !state.worklistCollapsed;
+    document.getElementById('worklistSection').classList.toggle('collapsed', state.worklistCollapsed);
+    return;
+  }
+
+  /* --- support --- */
+  const faqEl = e.target.closest('[data-faq]');
+  if(faqEl){
+    const i = parseInt(faqEl.dataset.faq,10);
+    supportTicketState.openFaq = supportTicketState.openFaq===i ? null : i;
+    renderSupportView(document.getElementById('otherView'));
+    return;
+  }
+  if(e.target.closest('#openAiFromSupport')){
+    renderAiPanel();
+    document.getElementById('aiPanel').style.display='flex';
+    return;
+  }
+  if(handleSupportClick(e)) return;
+  if(e.target.closest('#ticketSendBtn')){
+    const card = document.getElementById('ticketCard');
+    const subject = (document.getElementById('ticketSubject')||{}).value || 'Support-Anfrage';
+    const message = (document.getElementById('ticketMessage')||{}).value || '';
+    if(!message.trim()){ showUpdateToast('Bitte eine Nachricht eingeben.'); return; }
+    const btn = document.getElementById('ticketSendBtn'); if(btn){ if(btn.dataset.busy) return; btn.dataset.busy='1'; btn.textContent='Sendet…'; }
+    // direkt über den Server an info@ – kein Mailprogramm nötig
+    tabletRequest('support_ticket', { subject: subject.trim() || 'Support-Anfrage', message, device: navigator.userAgent }, 20000).then(r=>{
+      const c = document.getElementById('ticketCard'); if(!c) return;
+      if(r.ok){ c.innerHTML = `<div class="ticket-sent">${iconCheck} Ticket gesendet – das AutoLeitwerk-Team meldet sich bei euch.</div>`; }
+      else if(btn){ delete btn.dataset.busy; btn.innerHTML = `${iconCheck} Ticket senden`; showUpdateToast('Ticket nicht gesendet: ' + (r.reason || 'keine Verbindung')); }
+    });
+    return;
+  }
+
+  if(e.target.closest('#logoutBtn') || e.target.closest('#sheetLogout')){
+    document.getElementById('mehrOverlay').style.display='none';
+    const p = document.querySelector('#logoutModal .modal-card p');
+    if(p && state.shiftStart){
+      const secs = (Date.now()-state.shiftStart)/1000;
+      const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
+      p.innerHTML = `Deine heutige Schicht: <b>${h}:${String(m).padStart(2,'0')} Std.</b> (seit ${formatClock(state.shiftStart)}).<br>Du wirst von AutoLeitwerk abgemeldet und musst dich erneut anmelden.`;
+    }
+    document.getElementById('logoutModal').style.display='flex';
+    return;
+  }
+  if(e.target.closest('#logoutCancel') || e.target.id==='logoutModal'){
+    document.getElementById('logoutModal').style.display='none';
+    return;
+  }
+  if(e.target.closest('#logoutConfirm')){
+    document.getElementById('logoutModal').style.display='none';
+    endSession(false);
+    document.getElementById('loginScreen').style.display='none';
+    document.getElementById('loggedOutScreen').style.display='flex';
+    return;
+  }
+  if(e.target.closest('#vehiclePhotoCameraBtn')){ document.getElementById('vehiclePhotoCamera').click(); return; }
+  if(e.target.closest('#vehiclePhotoGalleryBtn')){ document.getElementById('vehiclePhotoGallery').click(); return; }
+  if(e.target.closest('#switchUserBtn') || e.target.closest('#sheetSwitchUser')){
+    document.getElementById('mehrOverlay').style.display='none';
+    endSession(true);
+    return;
+  }
+  if(e.target.closest('#helpOkBtn')){
+    try{ localStorage.setItem('autoleitwerk.helpSeen.'+state.mainView,'1'); }catch(_){}
+    renderHelpBar();
+    return;
+  }
+  if(e.target.closest('#resetHelpBtn')){
+    resetHelp();
+    return;
+  }
+  if(e.target.closest('#reLoginBtn')){
+    showLoginScreen();
+    return;
+  }
+
+  /* --- login & profilauswahl --- */
+  if(e.target.closest('#loginSubmitBtn')){
+    performLogin();
+    return;
+  }
+  // Früher: Profil antippen = Wechsel ohne Anmeldung. Bewusst entfernt – Wechsel nur über Name + PIN.
+  if(e.target.closest('#profileBackToLogin')){
+    try{ localStorage.removeItem(SAVED_CODE_KEY); }catch(_){}
+    showLoginScreen();
+    const c = document.getElementById('loginWorkshopCode'); if(c){ c.value=''; setTimeout(()=>c.focus(),50); }
+    return;
+  }
+  const lp = e.target.closest('[data-loginprofile]');
+  if(lp){ chooseLoginProfile(lp.dataset.loginprofile); return; }
+
+  /* --- pin-bildschirm --- */
+  const pinKey = e.target.closest('[data-pinkey]');
+  if(pinKey){
+    const k = pinKey.dataset.pinkey;
+    if(k==='del') pinBackspace(); else pinPressDigit(k);
+    return;
+  }
+  if(e.target.closest('#pinBackBtn')){
+    backToProfiles();
+    return;
+  }
+});
+
+['vehiclePhotoCamera','vehiclePhotoGallery'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', (e)=>{
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if(f) setVehiclePhoto(getSelectedOrder(), f);
+  });
+});
+document.getElementById('photoFileInput').addEventListener('change', (e)=>{
+  if(e.target.files && e.target.files.length>0){
+    addPhotoToCurrentTask(e.target.files);
+    e.target.value='';
+  }
+});
+
+document.getElementById('cameraFileInput').addEventListener('change', (e)=>{
+  if(e.target.files && e.target.files.length>0){
+    addPhotoToCurrentTask(e.target.files);
+    e.target.value='';
+  }
+});
+
+document.addEventListener('change', (e)=>{
+  if(e.target.matches('[data-teamrole]')){
+    const i = parseInt(e.target.dataset.teamrole,10);
+    const newRole = e.target.value;
+    team[i].role = newRole;
+    if(state.backendAvailable && state.apiUsers){
+      const apiUser = state.apiUsers.find(u => u.name === team[i].name);
+      if(apiUser){
+        apiFetch(`/users/${apiUser.id}/role`, { method:'PATCH', body: JSON.stringify({ role: newRole }) })
+          .catch(err => console.warn('Rollenänderung (Backend) fehlgeschlagen (evtl. keine Admin-Rechte):', err.message));
+      }
+    }
+  }
+});
+
+document.addEventListener('input', (e)=>{
+  if(e.target.id==='tireSearchInput'){
+    state.tireSearch = e.target.value;
+    const list = tsFiltered();
+    const listEl = document.querySelector('.rl-list');
+    const headEl = document.querySelector('.rl-list-head span');
+    if(listEl) listEl.innerHTML = tsListHtml(list);
+    if(headEl) headEl.textContent = list.length;
+  }
+  if(e.target.id==='toolSearchInput'){
+    const q = e.target.value.toLowerCase();
+    const results = toolCatalog.filter(t=>t.name.toLowerCase().includes(q));
+    const listEl = document.getElementById('toolListResults');
+    if(listEl){
+      listEl.innerHTML = results.length===0
+        ? `<div class="placeholder">${iconInbox}<b>Kein Werkzeug gefunden</b><p>Versuch einen anderen Suchbegriff.</p></div>`
+        : results.map(renderToolRow).join('');
+    }
+  }
+});
+
+document.addEventListener('keydown', (e)=>{
+  if(e.key==='Enter' && document.activeElement && (document.activeElement.id==='loginWorkshopCode' || document.activeElement.id==='loginEmployeeName')){
+    performLogin();
+  }
+  if(e.key==='Enter' && document.activeElement && document.activeElement.id==='msgInput'){
+    sendMessage();
+  }
+  if(e.key==='Enter' && document.activeElement && document.activeElement.id==='aiInput'){
+    aiAsk();
+  }
+  if(e.key==='Enter' && document.activeElement && document.activeElement.id==='noteInput'){
+    addQuickNote();
+  }
+  if(document.getElementById('pinScreen').style.display==='flex'){
+    if(/^[0-9]$/.test(e.key)) pinPressDigit(e.key);
+    if(e.key==='Backspace') pinBackspace();
+  }
+});
+
+function sendMessage(){
+  const input = document.getElementById('msgInput');
+  if(!input || !input.value.trim()) return;
+  const conv = messages.find(c=>c.id===state.selectedConvId);
+  const now = new Date();
+  conv.msgs.push({from:'out', text:input.value.trim(), time:now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')});
+  input.value='';
+  renderNachrichtenView(document.getElementById('otherView'));
+  const inp = document.getElementById('msgInput');
+  if(inp) inp.focus();
+}
+
+function toggleTask(o,t){
+  if(t.status==='done'){
+    t.status='open'; t.statusLabel='Ausstehend'; t.progress=0;
+    saveTaskStatus(t);
+  } else {
+    completeTask(o,t,true);
+  }
+  recalcProgress(o);
+  renderOrderList(); renderDetail();
+}
+function completeTask(o,t){
+  t.status='done';
+  t.progress=100;
+  const now = new Date();
+  t.statusLabel = 'heute · ' + now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+  recalcProgress(o);
+  renderOrderList(); renderDetail();
+  saveTaskStatus(t);
+}
+function recalcProgress(o){
+  const total = o.tasks.length;
+  const doneWeighted = o.tasks.reduce((sum,t)=> sum + (t.status==='done'?1: (t.progress||0)/100), 0);
+  o.progress = total ? Math.round((doneWeighted/total)*100) : 0;
+}
+
+/* ---------- 6. ALEX (KI-Assistent) ---------- */
+/* ---------- Schnellnotiz ---------- */
+// Persönliche Schnellnotizen – werden nur auf diesem Tablet gespeichert (localStorage).
+// Pro Werkstatt + Mitarbeiter getrennt, damit Notizen beim Wechsel nicht beim Nächsten auftauchen.
+const QUICK_NOTES_KEY = 'autoleitwerk.quickNotes';
+let quickNotesKey = null;
+const quickNotes = [];
+function loadQuickNotesFor(code, name){
+  quickNotes.splice(0);
+  quickNotesKey = code && name ? `${QUICK_NOTES_KEY}.${String(code).toUpperCase()}.${String(name).trim().toLowerCase()}` : null;
+  if(quickNotesKey){ try{ quickNotes.push(...JSON.parse(localStorage.getItem(quickNotesKey)||'[]')); }catch(_){} }
+  if(typeof updateNoteBadge==='function') try{ updateNoteBadge(); }catch(_){}
+}
+function persistQuickNotes(){ if(!quickNotesKey) return; try{ localStorage.setItem(quickNotesKey, JSON.stringify(quickNotes)); }catch(_){} }
+function renderNotePanel(){
+  const panel = document.getElementById('notePanel');
+  panel.innerHTML = `
+    <div class="ai-panel-head">
+      <div class="ic" style="background:var(--note-bg);color:var(--on-status);">${iconNote}</div>
+      <div><b>Schnellnotizen</b><span style="color:var(--text-faint);">${quickNotes.length} gespeichert</span></div>
+      <div class="ai-panel-close" id="notePanelClose">${iconClose}</div>
+    </div>
+    <div class="note-list" id="noteListBody">
+      ${quickNotes.length===0 ? `<div class="note-empty">Noch keine Notizen. Schreib dir schnell etwas auf!</div>` : quickNotes.slice().reverse().map(n=>`
+        <div class="note-item">
+          <div class="note-text">${n.text}</div>
+          <div class="note-time">${n.time}</div>
+          <div class="note-del" data-delnote="${n.id}">${iconTrash}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="ai-panel-input-row">
+      <input class="ai-panel-input" id="noteInput" placeholder="Notiz eingeben…">
+      <button class="ai-panel-send" id="noteSendBtn" style="background:var(--note-bg);color:var(--on-status);">${iconPlus}</button>
+    </div>
+  `;
+  const body = document.getElementById('noteListBody');
+  if(body) body.scrollTop = 0;
+  updateNoteBadge();
+}
+function addQuickNote(){
+  const input = document.getElementById('noteInput');
+  if(!input || !input.value.trim()) return;
+  const text = input.value.trim();
+  const now = new Date();
+  const localNote = {id:'n'+Date.now(), text, time:now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')};
+  quickNotes.push(localNote);
+  input.value='';
+  renderNotePanel();
+  const inp = document.getElementById('noteInput');
+  if(inp) inp.focus();
+  persistQuickNotes();
+}
+function deleteQuickNote(id){
+  const idx = quickNotes.findIndex(n=>n.id===id);
+  if(idx>-1) quickNotes.splice(idx,1);
+  renderNotePanel();
+  persistQuickNotes();
+}
+function updateNoteBadge(){
+  const badge = document.getElementById('noteFabBadge');
+  if(!badge) return;
+  if(quickNotes.length>0){ badge.style.display='flex'; badge.textContent = quickNotes.length; }
+  else { badge.style.display='none'; }
+}
+
+const aiChat = [
+  {from:'bot', text:'Hallo, ich bin ALEX! Frag mich nach Fehlercodes, Geräuschen oder Reparaturschritten – oder öffne einen Auftrag und tippe „ALEX fragen“, dann kenne ich das Fahrzeug schon.'},
+];
+// BMW E30 Schaltplan-PDF (vom Nutzer bereitgestellt, als data-URI eingebettet, damit ALEX es direkt anbieten kann - kein Server-Upload noetig)
+const BMW_E30_SCHALTPLAN_PDF = 'docs/BMW_E30_Schaltplan.pdf'; // ausgelagert (vorher base64 in dieser Datei)
+const AI_KB = [
+  /* ===== Diagnose & Fehlercodes – generischer Workflow (Bereich 1) ===== */
+  { match:/wie (gehe ich|gehen wir|sollte ich).*vor|systematisch.*(diagnostizieren|vorgehen|fehler)|diagnose.*(vorgehen|schritte|workflow)/i, reply:`<b>Systematischer Diagnose-Workflow bei unbekanntem Fehler</b><ul>
+      <li>1. Fehlerspeicher komplett auslesen (alle Steuergeräte, nicht nur Motor) – auch gespeicherte/sporadische Codes mitnehmen</li>
+      <li>2. Freeze-Frame-Daten zum Code prüfen: unter welchen Bedingungen (Drehzahl, Temperatur, Last) trat der Fehler auf</li>
+      <li>3. Kundengespräch/Symptome abgleichen: passt das gemeldete Symptom zum gespeicherten Code, oder gibt es Zusatzsymptome ohne Code</li>
+      <li>4. Plausibilitätsprüfung vor Bauteiltausch: Sensor/Aktor gezielt mit Live-Daten oder Multimeter verifizieren statt auf Verdacht tauschen</li>
+      <li>5. Nach Reparatur: Fehler löschen, Probefahrt/Testzyklus, erneut auslesen zur Bestätigung</li>
+    </ul>` },
+  { match:/aufbau.*fehlercode|fehlercode.*aufbau|was bedeutet.*p0|obd.*code.*aufbau|unterschied.*p-code.*b-code|unterschied.*p.?code.*c.?code/i, reply:`<b>Aufbau eines OBD-Fehlercodes (z.B. P0401)</b><ul>
+      <li>1. Buchstabe – System: P=Antrieb (Powertrain), B=Karosserie (Body), C=Fahrwerk (Chassis), U=Netzwerk/Kommunikation (Network)</li>
+      <li>2. Ziffer – Norm: 0=generischer SAE-Code (herstellerübergreifend genormt), 1=herstellerspezifischer Code</li>
+      <li>3. Ziffer – Subsystem-Gruppe: z.B. 1er/2er=Kraftstoff/Luft-Gemisch, 3er=Zündung/Aussetzer, 4er=Zusatzemission (AGR/Sekundärluft), 5er=Fahrzeuggeschwindigkeit/Leerlauf, 6er=Steuergerät/Ausgänge, 7er/8er=Getriebe</li>
+      <li>4.–5. Ziffer – laufende Nummer innerhalb der Gruppe, identifiziert das konkrete Bauteil/die konkrete Störung</li>
+    </ul>` },
+  { match:/pending.*code|permanent.*code|unterschied.*fehlercode.*status|fehlercode.*(bestätigt|unbestätigt)/i, reply:`<b>Pending / Stored / Permanent – Fehlercode-Status verstehen</b><ul>
+      <li><b>Pending (anstehend):</b> Fehler ist einmal aufgetreten, aber noch nicht in zwei aufeinanderfolgenden Fahrzyklen bestätigt – MIL/Warnleuchte i.d.R. noch aus</li>
+      <li><b>Stored/Confirmed (gespeichert/bestätigt):</b> Fehler wurde in mehreren Zyklen bestätigt – MIL an, Freeze-Frame-Daten liegen vor</li>
+      <li><b>Permanent:</b> Code bleibt gespeichert, bis das Fahrzeug den Fehler selbst über mehrere saubere Fahrzyklen als behoben erkennt – lässt sich nicht per Diagnosegerät manuell löschen (Missbrauchsschutz für Abgasrelevanz)</li>
+      <li>Praxisrelevanz: Ein "Permanent"-Code nach Reparatur ist normal und verschwindet erst nach erfolgreicher Selbstdiagnose des Fahrzeugs, nicht durch Löschen</li>
+    </ul>` },
+  { match:/freeze.?frame|standbilddaten|momentaufnahme.*fehlerspeicher/i, reply:`<b>Freeze-Frame-Daten interpretieren</b><ul>
+      <li>Freeze-Frame = Schnappschuss der Betriebsparameter (Drehzahl, Last, Temperatur, Geschwindigkeit, Kraftstoff-Trimmwerte) im Moment der Fehlererkennung</li>
+      <li>Hilft zu unterscheiden: last-/drehzahlabhängiger Fehler vs. Fehler im Leerlauf/Standgas</li>
+      <li>Kühlmitteltemperatur im Freeze-Frame prüfen: Fehler nur im Kaltlauf aufgetreten? → andere Ursachenrichtung als bei warmem Motor</li>
+      <li>Wichtig: Freeze-Frame zeigt die Bedingungen bei Fehler-<i>erkennung</i>, nicht zwingend die Grundursache selbst</li>
+    </ul>` },
+  { match:/sporadisch|intermittierend|fehler.*kommt.*geht|wackelkontakt.*diagnose/i, reply:`<b>Sporadischen/intermittierenden Fehler diagnostizieren</b><ul>
+      <li>Fehlerspeicher-Historie nutzen: Häufigkeit und Zeitabstand der Fehlerauslösung geben Hinweis auf Auslöser (Vibration, Temperatur, Feuchtigkeit)</li>
+      <li>Wackelkontakte gezielt provozieren: Kabelbaum/Steckverbinder im Verdachtsbereich unter Betrieb leicht bewegen/klopfen, dabei Live-Daten beobachten</li>
+      <li>Datenlogger/Langzeitmessung sinnvoll, wenn Fehler im Werkstattbetrieb nicht reproduzierbar ist (z.B. nur bei Nässe oder nach langer Fahrt)</li>
+      <li>Steckverbinder auf Korrosion/aufgeweitete Kontakte prüfen – häufigste Ursache für "kommt und geht"-Fehler bei Elektronik</li>
+    </ul>` },
+  { match:/(fehlerspeicher|fehlercode).*löschen|löschen.*(fehlerspeicher|fehlercode)|nur.*löschen.*bringt/i, reply:`<b>Fehlercode löschen ohne Ursachenbehebung – typischer Fallstrick</b><ul>
+      <li>Löschen des Fehlerspeichers behebt nie die Ursache – der Code kommt nach dem nächsten passenden Fahrzyklus wieder, wenn der Defekt weiterbesteht</li>
+      <li>Vor dem Löschen: Freeze-Frame-Daten und Auftretenshäufigkeit dokumentieren, sonst gehen Diagnoseinformationen verloren</li>
+      <li>Sinnvoller Einsatz von "Löschen": gezielt nach abgeschlossener Reparatur, um die Selbstdiagnose des Fahrzeugs für Permanent-Codes neu zu starten</li>
+      <li>Kundenkommunikation: "Lampe aus" durch reines Löschen ohne Reparatur ist keine Lösung und sollte klar so benannt werden</li>
+    </ul>` },
+  { match:/kein(en)? (fehlercode|dtc).*(gespeichert|vorhanden)|problem.*ohne.*fehlercode|fehler.*aber.*kein.*code|kein.*fehlercode.*aber/i, reply:`<b>Diagnose bei Symptom ohne gespeicherten Fehlercode</b><ul>
+      <li>Nicht jeder wahrnehmbare Fehler erzeugt einen DTC – viele Systeme melden erst ab einer definierten Schwelle/Häufigkeit</li>
+      <li>Vorgehen: Live-Daten im Grenzbereich beobachten (z.B. Lambdawerte, Raildruck-Ist/Soll, Sensorspannungen), statt auf einen Code zu warten</li>
+      <li>Kundenbeschreibung strukturiert abfragen: wann genau, wie oft, unter welchen Bedingungen (kalt/warm, Last, Wetter)</li>
+      <li>Vergleichsmessung an einem baugleichen, fehlerfreien Fahrzeug kann bei unklaren Grenzwerten helfen</li>
+    </ul>` },
+  /* ===== Schaltpläne & Elektrik – Grundlagen (Bereich 2) ===== */
+  { match:/can.?bus|canbus.*(diagnose|fehler|terminierung|abschlusswiderstand)/i, reply:`<b>CAN-Bus – Grundlagen &amp; Diagnoseansatz</b><ul>
+      <li>Zwei Leitungen (CAN-High/CAN-Low), differentielles Signal – dadurch robust gegen elektromagnetische Störungen</li>
+      <li>Abschlusswiderstände (i.d.R. 2× 120Ω an den Bus-Enden, zusammen ca. 60Ω messbar zwischen den Leitungen) – fehlender/defekter Widerstand verursacht Kommunikationsausfälle</li>
+      <li>Typischer Fehler "Steuergerät nicht erreichbar": zuerst Spannungsversorgung/Masse des Steuergeräts prüfen, dann Bus-Pegel mit Oszilloskop, erst danach Steuergerät selbst verdächtigen</li>
+      <li>Mehrere Steuergeräte gleichzeitig nicht erreichbar deutet auf Bus-Problem (Kurzschluss/Unterbrechung/Abschlusswiderstand) statt Einzelbauteil hin</li>
+    </ul>` },
+  { match:/lin.?bus/i, reply:`<b>LIN-Bus – Grundlagen</b><ul>
+      <li>Single-Wire-Bus (eine Datenleitung + Masse) für einfache Komponenten – günstiger als CAN, aber langsamer und weniger störsicher</li>
+      <li>Typischer Einsatz: Fensterheber, Sitzverstellung, Klimabedienteile, Regensensor – Komfortelektronik statt sicherheitsrelevante Systeme</li>
+      <li>Ein Master-Steuergerät steuert mehrere LIN-Slaves im Zeitschlitzverfahren – fällt der Master aus, sind alle angeschlossenen Slaves betroffen</li>
+      <li>Diagnose ähnlich CAN: erst Spannungsversorgung/Masse der Teilnehmer prüfen, dann Signalpegel auf der einzelnen Datenleitung</li>
+    </ul>` },
+  { match:/spannungsabfall|voltage.?drop|leitungswiderstand.*prüfen/i, reply:`<b>Spannungsabfalltest (Voltage Drop) – Vorgehen</b><ul>
+      <li>Prinzip: Multimeter parallel über den zu prüfenden Leitungs-/Kontaktabschnitt, Verbraucher dabei eingeschaltet (Strom muss fließen, sonst kein aussagekräftiges Ergebnis)</li>
+      <li>Deutlich sinnvoller als reine Widerstandsmessung im spannungslosen Zustand – findet auch Übergangswiderstände, die erst unter Last auftreten</li>
+      <li>Typische Prüfpunkte: Batterie-Pluspol bis Verbraucher, Verbraucher-Masse bis Batterie-Minuspol, einzelne Steckverbindungen im Verdachtsbereich</li>
+      <li>Auffällig hoher Spannungsabfall an einem Abschnitt (deutlich höher als an vergleichbaren Abschnitten) markiert die Fehlerstelle – Korrosion, lockerer Kontakt oder Kabelbruch mit Teilkontakt</li>
+    </ul>` },
+  { match:/massefehler|erdungsfehler|schlechte masse|masseproblem|masseband/i, reply:`<b>Massefehler/Erdungsproblem finden</b><ul>
+      <li>Typische Symptome: mehrere, scheinbar unzusammenhängende elektrische Probleme gleichzeitig, flackernde Beleuchtung, unplausible Sensorwerte</li>
+      <li>Massebänder (Motor-Karosserie, Getriebe-Karosserie) auf Korrosion/lockeren Sitz prüfen – häufigste Fehlerquelle bei Masseproblemen</li>
+      <li>Spannungsabfalltest zwischen Bauteil-Masseanschluss und Batterie-Minuspol durchführen, um die genaue Stelle mit erhöhtem Übergangswiderstand einzugrenzen</li>
+      <li>Vorsicht bei Ersatz-/Behelfsmassen: unsachgemäß gesetzte Zusatzmassen können neue Ausgleichsströme und Folgefehler verursachen</li>
+    </ul>` },
+  { match:/wann.*oszilloskop|multimeter.*oszi|oszi.*multimeter|wann.*multimeter/i, reply:`<b>Multimeter vs. Oszilloskop – wann was einsetzen</b><ul>
+      <li>Multimeter: statische/quasi-statische Werte – Spannung, Widerstand, Strom, Spannungsabfall – reicht für die meisten Standardprüfungen</li>
+      <li>Oszilloskop: immer dann nötig, wenn sich ein Signal über die Zeit ändert – Sensorsignale (Kurbelwelle/Nockenwelle), PWM-Signale, Kommunikationsbusse (CAN/LIN), Zündsignale</li>
+      <li>Faustregel: wackelt/schwankt ein Multimeter-Messwert unerklärlich, oder soll ein "sporadischer" Aussetzer im Signal selbst gefunden werden → zum Oszilloskop wechseln</li>
+      <li>Bus-Diagnose (CAN/LIN) ist ohne Oszilloskop nur eingeschränkt möglich – reine Spannungsmessung zeigt keine Signalqualität/Störungen im Datenverkehr</li>
+    </ul>` },
+  { match:/schaltplan.*les|les.*schaltplan|schaltplansymbole|schaltzeichen.*bedeutung/i, reply:`<b>Schaltplan lesen – Grundlagen &amp; Symbole</b><ul>
+      <li>Leitungsfarben und Querschnittsangaben im Schaltplan mit der realen Verkabelung abgleichen – Farbcode ist herstellerspezifisch, immer die Legende des jeweiligen Plans nutzen</li>
+      <li>Bauteile werden meist als vereinfachte Symbole dargestellt (Schalter, Relais, Steckverbinder, Massepunkte) – Legende/Symbolverzeichnis am Anfang des Dokuments klärt die genaue Bedeutung</li>
+      <li>Steckverbinder-Nummerierung und Pin-Bezeichnung im Plan mit der Beschriftung am realen Stecker abgleichen, bevor gemessen wird</li>
+      <li>Stromlaufrichtung meist von oben (Versorgung/Plus) nach unten (Masse) dargestellt – hilft beim schnellen Einordnen unbekannter Pläne</li>
+    </ul>` },
+  { match:/pin.*prüfen|steckverbinder.*prüfen|kontaktwiderstand|pinbelegung.*prüfen/i, reply:`<b>Steckverbinder/Pins prüfen – Kontaktwiderstand</b><ul>
+      <li>Sichtprüfung zuerst: Korrosion, aufgeweitete/verbogene Kontakte, Feuchtigkeitsspuren im Steckergehäuse</li>
+      <li>Kontaktwiderstand nie nur "gesteckt" prüfen – Spannungsabfalltest unter Last liefert das aussagekräftigere Ergebnis als eine Widerstandsmessung im spannungslosen Zustand</li>
+      <li>Bei Verdacht auf Wackelkontakt: Steckverbinder unter Betrieb/Live-Daten-Beobachtung leicht bewegen, um den Fehler gezielt zu provozieren</li>
+      <li>Passende Pin-Auszieh-/Prüfwerkzeuge verwenden statt mit Prüfspitzen direkt in die Kontaktkammer zu gehen – vermeidet dauerhaft aufgeweitete Kontakte durch die Prüfung selbst</li>
+    </ul>` },
+  /* ===== Symptom-/Phänomen-Diagnose ohne DTC ===== */
+  { match:/ruckelt.*beschleunig|ruckeln.*(last|beschleunigen)|beschleunigen.*ruckel/i, reply:`<b>Ruckeln beim Beschleunigen – Diagnoseansatz</b><ul>
+      <li>Kalt vs. warm unterscheiden: nur im Kaltlauf → oft Gemischaufbereitung/Sensorik noch nicht in Regelbereich; auch warm → eher mechanisch/elektrisch dauerhaft</li>
+      <li>Mögliche Ursachen: Zündaussetzer (Kerzen/Spulen), Kraftstoffdruck schwankt, verschmutzte Drosselklappe, Nebenluft, verstopfter Kraftstofffilter</li>
+      <li>Vorgehen: zuerst Fehlerspeicher auslesen (auch Sporadische/History), dann Fuel-Trims im Livedaten-Modus unter Last beobachten, danach gezielt Zündung/Einspritzung eingrenzen</li>
+      <li>Bei Automatik zusätzlich: Wandlerüberbrückungskupplung (Schlupf) als Ursache für last-abhängiges Ruckeln in Betracht ziehen</li>
+    </ul>` },
+  { match:/kaltstart.*(problem|schwer|schlecht)|startprobleme.*kälte|kälte.*startproblem/i, reply:`<b>Startprobleme bei Kälte – Diagnoseansatz</b><ul>
+      <li>Diesel: Glühkerzen/Glühzeitsteuergerät prüfen (Vorglühzeit, Anzahl defekter Kerzen per Stromzangenmessung), Kompression bei Verdacht auf Motoralter</li>
+      <li>Benziner: Batteriezustand/Kaltstartstrom, Zündkerzen-Zustand, Kraftstoffdruckhaltung über Nacht (Standdruck-Abfall = undichtes Rückschlagventil/Injektor)</li>
+      <li>Bei beiden: Kühlmitteltemperatursensor-Plausibilität prüfen (falscher Wert → falsches Kaltstart-Kennfeld)</li>
+      <li>Symptom "dreht durch, springt aber nicht an" bei Kälte spricht eher für Kraftstoff/Zündung als für den Anlasser selbst</li>
+    </ul>` },
+  { match:/quietscht|pfeift(?!.*bremse)|zischt.*motor/i, reply:`<b>Quietschen/Pfeifen/Zischen – Geräusch eingrenzen</b><ul>
+      <li>Hochfrequentes Quietschen beim Start/Kaltlauf: meist Keilrippenriemen (Spannrolle/Riemenscheiben-Fluchtung prüfen)</li>
+      <li>Pfeifen unter Last/bei Gas: Hinweis auf Unterdruck-/Ladeluftleck (Schläuche, Ladeluftkühler, Turboladerdichtungen)</li>
+      <li>Zischen aus dem Motorraum bei laufendem Motor: Abgasleck (Krümmerdichtung) oder Vakuumleck am Bremskraftverstärker</li>
+      <li>Vorgehen: Geräusch bei stehendem Fahrzeug mit Stethoskop/Hörrohr lokalisieren, danach gezielt Bauteil prüfen statt auf Verdacht tauschen</li>
+    </ul>` },
+  { match:/vibriert|vibration.*(fahrt|tempo|geschwindigkeit|km\/h)/i, reply:`<b>Vibration bei bestimmter Geschwindigkeit – Diagnoseansatz</b><ul>
+      <li>Vibration tempoabhängig (nicht drehzahlabhängig) → meist Rad/Reifen: Unwucht, Reifenschaden, Felge verzogen</li>
+      <li>Vibration beim Bremsen: Bremsscheibe verzogen (Scheibendickenschwankung)</li>
+      <li>Vibration nur bei Beschleunigung/Last, unabhängig vom Tempo: Antriebswelle/Gelenkwelle (Gummilager, Gleichlaufgelenk) oder Motorlager</li>
+      <li>Vorgehen: Probefahrt mit Zuordnung Lenkrad (Vorderachse) vs. Sitz/Karosserie (Hinterachse/Antriebsstrang), danach gezielt Rad tauschen/Unwucht prüfen zur Eingrenzung</li>
+    </ul>` },
+  { match:/automatik.*(ruckelt|hart|schaltruck)|schaltruck|getriebe.*ruckelt/i, reply:`<b>Automatikgetriebe ruckelt/schaltet hart – Diagnoseansatz</b><ul>
+      <li>Getriebeöl-Zustand und -Stand prüfen (verbranntes/dunkles Öl, falscher Füllstand sehr häufige Ursache)</li>
+      <li>Fehlerspeicher Getriebesteuergerät separat auslesen (oft eigenes Modul, nicht immer über Standard-OBD sichtbar)</li>
+      <li>Adaptionswerte/Anlernung: nach Ölwechsel oder Batterietrennung ggf. Getriebeadaption zurückgesetzt – Anlernfahrt nach Herstellervorgabe nötig</li>
+      <li>Hartes Schalten nur kalt, normal warm: meist unkritisch (Ölviskosität) – nur warm hart/ruckelnd: eher Kupplungspaket/Wandler-Thema</li>
+    </ul>` },
+  { match:/verkokung|einlassventile.*verkokt|carbon.*ventile|ventile.*(verkokt|verrußt)/i, reply:`<b>Verkokung der Einlassventile bei Direkteinspritzern – bekanntes Serienthema</b><ul>
+      <li>Betrifft v.a. Benzin-Direkteinspritzer (FSI/TSI/TFSI, viele BMW-N-Motoren, u.a.): Kraftstoff spült bei Saugrohreinspritzung die Ventile, bei Direkteinspritzung fehlt dieser Reinigungseffekt</li>
+      <li>Anzeichen: Leistungsverlust, unruhiger Leerlauf, erhöhter Kraftstoffverbrauch, teils Zündaussetzer bei starker Verkokung</li>
+      <li>Diagnose: Endoskopie durch die Zündkerzenbohrung zur Sichtprüfung der Einlassventile</li>
+      <li>Reparatur: Walnussschalen-Strahlen (Soda-/Walnuss-Reinigung) der Ventile bei ausgebautem Ansaugtrakt; vorbeugend: hochwertigen Kraftstoff, regelmäßige Additiv-Reinigung</li>
+    </ul>` },
+  { match:/kettenlängung|steuerkette.*(gelängt|verschleiß)(?!.*n47)/i, reply:`<b>Steuerkettenlängung – allgemeines Diagnoseprinzip (motorunabhängig)</b><ul>
+      <li>Kette "längt" sich durch Verschleiß an Bolzen/Buchsen, nicht durch tatsächliche Materialdehnung – Kettenspanner gleicht das bis zu einem Grenzwert aus</li>
+      <li>Typisches Symptom: Rasseln/Klappern im Kaltstart (kurz, dann leiser durch Öldruckaufbau am Spanner)</li>
+      <li>Diagnose: Nockenwellen-/Kurbelwellen-Sensorkorrelation im Diagnosegerät prüfen (Phasenabweichung = Indiz für gelängte Kette)</li>
+      <li>Wichtig: motorspezifische Ausfallmuster (z.B. bestimmte Baureihen) gesondert nachschlagen – Ausfallzeitpunkt/Kilometerlaufleistung variiert stark je Motor</li>
+    </ul>` },
+  /* ===== Komponentenwissen & Sensorik ===== */
+  { match:/hallgeber|induktivgeber|kurbelwellensensor.*(typ|unterschied)|nockenwellensensor.*(typ|unterschied)/i, reply:`<b>Hall- vs. Induktivgeber (Kurbel-/Nockenwellensensor)</b><ul>
+      <li>Induktivgeber (passiv, 2-Draht): erzeugt Wechselspannung durch Zahnrad-Vorbeibewegung, Signalamplitude drehzahlabhängig, im Stillstand kein Signal messbar</li>
+      <li>Hallgeber (aktiv, 3-Draht: Versorgung/Masse/Signal): liefert Rechtecksignal, auch bei sehr niedriger Drehzahl/Stillstand auswertbar (wichtig fürs Anlassen)</li>
+      <li>Prüfung Induktivgeber: Widerstandsmessung an den beiden Signalleitungen (Sollwert laut Hersteller, üblich einige hundert Ohm bis ca. 1–2 kΩ) plus Oszilloskop-Signalform (sauberer Sinus)</li>
+      <li>Prüfung Hallgeber: Versorgungsspannung am Stecker prüfen, dann Rechtecksignal am Oszilloskop bei Motor durchdrehen</li>
+    </ul>` },
+  { match:/lambdasonde|breitbandsonde|sprungsonde/i, reply:`<b>Breitband- vs. Sprung-Lambdasonde</b><ul>
+      <li>Sprungsonde (Zirkondioxid): springt sprunghaft zwischen ca. 0,1 V (mager) und 0,9 V (fett) um Lambda=1 – nur Aussage "zu fett/zu mager", kein genauer Wert</li>
+      <li>Breitbandsonde (Planarsonde, meist 5–6 Leitungen): liefert stufenlosen Strom-/Spannungswert proportional zum tatsächlichen Lambda-Wert, auch weit von Lambda=1 entfernt messbar (wichtig für Direkteinspritzer/Magerbetrieb)</li>
+      <li>Position: Sprungsonde meist hinter Kat (Diagnosesonde), Breitbandsonde vor Kat (Regelsonde)</li>
+      <li>Diagnosehinweis: träge reagierende Sonde (verzögerte Spannungswechsel) = klassisches Alterungssymptom, oft mit P0420/P0430 verwechselt</li>
+    </ul>` },
+  { match:/piezo.*injektor|magnetventil.*injektor|injektor.*(typ|unterschied)/i, reply:`<b>Piezo- vs. Magnetventil-Injektoren</b><ul>
+      <li>Magnetventil-Injektor: klassische Bauart, Schaltzeiten im Bereich einiger hundert Mikrosekunden, robuster/günstiger, etwas trägere Ansteuerung</li>
+      <li>Piezo-Injektor: Piezokristall dehnt sich unter Spannung, extrem schnelle Schaltzeiten (Mehrfacheinspritzung präziser möglich), typisch bei modernen Common-Rail-Dieseln und einigen Benzin-Direkteinspritzern</li>
+      <li>Diagnose gemeinsam: Stromzangenmessung am Injektor-Steuersignal zeigt Ansteuerungsmuster; Mengenabgleich-Werte im Diagnosegerät je Zylinder vergleichen (Ausreißer = Injektor-Verdacht)</li>
+      <li>Wichtig: Piezo-Injektoren reagieren empfindlicher auf Kraftstoffverunreinigung – bei Tausch grundsätzlich Kraftstoffsystem auf Verschmutzung prüfen</li>
+    </ul>` },
+  { match:/agr.*(diagnose|prüfen|klappe|system)|egr.*(diagnose|prüfen)/i, reply:`<b>AGR/EGR-System – Diagnose ohne konkreten Fehlercode</b><ul>
+      <li>Funktion: führt Abgas zurück in den Ansaugtrakt, senkt Verbrennungstemperatur, reduziert Stickoxide (NOx)</li>
+      <li>Typische mechanische Symptome: AGR-Ventil hängt (verkokt) → unruhiger Leerlauf, Leistungsverlust, oder hängt offen → mageres Gemisch/Startprobleme</li>
+      <li>Prüfung: Ansteuerung im Diagnosegerät aktivieren (Stellgliedtest) und Klappenbewegung/Ansaugdruckänderung beobachten; bei elektrischem AGR-Ventil zusätzlich Potentiometer-Rückmeldung live prüfen</li>
+      <li>Sichtprüfung: Ventil ausbauen, Verkokungsgrad beurteilen – bei Diesel meist deutlich stärker verkokt als bei Benziner</li>
+    </ul>` },
+  { match:/\bdpf\b|partikelfilter|russpartikelfilter/i, reply:`<b>DPF (Dieselpartikelfilter) – Regenerationsbedingungen</b><ul>
+      <li>Aktive Regeneration wird vom Steuergerät eingeleitet, wenn Beladung (Differenzdrucksensor + Ruß-Modell) einen Schwellwert erreicht – meist alle paar hundert km</li>
+      <li>Voraussetzungen für erfolgreiche Regeneration: Motor auf Betriebstemperatur, längere Fahrt mit gleichmäßiger Last (Autobahn/Landstraße), ausreichend Kraftstoff im Tank</li>
+      <li>Häufige Ursache für DPF-Probleme: reine Kurzstreckenfahrten verhindern Regeneration → Filter läuft voll, Warnleuchte, im Extremfall Leistungsreduzierung</li>
+      <li>Diagnose: Beladungswert und Anzahl fehlgeschlagener Regenerationen im Diagnosegerät auslesen, vor Filtertausch immer Ursache (z.B. Injektor, AGR, Ölverdünnung) mitprüfen</li>
+    </ul>` },
+  { match:/adas|kamera.*kalibrier|radar.*kalibrier|lenkwinkelsensor/i, reply:`<b>ADAS-Kalibrierung (Kamera/Radar) &amp; Lenkwinkelsensor – Grundprinzip</b><ul>
+      <li>Nach Arbeiten mit Bezug zu Achsgeometrie, Windschutzscheibentausch, Stoßfängerarbeiten oder Batterietrennung ist eine Neukalibrierung der Fahrerassistenzsysteme oft zwingend vorgeschrieben</li>
+      <li>Statische Kalibrierung: Kalibriertafeln in exakt definiertem Abstand/Winkel vor dem Fahrzeug, Fahrzeug muss eben und exakt ausgerichtet stehen</li>
+      <li>Dynamische Kalibrierung: Kalibrierfahrt unter definierten Bedingungen (Geschwindigkeit, Fahrbahnmarkierungen, Diagnosegerät verbunden)</li>
+      <li>Lenkwinkelsensor-Anlernen: nach Reparaturen an Lenkung/Achsgeometrie zwingend, sonst fehlerhafte ESP-/Spurhalteassistent-Funktion – Ablauf grundsätzlich: Lenkung auf Geradeausstellung, Anlernvorgang über Diagnosegerät starten, danach Prüffahrt</li>
+    </ul>` },
+  /* ===== Anlernprozeduren – allgemeine Grundprinzipien ===== */
+  { match:/drosselklappe.*anlernen|drosselklappenanpassung/i, reply:`<b>Drosselklappen-Anlernen – Grundprinzip</b><ul>
+      <li>Nötig nach: Drosselklappentausch, Reinigung, Batterietrennung oder Fehlercode-Löschung bei elektronischer Drosselklappe (E-Gas)</li>
+      <li>Ablauf grundsätzlich: Zündung ein (Motor aus), Anlernvorgang über Diagnosegerät starten, Steuergerät fährt die Klappe selbstständig an Anschläge und lernt Grundstellung/Endanschläge</li>
+      <li>Nach dem Anlernen: Leerlaufverhalten und Gasannahme im Livedaten-Modus prüfen, Probefahrt zur Kontrolle</li>
+      <li>Ohne korrektes Anlernen drohen: unruhiger Leerlauf, Notlaufprogramm, ruckartige Gasannahme</li>
+    </ul>` },
+  { match:/batterie.*(anlernen|registrierung|registrieren|codieren)|neue batterie.*(agm|efb)|agm.*batterie|efb.*batterie/i, reply:`<b>Batterie-Anlernen/Registrierung (Batteriemanagement)</b><ul>
+      <li>Grundprinzip: viele Fahrzeuge mit intelligentem Batteriemanagement (Batteriesensor/BMS) müssen nach Batterietausch über das Diagnosegerät die neue Batterie "anmelden" – sonst rechnet das System weiter mit dem alten Alterungszustand</li>
+      <li>Folgen bei fehlender Registrierung: falsches Lademanagement, ggf. verkürzte Batterielebensdauer, Start-Stopp-Funktion kann deaktiviert bleiben</li>
+      <li>AGM- vs. EFB-Batterie: AGM (meist bei Start-Stopp mit Rekuperation) hat höhere Zyklenfestigkeit als EFB – beim Tausch grundsätzlich denselben Batterietyp wie Original verwenden, sonst Ladestrategie/BMS-Fehlanpassung möglich</li>
+      <li>Ablauf grundsätzlich: Batteriekapazität (Ah) und -typ im Diagnosegerät hinterlegen, Anlernvorgang bestätigen</li>
+    </ul>` },
+  { match:/dpf.*rückstellung|russfilter.*(getauscht|zurücksetzen)|servicereset.*dpf/i, reply:`<b>DPF-Rückstellung nach Filtertausch – Grundprinzip</b><ul>
+      <li>Nach mechanischem DPF-Tausch muss der Beladungswert/Servicezähler im Steuergerät zurückgesetzt werden, sonst rechnet das System mit dem alten (vollen) Beladungsstand weiter</li>
+      <li>Ablauf grundsätzlich: über Diagnosegerät "Bauteil ersetzt"-Funktion oder gezielten Servicereset für den Partikelfilter auswählen und bestätigen</li>
+      <li>Wichtig: unterscheiden zwischen reinem Reset (nach Tausch) und aktiver Zwangsregeneration (bei zugesetztem, aber noch verbautem Filter) – unterschiedliche Menüpunkte im Diagnosegerät</li>
+    </ul>` },
+  { match:/epb.*(service|wartung)|elektrische parkbremse.*(service|wartung|zurückfahren)|bremsenentlüftung.*diagnose/i, reply:`<b>EPB (Elektrische Parkbremse) in Servicestellung / Diagnose-Bremsenentlüftung</b><ul>
+      <li>Vor Arbeiten an Bremsbelägen/Bremssattel bei elektrischer Parkbremse: Kolben müssen über Diagnosegerät in Service-/Wartungsposition zurückgefahren werden (nicht mechanisch gewaltsam zurückdrücken)</li>
+      <li>Nach Arbeiten: Anlernvorgang/Grundeinstellung über Diagnosegerät, danach Funktionstest (Anziehen/Lösen) vor der ersten Fahrt</li>
+      <li>Bremsenentlüftung per Diagnosegerät: bei modernen Systemen (v.a. mit ESP-Pumpe im Kreislauf) ist eine softwaregestützte Entlüftungsroutine oft vorgeschrieben, rein manuelles Pedal-Pumpen reicht nicht sicher aus</li>
+      <li>Sicherheitshinweis: Fahrzeug bei EPB-Arbeiten gegen Wegrollen zusätzlich mechanisch sichern (Unterlegkeile), da die elektrische Bremse während der Arbeit ausgehängt ist</li>
+    </ul>` },
+  { match:/p0401/i, reply:`<b>P0401 – AGR-System, unzureichender Durchfluss</b><ul>
+      <li>Mögliche Ursache: AGR-Ventil verkokt oder klemmt</li>
+      <li>Reparatur: AGR-Ventil ausbauen, reinigen oder ersetzen</li>
+      <li>Benötigte Teile: AGR-Ventil, Dichtsatz</li>
+      <li>Arbeitszeit: ca. 1,5 Std.</li>
+      <li>Hinweis: nach Reparatur Fehlerspeicher löschen &amp; Probefahrt</li>
+    </ul>` },
+  { match:/klackert|klacker|geräusch/i, reply:`<b>Klackern im Fahrwerksbereich – typische Ursachen</b><ul>
+      <li>Koppelstange Stabilisator ausgeschlagen</li>
+      <li>Federbeinlager defekt</li>
+      <li>Achsmanschette gerissen</li>
+      <li>Prüfung: Sichtprüfung + Abklopfen bei angehobener Achse</li>
+      <li>Arbeitszeit Koppelstange: ca. 0,5 Std. je Seite</li>
+    </ul>` },
+  { match:/bremse|bremsen/i, reply:`<b>Bremsenprüfung – Richtwerte</b><ul>
+      <li>Mindestbelagstärke: 2 mm</li>
+      <li>Anzugsdrehmoment Radschrauben: meist 100–140 Nm (Herstellerangabe beachten)</li>
+      <li>Nach Belagwechsel: Bremse mehrfach betätigen, Probefahrt mit Bremstest</li>
+    </ul>` },
+  { match:/öl|oel/i, reply:`<b>Ölwechsel – Standardablauf</b><ul>
+      <li>Motor auf Betriebstemperatur bringen</li>
+      <li>Altöl ablassen, Ölfilter wechseln</li>
+      <li>Neues Öl nach Herstellerfreigabe einfüllen</li>
+      <li>Ölstand nach 5 Minuten Wartezeit kontrollieren</li>
+    </ul>` },
+  { match:/p0300|zündaussetzer|verbrennungsaussetzer/i, reply:`<b>P0300 – Zündaussetzer (mehrere Zylinder)</b><ul>
+      <li>Mögliche Ursachen: Zündkerzen verschlissen, Zündspule defekt, Kraftstoffzufuhr mangelhaft</li>
+      <li>Prüfung: Zylinderindividuelle Aussetzererkennung im Diagnosegerät auslesen</li>
+      <li>Reparatur: Zündkerzen/-spulen tauschen, Kompression prüfen wenn Ursache unklar</li>
+      <li>Hinweis: bei Ruckeln unter Last zusätzlich Kraftstoffdruck prüfen</li>
+    </ul>` },
+  { match:/p0420|katalysator|kat\b/i, reply:`<b>P0420 – Katalysator-Wirkungsgrad unter Schwelle</b><ul>
+      <li>Mögliche Ursachen: Katalysator gealtert/beschädigt, vorgelagerte Lambdasonde defekt, Abgasleck vor Sonde</li>
+      <li>Prüfung: beide Lambdasonden-Signale vergleichen, Abgasanlage auf Undichtigkeiten prüfen</li>
+      <li>Reparatur: erst Sonden/Dichtigkeit prüfen, Katalysator nur bei bestätigtem Defekt tauschen</li>
+    </ul>` },
+  { match:/p0171|p0174|gemisch.*mager|mager.*gemisch/i, reply:`<b>P0171/P0174 – Gemisch zu mager</b><ul>
+      <li>Mögliche Ursachen: Nebenluft (undichter Ansaugtrakt), verschmutzter Luftmassenmesser, schwache Kraftstoffpumpe</li>
+      <li>Prüfung: Rauchtest Ansaugtrakt, Luftmassenmesser reinigen/prüfen, Kraftstoffdruck messen</li>
+      <li>Hinweis: Bank 1 = Zylinder mit Zylinder 1, Bank 2 = gegenüberliegende Bank bei V-Motoren</li>
+    </ul>` },
+  { match:/p0128|thermostat|kühlmitteltemperatur/i, reply:`<b>P0128 – Kühlmitteltemperatur unterhalb Regelwert</b><ul>
+      <li>Mögliche Ursache: Thermostat klemmt offen</li>
+      <li>Prüfung: Warmlaufverhalten beobachten, Motor erreicht Betriebstemperatur nicht in erwarteter Zeit</li>
+      <li>Reparatur: Thermostat ersetzen, danach Kühlsystem entlüften</li>
+    </ul>` },
+  { match:/batterie|starthilfe/i, reply:`<b>Batterie &amp; Starthilfe</b><ul>
+      <li>Ruhestrom prüfen (Sollwert meist &lt; 50 mA, Herstellerangabe beachten)</li>
+      <li>Batterietest: Ladezustand + Kaltstartstrom (CCA) mit Batterietester prüfen</li>
+      <li>Starthilfe: Plus zuerst an leere Batterie, Minus an Massepunkt (nicht direkt an leere Batterie), Reihenfolge beim Abklemmen umgekehrt</li>
+      <li>Nach Batterietausch: Anlernvorgang/Registrierung bei vielen Fahrzeugen nötig (Batteriemanagement)</li>
+    </ul>` },
+  { match:/zahnriemen|steuerriemen|zahnriemenwechsel/i, reply:`<b>Zahnriemen/Steuerriemen – Wechsel</b><ul>
+      <li>Wechselintervall herstellerspezifisch, üblich 60.000–160.000 km oder 5–10 Jahre</li>
+      <li>Bei Wechsel: Wasserpumpe, Spannrolle &amp; Umlenkrolle mittauschen (Satz)</li>
+      <li>Bei Riss/Sprung: Zylinderkopfschaden möglich (Ventilschäden bei Interferenzmotor prüfen)</li>
+      <li>Nach Einbau: Steuerzeiten mit Werkzeugsatz exakt nach Herstellervorgabe fixieren</li>
+    </ul>` },
+  { match:/kupplung/i, reply:`<b>Kupplung – Verschleißanzeichen</b><ul>
+      <li>Rutschen: Motordrehzahl steigt ohne entsprechenden Vortrieb, v.a. bei Last/Steigung</li>
+      <li>Rupfen beim Anfahren: Mitnehmerscheibe verölt oder verschlissen</li>
+      <li>Kupplungspedal-Spiel/Geräusche: Ausrücklager prüfen</li>
+      <li>Arbeitszeit Kupplungssatz: stark modellabhängig (oft 3–6 Std., Getriebeausbau nötig)</li>
+    </ul>` },
+  { match:/klima|klimaanlage|klimaservice/i, reply:`<b>Klimaanlage/Klimaservice</b><ul>
+      <li>Klimaservice: Kältemittel absaugen, Anlage auf Dichtigkeit prüfen, evakuieren, neu befüllen (Menge nach Herstellerangabe)</li>
+      <li>Kältemitteltyp beachten: R134a oder R1234yf – nicht verwechseln</li>
+      <li>Schwacher Kühleffekt: meist Kältemittelverlust durch Leckage, UV-Kontrastmittel zur Lecksuche nutzen</li>
+      <li>Unangenehmer Geruch: Verdampfer-/Innenraumfilter prüfen, ggf. Klimaanlagen-Desinfektion</li>
+    </ul>` },
+  { match:/zündkerze/i, reply:`<b>Zündkerzenwechsel</b><ul>
+      <li>Wechselintervall: meist 30.000–60.000 km (Iridium/Platin-Kerzen auch deutlich länger), Herstellerangabe beachten</li>
+      <li>Elektrodenabstand vor Einbau prüfen (falls nicht vorjustiert)</li>
+      <li>Anzugsdrehmoment beachten – nicht überdrehen (Gewindeschaden im Zylinderkopf möglich)</li>
+      <li>Zündspule bei Wechsel auf Risse/Ölspuren im Kerzenschacht prüfen</li>
+    </ul>` },
+  { match:/kühlmittel|kühlwasser|kühlsystem/i, reply:`<b>Kühlmittel wechseln</b><ul>
+      <li>Kühlsystem drucklos machen, Altkühlmittel vollständig ablassen (auch Motorblock-Ablassschraube falls vorhanden)</li>
+      <li>Nur freigegebenes Kühlmittel-Konzentrat mischen (Frostschutz i.d.R. bis -25°C bis -35°C je nach Klima)</li>
+      <li>Nach Befüllung: System entlüften (Entlüftungsschraube/-ventil), Motor mit offenem Deckel/Ventil warmlaufen lassen</li>
+      <li>Kühlmittelstand nach Abkühlen erneut kontrollieren</li>
+    </ul>` },
+  { match:/bremsflüssigkeit|dot\s?4|dot\s?3/i, reply:`<b>Bremsflüssigkeit wechseln</b><ul>
+      <li>Wechselintervall: meist alle 2 Jahre unabhängig vom Kilometerstand (Wasseraufnahme durch Hygroskopie)</li>
+      <li>Nur freigegebene Spezifikation verwenden (meist DOT 4, Herstellerangabe beachten)</li>
+      <li>Reihenfolge beim Entlüften: vom Rad mit dem längsten Bremsleitungsweg zum kürzesten (meist hinten rechts → vorne links)</li>
+      <li>Nach Wechsel: Bremspedalgefühl und Dichtigkeit prüfen</li>
+    </ul>` },
+  { match:/stoßdämpfer|fahrwerk/i, reply:`<b>Stoßdämpfer/Fahrwerk prüfen</b><ul>
+      <li>Sichtprüfung: Ölaustritt am Dämpfer = Defekt, immer achsweise (paarweise) tauschen</li>
+      <li>Funktionstest: Fahrzeugecke eindrücken – schwingt sie mehr als 1–1,5x nach, Dämpfer verschlissen</li>
+      <li>Begleitend prüfen: Domlager, Federn auf Setzung/Bruch, Koppelstangen</li>
+    </ul>` },
+  { match:/achsvermessung|spur\b|spureinstellung/i, reply:`<b>Achsvermessung/Spureinstellung</b><ul>
+      <li>Vorher prüfen: Reifendruck korrekt, Fahrwerk unbeschädigt, Fahrzeug auf Nennlast/-beladung</li>
+      <li>Typische Ursache für einseitigen Verschleiß: Spur oder Sturz außerhalb Toleranz</li>
+      <li>Nach Fahrwerksarbeiten (Federn, Querlenker, Spurstangen) immer Achsvermessung empfehlen</li>
+    </ul>` },
+  { match:/hu\b|au\b|tüv|hauptuntersuchung/i, reply:`<b>HU/AU-Vorbereitung (TÜV)</b><ul>
+      <li>Prüfpunkte vorab checken: Beleuchtung, Bremsen, Reifenprofil (min. 1,6 mm, empfohlen mehr), Abgaswerte</li>
+      <li>Fälligkeitsplakette am Kennzeichen kontrollieren, mit next_service_date im Auftrag abgleichen</li>
+      <li>Häufige Mängel: Bremsscheiben korrodiert, Ölundichtigkeiten, defekte Beleuchtung, Achsspiel</li>
+      <li>Bei Mängeln: Frist zur Nachbesserung beachten (i.d.R. 1 Monat für Nachprüfung)</li>
+    </ul>` },
+  { match:/adblue/i, reply:`<b>AdBlue/SCR-System</b><ul>
+      <li>Warnmeldung "Restreichweite" ernst nehmen – bei leerem Tank verweigert der Motor nach Fahrtende den Neustart</li>
+      <li>Nur AdBlue nach ISO 22241 verwenden (32,5% Harnstofflösung), Verunreinigung vermeiden</li>
+      <li>Fehlercodes im SCR-System: oft Dosierventil, NOx-Sensor oder Tankheizung betroffen</li>
+    </ul>` },
+  { match:/anlasser|springt nicht an|startet nicht/i, reply:`<b>Anlasser/Startprobleme</b><ul>
+      <li>Kein Geräusch beim Startversuch: Batterie, Massepunkte, Zündschloss/Starterrelais prüfen</li>
+      <li>Klacken ohne Durchdrehen: Anlasser-Magnetschalter oder Ritzel defekt, oder Batterie zu schwach</li>
+      <li>Motor dreht durch, springt aber nicht an: Kraftstoffversorgung, Zündung, Wegfahrsperre prüfen</li>
+    </ul>` },
+  { match:/lichtmaschine|generator|ladekontrolle/i, reply:`<b>Lichtmaschine/Ladeproblem</b><ul>
+      <li>Ladekontrollleuchte an bei laufendem Motor: Ladespannung messen (Sollwert meist 13,5–14,8 V)</li>
+      <li>Mögliche Ursachen: Keilrippenriemen gerissen/rutscht, Lichtmaschine oder Regler defekt</li>
+      <li>Batterie entlädt sich trotz Fahrbetrieb: auf jeden Fall vor Batterietausch die Ladeleistung prüfen</li>
+    </ul>` },
+  { match:/scheibenwischer|scheibenwaschanlage/i, reply:`<b>Scheibenwischer/Scheibenwaschanlage</b><ul>
+      <li>Schlierenbildung: Wischerblätter tauschen, Scheibe vorher fettfrei reinigen</li>
+      <li>Waschanlage fördert nicht: Pumpe, Düsen (verstopft) und Sicherung prüfen</li>
+      <li>Bei Frost: nur frostsicheres Scheibenreinigungsmittel verwenden (Frostschutzgrad prüfen)</li>
+    </ul>` },
+  { match:/auspuff|abgasanlage|rauch\b/i, reply:`<b>Auspuff/Abgasanlage – Rauchfarben-Diagnose</b><ul>
+      <li>Blauer Rauch: Motor verbrennt Öl (Kolbenringe/Ventilschaftdichtungen)</li>
+      <li>Weißer Rauch (dauerhaft, nicht nur Kondenswasser): Kühlmittel gelangt in Brennraum (Zylinderkopfdichtung)</li>
+      <li>Schwarzer Rauch: Gemisch zu fett, oft Einspritzung oder Luftfilter betroffen</li>
+      <li>Zusätzlich: Anlage auf Durchrostung/Undichtigkeiten und Aufhängung prüfen</li>
+    </ul>` },
+  { match:/n47.*(steuerkette|kette)|steuerkette.*n47|bmw.*(diesel).*kette/i, reply:`<b>BMW N47 (Diesel) – Steuerkettenverschleiß</b><ul>
+      <li>Betrifft v.a. BMW N47 (2007–2014, 118d/120d/318d/320d u.a.) – Steuerkette liegt motorseitig hinten, sehr aufwendiger Wechsel</li>
+      <li>Anzeichen: Rasseln/Klappern beim Kaltstart, Fehlercode Nockenwellen-/Kurbelwellensensor-Korrelation</li>
+      <li>Bei Kettenriss: Motortotalschaden (Interferenzmotor) möglich – bei Verdacht keine Probefahrt mehr</li>
+      <li>Reparatur: Steuerkettensatz (Kette, Spanner, Führungsschienen) – Motor/Getriebe muss meist abgesenkt werden</li>
+      <li>Arbeitszeit: ca. 8–12 Std. je nach Modell</li>
+    </ul>` },
+  { match:/bmw.*(ventildeckel|öllecl|undicht)|ventildeckeldichtung.*bmw|n52|n54|n55/i, reply:`<b>BMW N52/N54/N55 – Ventildeckeldichtung/Ölundichtigkeit</b><ul>
+      <li>Klassische Ölleckage-Stelle bei vielen BMW-Reihenmotoren: Ventildeckeldichtung wird mit den Jahren spröde</li>
+      <li>Kontrolle: Motor sauber machen, Probefahrt, danach auf frische Ölspuren am Ventildeckel/Zündspulenschächten prüfen</li>
+      <li>Reparatur: Ventildeckeldichtung inkl. Zündspulendichtringe ersetzen</li>
+      <li>Hinweis: Öl in Zündspulenschächten kann Zündaussetzer (P0300er-Codes) verursachen</li>
+    </ul>` },
+  { match:/vanos/i, reply:`<b>BMW VANOS – Nockenwellenverstellung</b><ul>
+      <li>Anzeichen für Defekt: Rasseln im Kaltstart (Rasselgeräusch von vorne am Motor), Leistungsloch im mittleren Drehzahlbereich</li>
+      <li>Häufige Ursache: Magnetventil verschlammt/verklebt (Ölverkokung), Dichtringe am VANOS-Kolben porös</li>
+      <li>Prüfung: VANOS-Solltest per Diagnosegerät, Ölzustand/Ölwechselintervall prüfen</li>
+      <li>Reparatur: VANOS-Magnetventile reinigen/tauschen, bei Verschleiß VANOS-Einheit überholen</li>
+    </ul>` },
+  { match:/bmw.*(wasserpumpe|kühlmittelverlust)|elektrische wasserpumpe/i, reply:`<b>BMW – Elektrische Wasserpumpe</b><ul>
+      <li>Viele BMW-Reihenmotoren (u.a. N20, N51, N52, N54, N55) nutzen eine elektrische Wasserpumpe – typisches Verschleißteil</li>
+      <li>Anzeichen: Temperaturschwankungen, Kühlmittelverlust ohne sichtbares Leck, Fehlercode Kühlmittelpumpe/Regelung</li>
+      <li>Reparatur: Wasserpumpe komplett ersetzen (nicht reparierbar), gleichzeitig Thermostat prüfen</li>
+      <li>Hinweis: nach Tausch Kühlsystem sorgfältig entlüften (BMW-spezifisches Befüllverfahren beachten)</li>
+    </ul>` },
+  { match:/n63|bmw.*v8.*(ölverbrauch|ölverlust)/i, reply:`<b>BMW N63/N63TU (V8) – bekannte Schwachstellen</b><ul>
+      <li>Erhöhter Ölverbrauch: Ventilschaftdichtungen/Kolbenringe – bei manchen Baujahren Kulanz-/Rückrufaktionen möglich, VIN prüfen</li>
+      <li>Abgaskrümmerdichtungen (innenliegend, zwischen den Zylinderbänken) undicht – Ansaugung von Abgas, Klopfgeräusch</li>
+      <li>Hochdruckpumpe und Ladeluftkühler-Kondensat ebenfalls bekannte Ausfallpunkte</li>
+      <li>Empfehlung: Ölstand bei jedem Service besonders im Blick behalten, kurze Ölwechselintervalle einhalten</li>
+    </ul>` },
+  { match:/n54|n55|hochdruckpumpe|hpfp/i, reply:`<b>BMW N54/N55 – Hochdruckpumpe (HPFP)</b><ul>
+      <li>Bekannte Schwachstelle bei Direkteinspritzer-Motoren N54/N55 – Ausfall meist ohne Vorwarnung</li>
+      <li>Anzeichen: Motor startet nicht/stirbt ab, Leistungsverlust, Fehlercode Kraftstoffdruck-Regelabweichung</li>
+      <li>Reparatur: Hochdruckpumpe komplett ersetzen, Kraftstoffdrucksensor mitprüfen</li>
+      <li>Hinweis: bei manchen Modelljahren gab es Werksgarantie-Verlängerung – VIN/Servicehistorie prüfen</li>
+    </ul>` },
+  { match:/e30.*(schaltplan|kabelbaum)|schaltplan.*e30|kabelbaum.*e30|e30.*farbcode|farbcode.*e30/i, reply:`<b>BMW E30 – Schaltplan-Übersicht (Verkabelungsschema)</b><ul>
+      <li>Deckt ab: 3er E30 (316–325i, auch Touring/Cabrio), 5er E28 &amp; E34 als Referenz</li>
+      <li>Farbcodes im Schaltplan: BK=Schwarz, BL=Blau, BR/TN=Braun, GE/Y=Gelb, GN=Grün, GR/GY=Grau, OR=Orange, PK/RS=Rosa, R/RT=Rot, V/VI=Violett, W/WS=Weiß</li>
+      <li>Enthaltene Schaltpläne: Starten/Laden/Hupe/Blinker (S.2) · Scheinwerfer/Nebelscheinwerfer/Innenlicht (S.3) · Check Control/Spiegel/Brems-Parklicht (S.4) · Motronic-Motorsteuerung (S.5–7) · Tempomat (S.8–9) · Zentralverriegelung/Alarm/Bordcomputer/Zusatzheizung/Uhr (S.10–12) · Scheinwerferwaschanlage (S.13–14) · elektrische Fenster (S.15–16) · Klimaanlage/Heizung (S.17–18) · Sitzheizung (S.19–20) · Memory-Sitze (S.21–23) · Sitze ohne Memory (S.24–25) · Radio (S.26–27) · L-Jetronic (S.28)</li>
+      <li>Hinweis: Details (genaue Pinbelegung/Stecker) im hinterlegten PDF-Dokument nachschlagen</li>
+      <li><a href="javascript:void(0)" onclick="openPdfModal(BMW_E30_SCHALTPLAN_PDF,'BMW E30 – Schaltplan (Verkabelungsschema)')" style="color:var(--accent-2);text-decoration:underline;font-weight:600;">&#128196; Komplettes Schaltplan-PDF öffnen</a></li>
+    </ul>` },
+  { match:/e30.*motronic|motronic.*e30/i, reply:`<b>BMW E30 – Motronic-Kabelbaum (Schaltplan S.5–7)</b><ul>
+      <li>Zentrale Steuergeräte-Kennung: 1 = Elektronisches Steuergerät (ESG)</li>
+      <li>Sensoren/Aktoren im Diagramm: Drosselklappenschalter (6), Luftstromsensor (7), Referenzmarkensensor (9), Kraftstoffeinspritzdüsen (25), Kühlmitteltemperatursensor (24), Öldruckschalter (12), elektrische Kraftstoffpumpe (30)</li>
+      <li>Zündung/Start: Zündspule (19), Verteiler (18), Starter (20), Lichtmaschine (21)</li>
+      <li>Diagnose: Diagnoseschaltung (14) am Motorstecker (15)</li>
+    </ul>` },
+  { match:/e30.*(zentralverriegelung|zzv|alarm|bordcomputer)|zentralverriegelung.*e30/i, reply:`<b>BMW E30 – Zentralverriegelung/Alarmanlage/Bordcomputer (Schaltplan S.10–12)</b><ul>
+      <li>Steuereinheit: zentrale Schlosssteuereinheit (4), Steuergerät Einbruchmeldeanlage (27)</li>
+      <li>Verriegelungsmotoren pro Tür einzeln verkabelt: Fahrertür (11), Beifahrertür (15), hintere Türen (21/25), Tankklappe (19), Kofferraum (17)</li>
+      <li>Türkontaktschalter (35–38) und Haubenkontakt (39) laufen zentral auf das Alarmsteuergerät</li>
+      <li>Bordcomputer-Anschluss an Instrumentencluster (61/63), Außentemperatursensor (53) und Digitaluhr (85)</li>
+    </ul>` },
+  { match:/e30.*fensterheber|fensterheber.*e30/i, reply:`<b>BMW E30 – Elektrische Fensterheber (Schaltplan S.15–16)</b><ul>
+      <li>Relais (Pos. 20) versorgt die Fensterheber-Sammelschiene (31I/31II)</li>
+      <li>Motoren einzeln je Tür: vorne links (16), vorne rechts (17), hinten links/rechts über separate Stecker (8/9)</li>
+      <li>Sicherheitsschalter (14) und Kindersicherung (15) unterbrechen bei Bedarf die Steuerleitung</li>
+      <li>Häufige Praxis-Ursache bei Ausfall: Kontaktprobleme an den Fensterheberschaltern oder der Steckverbindung in der Tür (Kabelbruch durch Türbewegung)</li>
+    </ul>` },
+  { match:/e30.*(klimaanlage|klima\b)|klimaanlage.*e30/i, reply:`<b>BMW E30 – Klimaanlage/Heizung (Schaltplan S.17–18)</b><ul>
+      <li>Steuergerät Klimaanlage (16), Schalter Klimaanlage (13)</li>
+      <li>Temperaturschalter zweistufig: 91°C Stufe I (11), 99°C Stufe II (12)</li>
+      <li>Elektromagnetische Kupplung Kompressor (28) wird über Hochdruck-Pressostat (20) abgesichert</li>
+      <li>Zusatzlüfter-Relais Stufe I/II (18/19) je nach Kühlmitteltemperatur</li>
+    </ul>` },
+  { match:/e30.*(sitzheizung|memory.*sitz|sitz.*memory)|sitzheizung.*e30/i, reply:`<b>BMW E30 – Sitzheizung &amp; Memory-Sitze (Schaltplan S.19–23)</b><ul>
+      <li>Sitzheizung: separate Schalter/Relais je Fahrer-/Beifahrerseite (Pos. 3/8), einfacher Stromkreis ohne Steuergerät</li>
+      <li>Memory-Sitze: elektronisches Steuergerät unter dem Sitz (Pos. 14), Speicherschalter (Pos. 25) sichert Rückenlehnen-, Höhen- und Kopfstützenposition</li>
+      <li>Motoren bei Memory-Sitzen: Rückenlehne, Höhe vorne/hinten, Kopfstütze – je eigener Kanal am Steuergerät</li>
+    </ul>` },
+  { match:/e30.*radio|radio.*e30/i, reply:`<b>BMW E30 – Radio-Verkabelung (Schaltplan S.26–27, frühe Modelle)</b><ul>
+      <li>Lautsprecher: vorne links/rechts (Pos. 1/2), hinten links/rechts (Pos. 3/13), Türlautsprecher links/rechts (Pos. 7/8)</li>
+      <li>Verstärker (Pos. 6) sitzt zwischen Radio und Lautsprechern bei entsprechender Ausstattung</li>
+      <li>Stromantenne über eigene Steuerleitung (Pos. 10), Sondergeräte-Stecker RA12 für Nachrüstungen</li>
+    </ul>` },
+  { match:/e30.*(l-jetronic|ljetronic)|l-jetronic.*e30/i, reply:`<b>BMW E30 – L-Jetronic-Kabelbaum (Schaltplan S.28)</b><ul>
+      <li>Einspritzsteuergerät (Pos. 11) verarbeitet Signale von Luftstromsensor (14), Drosselklappenschalter (13), Kühlmittelsensor (10)</li>
+      <li>Kraftstoffpumpenrelais (Pos. 16) schaltet die Kraftstoffpumpe über Motorstecker-Pin C3/C13</li>
+      <li>Zündung: Zündspule (3), Verteiler (2) mit Impulsgeber, Zündmodul (17)</li>
+      <li>Diagnosestecker vorhanden für Fehlerauslesung am Steuergerät</li>
+    </ul>` },
+  { match:/e92.*(hinterachse|differential|subframe)|hinterachse.*e92|subframe.*e92/i, reply:`<b>BMW E92 – Hinterachse/Differential-Aufhängung</b><ul>
+      <li>Bekannte Schwachstelle bei E90/E92/E93: die Differential-Aufnahme kann aus dem Blech der Karosserie ausreißen (v.a. bei sportlicher Fahrweise/Leistungssteigerung)</li>
+      <li>Anzeichen: dumpfes Klonken beim Gasgeben/-wegnehmen aus dem Heckbereich, sichtbare Risse am Blech bei Anhebung</li>
+      <li>Prüfung: Fahrzeug anheben, Differential-Aufnahme und Hinterachsträger-Lagerung auf Risse/Verformung sichtprüfen</li>
+      <li>Reparatur: bei bestätigtem Riss Verstärkungsblech/-kit einschweißen (kein reiner Teiletausch ausreichend)</li>
+    </ul>` },
+  { match:/s65|e92.*m3|m3.*e92|pleuellager/i, reply:`<b>BMW E92 M3 (S65 V8) – Pleuellager-Verschleiß</b><ul>
+      <li>Bekanntes Thema beim S65-V8: erhöhter Verschleiß der Pleuellager, v.a. bei frühen Baujahren (2007–2008)</li>
+      <li>Anzeichen: metallisches Klopfen/Rasseln aus dem Motorblock, oft last-/drehzahlabhängig, Warnleuchte Öldruck möglich</li>
+      <li>Prüfung: unbedingt vor Kauf/nach Auffälligkeit Ölanalyse (Spektralanalyse auf Metallabrieb) und Motor-Abhörtest im Kaltstart</li>
+      <li>Reparatur: bei bestätigtem Verschleiß Pleuellager satzweise tauschen (Motor muss dafür ausgebaut werden) – frühzeitige Diagnose spart Folgeschäden</li>
+    </ul>` },
+  { match:/disa|saugrohrklappe|ansaugbrücke.*rasseln/i, reply:`<b>BMW N52 (u.a. E92 325i/328i/330i) – DISA-Ventil</b><ul>
+      <li>DISA-Ventil (variable Saugrohrgeometrie) klappert im Leerlauf/unteren Drehzahlbereich, wenn die interne Feder bricht oder Lager verschleißen</li>
+      <li>Anzeichen: rasselndes/klackerndes Geräusch aus dem Ansaugbereich, meist bei ca. 2000–4000 U/min am deutlichsten</li>
+      <li>Reparatur: DISA-Ventil-Reparatursatz (Feder+Lager) oder komplettes Ventil tauschen – kein Sicherheitsrisiko, aber Dauerbetrieb kann Kleinteile ins Saugrohr fallen lassen</li>
+    </ul>` },
+  { match:/e92.*fensterheber|one.?touch.*fenster|fensterheber.*(reset|anlernen)/i, reply:`<b>BMW E90/E92 – Fensterheber „One-Touch“-Ausfall</b><ul>
+      <li>Typisches Symptom: Fenster lässt sich nur noch manuell (gehalten) auf/zu fahren, One-Touch-Automatik und Einklemmschutz reagieren nicht mehr</li>
+      <li>Ursache meist: Fensterheber-Steuerung hat die Referenzposition verloren (z.B. nach Batterietrennung oder mechanischem Widerstand)</li>
+      <li>Reparatur: Fensterheber neu anlernen – Fenster von Hand ganz hochfahren, Taste 3× über Anschlag halten (Anlernvorgang), je Tür einzeln wiederholen</li>
+      <li>Bleibt der Fehler bestehen: Fensterheberschalter oder Steuergerät in der Tür prüfen</li>
+    </ul>` },
+  { match:/e92.*(335i|n54).*(ladeluft|y-?rohr|chargepipe)|chargepipe|ladeluftrohr.*riss/i, reply:`<b>BMW E92 335i (N54) – Ladeluftrohr/Chargepipe-Riss</b><ul>
+      <li>Das werksseitige Kunststoff-Ladeluftrohr (Y-Pipe) zwischen den Turboladern neigt bei höherer Ladedrücken/Alterung zum Reißen</li>
+      <li>Anzeichen: spürbarer Leistungsverlust, Fehlercode Ladedruck-Regelabweichung, teils hörbares Zischen unter Last</li>
+      <li>Reparatur: Ladeluftrohr ersetzen – im Nachrüstmarkt sind verstärkte Aluminium-Chargepipes üblich (haltbarer als Original-Kunststoffteil)</li>
+      <li>Zusätzlich prüfen: Wastegate-Rasseln im Leerlauf (separates, bekanntes N54-Thema, meist unkritisch aber hörbar störend)</li>
+    </ul>` },
+];
+/* ---------- ALEX mit KI-Backend (eigener Server, Cloudflare Workers AI, über tabletAction alex_ask) ---------- */
+// Eigene Anfrage-Funktion: ALEX/Reifenscan dürfen NICHT state.writeSupported umschalten,
+// wenn eine neue Aktion (z. B. alex_execute) auf dem Server noch fehlt.
+async function tabletRequest(action, payload, timeoutMs){
+  if(!state.sessionToken) return { ok:false, reason:'nicht angemeldet' };
+  if(navigator.onLine === false) return { ok:false, reason:'offline' };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(()=>controller.abort(), timeoutMs || 30000);
+  const body = { action };
+  Object.entries(payload||{}).forEach(([k,v])=>{ if(v!==null && v!==undefined) body[k]=v; });
+  try{
+    const res = await fetch(BASE44_ACTION_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + state.sessionToken },
+      body: JSON.stringify(body), signal: controller.signal,
+    });
+    const data = await res.json().catch(()=>({}));
+    if(res.status===401){ handleSessionExpired(); return { ok:false, status:401, reason:'Sitzung abgelaufen' }; }
+    const missing = data.error==='unknown_action' || data.error==='not_available' || (res.status===404 && /not found or not deployed/i.test(String(data.message||'')));
+    if(missing) return { ok:false, status:res.status, missing:true, reason:'noch nicht freigeschaltet' };
+    if(isCreditsLimit(data)) return { ok:false, status:res.status, credits:true, reason: CREDITS_MSG };
+    if(data.error==='ai_quota') return { ok:false, status:res.status, quota:true, reason: data.message || 'KI-Tageskontingent aufgebraucht' };
+    if(!res.ok || data.ok===false) return { ok:false, status:res.status, data, reason: data.message || data.error || ('HTTP '+res.status) };
+    return { ok:true, status:res.status, data };
+  }catch(e){
+    return { ok:false, reason: e.name==='AbortError' ? 'Zeitüberschreitung' : 'keine Verbindung' };
+  }finally{ clearTimeout(timeoutId); }
+}
+function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// Klartext-Antwort der KI in einfaches, sicheres HTML umwandeln (Listen, fett, Absätze)
+function formatAlexAnswer(text){
+  const inline = t => escHtml(t)
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+    .replace(/\[Eintrag (\d+)\]/g,'<sup class="alex-ref">[$1]</sup>');
+  const lines = String(text||'').replace(/\r/g,'').split('\n');
+  let html = '', list = null, olNext = 1;
+  const close = ()=>{ if(list){ html += `</${list}>`; list = null; } };
+  lines.forEach(raw=>{
+    const line = raw.trim();
+    if(!line) return; // Leerzeilen trennen keine Listen – sonst beginnt die Nummerierung neu
+    let m;
+    if((m = line.match(/^(\d+)[.)]\s+(.*)$/))){ const n = parseInt(m[1],10); if(list!=='ol'){ close(); if(n===1) olNext = 1; html+=`<ol start="${n||olNext}">`; list='ol'; } olNext = (n||olNext)+1; html += `<li>${inline(m[2])}</li>`; return; }
+    if((m = line.match(/^[-•*]\s+(.*)$/))){ if(list!=='ul'){ close(); html+='<ul>'; list='ul'; } html += `<li>${inline(m[1])}</li>`; return; }
+    if((m = line.match(/^#{1,4}\s+(.*)$/))){ close(); html += `<div class="alex-h">${inline(m[1])}</div>`; return; }
+    close(); olNext = 1; html += `<p>${inline(line)}</p>`;
+  });
+  close();
+  return html;
+}
+const ALEX_LABELS = { customer_name:'Kunde', license_plate:'Kennzeichen', vehicle_brand:'Marke', vehicle_model:'Modell', vin:'FIN', hsn:'HSN', tsn:'TSN',
+  mileage:'Km-Stand', description:'Beschreibung', priority:'Priorität', assigned_mechanic:'Mechaniker', planned_completion:'Fertig geplant',
+  appointment_date:'Datum', time_slot:'Uhrzeit', end_time:'bis', service_name:'Dienstleistung', estimated_duration:'Dauer (Min.)', appointment_type:'Termintyp',
+  part_name:'Teil', part_number:'Teilenummer', quantity:'Menge', supplier_name:'Lieferant', stock_quantity:'Bestand', location:'Lagerort',
+  size:'Größe', season:'Saison', tread_depth:'Profil (mm)', storage_location:'Lagerplatz', status:'Status', phone:'Telefon', email:'E-Mail' };
+function alexLabel(k){ return ALEX_LABELS[k] || k.replace(/_/g,' ').replace(/^./, c=>c.toUpperCase()); }
+function alexPrimitiveRows(obj, max){
+  return Object.entries(obj||{})
+    .filter(([k,v])=> v!==null && v!=='' && typeof v!=='object' && !/(^id$|_id$|_ids$|token|^type$|^title$|^name$|^subtitle$|^level$|photo|_url$|^summary$)/.test(k))
+    .slice(0, max||8)
+    .map(([k,v])=>`<div class="alex-row"><span>${escHtml(alexLabel(k))}</span><b>${escHtml(typeof v==='boolean'?(v?'ja':'nein'):v)}</b></div>`).join('');
+}
+function alexLevelClass(c){
+  const l = String(c.level||c.ampel||c.severity||'').toLowerCase();
+  if(/rot|red|hoch|high|ueberbucht|überbucht|kritisch/.test(l)) return 'lvl-red';
+  if(/gelb|yellow|mittel|medium|knapp|warn/.test(l)) return 'lvl-yellow';
+  if(/gr(ü|ue)n|green|ok|niedrig|low/.test(l)) return 'lvl-green';
+  return '';
+}
+const ALEX_WEEKDAY = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+function alexCardHtml({title, sub, lines, lvl, action}){
+  const btn = action && action.kind==='open_order' && action.order_id && orders.some(o=>o.id===action.order_id)
+    ? `<button class="alex-card-btn" data-alex-open="${escHtml(action.order_id)}">${iconCar} Auftrag öffnen</button>` : '';
+  return `<div class="alex-card ${lvl||''}">${title?`<div class="alex-card-t">${escHtml(title)}</div>`:''}${sub?`<div class="alex-card-s">${escHtml(sub)}</div>`:''}${lines||''}${btn}</div>`;
+}
+function renderAlexCards(cards){
+  if(!Array.isArray(cards) || !cards.length) return '';
+  const out = [], cap = [];
+  cards.forEach(c=>{
+    if(!c || typeof c!=='object' || c.type==='draft') return;
+    if(c.type==='empfehlungen' && Array.isArray(c.items)){
+      c.items.slice(0,8).forEach(it=>out.push(alexCardHtml({ title:it.title, sub:it.detail, lvl: it.priority>=3?'lvl-red':(it.priority==2?'lvl-yellow':''), action:it.action })));
+      return;
+    }
+    if(c.type==='kapazitaet'){ cap.push(c); return; }
+    if(c.type==='kunde' && c.customer){
+      const k = c.customer;
+      const lines = [
+        ...(k.vehicles||[]).map(v=>`<div class="alex-line">${iconCar} ${escHtml(v)}</div>`),
+        k.last_visit ? `<div class="alex-line">Letzter Besuch: ${formatDateDE(k.last_visit)}</div>` : '',
+        k.open_orders ? `<div class="alex-line">Offene Aufträge: ${k.open_orders}</div>` : '',
+        Array.isArray(k.tires)&&k.tires.length ? `<div class="alex-line">${iconTire} ${k.tires.length} Reifensatz/-sätze eingelagert: ${k.tires.map(t=>escHtml([t.season, t.brand, t.storage_location].filter(Boolean).join(' '))).join(' · ')}</div>` : '',
+      ].join('');
+      out.push(alexCardHtml({ title:k.name, sub:k.license_plate, lines, action: (k.open_order_ids||[])[0] ? {kind:'open_order', order_id:k.open_order_ids[0]} : null }));
+      return;
+    }
+    const obj = c.tire || c.reifen || c.part || c.teil || c.customer || c.item || c;
+    out.push(alexCardHtml({ title: obj.title || obj.name || obj.customer_name || obj.part_name || obj.label || '', sub: obj.subtitle || obj.description || obj.detail || obj.summary || obj.message || '', lines: Array.isArray(obj.lines) ? obj.lines.map(l=>`<div class="alex-line">${escHtml(typeof l==='string'?l:(l.text||l.label||''))}</div>`).join('') : alexPrimitiveRows(obj, 6), lvl: alexLevelClass(obj), action: obj.action }));
+  });
+  if(cap.length){
+    out.push(`<div class="alex-cap">${cap.slice(0,7).map(k=>{
+      const d = new Date(k.datum+'T12:00:00'); const lvl = /rot/.test(k.status)?'lvl-red':/gelb/.test(k.status)?'lvl-yellow':'lvl-green';
+      return `<div class="alex-cap-d ${lvl}"><span>${ALEX_WEEKDAY[d.getDay()]} ${d.getDate()}.${d.getMonth()+1}.</span><b>${Math.round(k.pct||0)} %</b><i style="width:${Math.min(100,k.pct||0)}%"></i></div>`;
+    }).join('')}</div>`);
+  }
+  return out.length ? `<div class="alex-cards">${out.join('')}</div>` : '';
+}
+function alexCanWrite(){ return state.currentUser && ['admin','serviceberater'].includes(state.currentUser.role); }
+function renderAlexDraft(draft, idx, m){
+  if(!draft || typeof draft!=='object') return '';
+  const fields = draft.fields || draft.data || draft.order || draft.appointment || draft.part_order || draft;
+  const kindLabel = { order:'Auftrag', auftrag:'Auftrag', appointment:'Termin', termin:'Termin', part_order:'Teilebestellung', teilebestellung:'Teilebestellung' }[String(draft.kind||draft.type||'').toLowerCase()] || 'Entwurf';
+  const warnings = [].concat(draft.warnings||[], draft.capacity && (draft.capacity.message||draft.capacity.warning) ? [draft.capacity.message||draft.capacity.warning] : []).map(w=>typeof w==='string'?w:(w.message||w.text||''));
+  const items = Array.isArray(draft.services) ? draft.services : (Array.isArray(draft.items) ? draft.items : []);
+  let actions;
+  if(m.draftState==='done') actions = `<div class="alex-done">${iconCheck} Angelegt</div>`;
+  else if(m.draftState==='discarded') actions = `<div class="alex-muted">Verworfen</div>`;
+  else if(m.draftState==='busy') actions = `<div class="alex-muted">Wird angelegt…</div>`;
+  else if(!alexCanWrite()) actions = `<div class="alex-muted">Anlegen dürfen Admin und Serviceberater.</div>`;
+  else actions = `<div class="alex-draft-actions"><button class="btn primary" data-alex-exec="${idx}">${iconCheck} Anlegen</button><button class="btn" data-alex-discard="${idx}">Verwerfen</button></div>`;
+  return `<div class="alex-draft">
+    <div class="alex-draft-t">${iconSparkle} ${escHtml(draft.title || kindLabel + ' – bitte prüfen')}</div>
+    ${warnings.map(w=>`<div class="alex-warn">${iconWarn} ${escHtml(w)}</div>`).join('')}
+    <div class="alex-rows">${alexPrimitiveRows(fields, 16)}</div>
+    ${items.length?`<div class="alex-items"><div class="alex-sub">Leistungen</div>${items.map(it=>`<div class="alex-line">• ${escHtml(typeof it==='string'?it:[it.name||it.title||it.description, it.duration?it.duration+' Min':'', it.price!=null?Number(it.price).toLocaleString('de-DE',{style:'currency',currency:'EUR'}):''].filter(Boolean).join(' · '))}</div>`).join('')}</div>`:''}
+    ${(draft.suggested_mechanic||draft.lift_name||draft.planned_completion||draft.estimated_price!=null)?`<div class="alex-rows">
+      ${draft.suggested_mechanic?`<div class="alex-row"><span>Mechaniker</span><b>${escHtml(draft.suggested_mechanic)}</b></div>`:''}
+      ${draft.lift_name?`<div class="alex-row"><span>Bühne</span><b>${escHtml(draft.lift_name)}</b></div>`:''}
+      ${draft.planned_completion?`<div class="alex-row"><span>Fertig geplant</span><b>${escHtml(formatDateTimeDE(draft.planned_completion))}</b></div>`:''}
+      ${draft.estimated_price!=null?`<div class="alex-row"><span>Preis ca.</span><b>${Number(draft.estimated_price).toLocaleString('de-DE',{style:'currency',currency:'EUR'})}</b></div>`:''}
+    </div>`:''}
+    ${draft.capacity && draft.capacity.pct!=null?`<div class="alex-capline ${/rot/.test(draft.capacity.status)?'lvl-red':/gelb/.test(draft.capacity.status)?'lvl-yellow':'lvl-green'}">Auslastung ${draft.capacity.datum?formatDateDE(draft.capacity.datum):''}: ${Math.round(draft.capacity.pct)} %</div>`:''}
+    ${m.draftError?`<div class="alex-warn">${iconWarn} ${escHtml(m.draftError)}</div>`:''}
+    ${actions}
+    <div class="alex-hint">ALEX schlägt vor – angelegt wird erst nach deiner Bestätigung.</div>
+  </div>`;
+}
+let alexBusy = false;
+let alexCtxOrderId = null;      // gesetzt über „ALEX fragen“ im Auftrag
+let alexCtxCleared = false;     // Nutzer hat den Fahrzeugkontext entfernt
+function alexCurrentOrder(){
+  if(alexCtxCleared) return null;
+  const id = alexCtxOrderId || (state.mainView==='auftraege' ? state.selectedOrderId : null);
+  return id ? orders.find(o=>o.id===id) || null : null;
+}
+const ALEX_CHIPS = ['Was steht heute an?','Fehlercode P0401','Bremsbeläge auf Lager?','Wie voll sind wir Freitag?'];
+function renderAiPanel(){
+  const panel = document.getElementById('aiPanel');
+  const ctx = alexCurrentOrder();
+  panel.innerHTML = `
+    <div class="ai-panel-head">
+      ${alexAvatar(34, { speak: alexBusy })}
+      <div><b>ALEX</b><span>${alexBusy ? '● denkt nach…' : (navigator.onLine===false ? '● offline – lokales Wissen' : '● KI-Assistent')}</span></div>
+      <div class="ai-panel-close" id="aiPanelClose">${iconClose}</div>
+    </div>
+    ${ctx ? `<div class="alex-ctx">${iconCar}<span>Auftrag #${escHtml(ctx.orderNumber)} · ${escHtml(ctx.vehicle)} · ${escHtml(ctx.plate)}</span><button id="alexCtxClear" title="Ohne Fahrzeug fragen">${iconClose}</button></div>` : ''}
+    <div class="ai-panel-body" id="aiPanelBody">
+      ${aiChat.map((m,i)=>`<div class="ai-msg ${m.from==='bot'?'bot':'user'}">${m.text}${m.draft?renderAlexDraft(m.draft,i,m):''}</div>`).join('')}
+      ${aiChat.length<=1 ? `<div class="alex-chips">${ALEX_CHIPS.map(c=>`<button class="alex-chip" data-alex-chip="${escHtml(c)}">${escHtml(c)}</button>`).join('')}</div>` : ''}
+    </div>
+    <div class="ai-panel-input-row">
+      <input class="ai-panel-input" id="aiInput" placeholder="${ctx?'Frag ALEX zu diesem Fahrzeug…':'Frag ALEX…'}" ${alexBusy?'disabled':''}>
+      <button class="ai-panel-send" id="aiSendBtn" ${alexBusy?'disabled':''}>${svg('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>')}</button>
+    </div>
+    <div class="alex-foot">ALEX ist eine KI-Hilfe und ersetzt keine Herstellerdaten.</div>
+  `;
+  const body = document.getElementById('aiPanelBody');
+  if(body) body.scrollTop = body.scrollHeight;
+}
+function openAlexPanel(orderId){
+  alexCtxOrderId = orderId || null;
+  alexCtxCleared = false;
+  document.getElementById('notePanel').style.display='none';
+  renderAiPanel();
+  document.getElementById('aiPanel').style.display='flex';
+  const inp = document.getElementById('aiInput'); if(inp) inp.focus();
+}
+function alexLocalAnswer(q){
+  const hit = AI_KB.find(k=>k.match.test(q));
+  return hit ? hit.reply : null;
+}
+async function aiAsk(prefill){
+  if(alexBusy) return;
+  const input = document.getElementById('aiInput');
+  const q = String(prefill || (input && input.value) || '').trim();
+  if(!q) return;
+  aiChat.push({ from:'user', text: escHtml(q), plain: q });
+  aiChat.push({ from:'bot', text:'<span class="alex-typing"><i></i><i></i><i></i></span>', pending:true });
+  alexBusy = true; renderAiPanel(); alexFabSpeak(true);
+  const ctx = alexCurrentOrder();
+  const messages = aiChat.filter(m=>!m.pending && m.plain).slice(-10).map(m=>({ role: m.from==='user' ? 'user' : 'assistant', content: m.plain }));
+  const r = await tabletRequest('alex_ask', { messages, order_id: ctx ? ctx.id : null }, 60000);
+  aiChat.pop();
+  const local = alexLocalAnswer(q);
+  if(r.ok && r.data && r.data.answer){
+    const d = r.data;
+    let html = formatAlexAnswer(d.answer);
+    html += renderAlexCards(d.cards);
+    // Dokumente aus der lokalen Wissensdatenbank (z. B. E30-Schaltplan) zusätzlich anbieten
+    if(local && /openPdfModal/.test(local)){
+      const links = local.match(/<a [^>]*openPdfModal[^>]*>[\s\S]*?<\/a>/g) || [];
+      if(links.length) html += `<div class="alex-docs">${links.join('<br>')}</div>`;
+    }
+    if(Array.isArray(d.sources) && d.sources.length) html += `<div class="alex-sources">${d.sources.slice(0,3).map((s,i)=>`<span>[${i+1}] ${escHtml(s.title||s)}</span>`).join('')}</div>`;
+    if(d.used_general_knowledge) html += `<div class="alex-general">Allgemeines KI-Wissen – bitte prüfen</div>`;
+    aiChat.push({ from:'bot', text: html, plain: d.answer, draft: d.draft || null });
+  } else if(r.status===429 || /rate|limit|zu viele/i.test(String(r.reason||''))){
+    aiChat.push({ from:'bot', text:'Du hast in dieser Stunde schon viele Fragen gestellt. Bitte versuch es gleich noch einmal.' });
+  } else {
+    const why = r.quota ? 'Das kostenlose KI-Kontingent für heute ist aufgebraucht (ab 2 Uhr nachts wieder da)' : r.missing ? 'ALEX ist auf dem Server noch nicht freigeschaltet' : r.credits ? 'Das KI-Kontingent dieses Monats ist aufgebraucht' : `Keine Verbindung zu ALEX (${escHtml(r.reason||'Fehler')})`;
+    aiChat.push({ from:'bot', text: `<div class="alex-general">${why} – Antwort aus dem lokalen Wissen:</div>` + (local || 'Dazu habe ich lokal nichts hinterlegt. Versuch es mit einem Fehlercode oder Stichwort wie „Bremse“ oder „Öl“.') });
+  }
+  alexBusy = false; alexFabSpeak(false);
+  if(input) input.value = '';
+  renderAiPanel();
+  const inp = document.getElementById('aiInput'); if(inp) inp.focus();
+}
+async function alexExecuteDraft(idx){
+  const m = aiChat[idx];
+  if(!m || !m.draft || m.draftState==='busy' || m.draftState==='done') return;
+  m.draftState = 'busy'; m.draftError = null; renderAiPanel();
+  const r = await tabletRequest('alex_execute', { draft: m.draft }, 30000);
+  if(r.ok){
+    m.draftState = 'done';
+    const what = (r.data && (r.data.message || r.data.summary)) || 'Angelegt.';
+    aiChat.push({ from:'bot', text: `${iconCheck} ${escHtml(what)}` });
+    showUpdateToast('ALEX: ' + what);
+    try{ await loadFromBase44(); renderChrome(); setMainView(state.mainView || 'dashboard'); }catch(_){}
+  } else {
+    m.draftState = null;
+    m.draftError = r.missing ? 'Anlegen über das Tablet ist noch nicht freigeschaltet – bitte im Base44-Dashboard anlegen.' : `Nicht angelegt: ${r.reason}`;
+  }
+  renderAiPanel();
+}
+function handleAlexClick(e){
+  const chip = e.target.closest('[data-alex-chip]');
+  if(chip){ aiAsk(chip.dataset.alexChip); return true; }
+  if(e.target.closest('#alexCtxClear')){ alexCtxCleared = true; alexCtxOrderId = null; renderAiPanel(); return true; }
+  if(e.target.closest('#askAlexOrderBtn')){ openAlexPanel(state.selectedOrderId); return true; }
+  if(e.target.closest('#diagOrderBtn')){ diag.orderId = state.selectedOrderId; setMainView('diagnose'); return true; }
+  const op = e.target.closest('[data-alex-open]');
+  if(op){ state.selectedOrderId = op.dataset.alexOpen; state.detailTab='aufgaben'; document.getElementById('aiPanel').style.display='none'; setMainView('auftraege'); return true; }
+  const ex = e.target.closest('[data-alex-exec]');
+  if(ex){ alexExecuteDraft(parseInt(ex.dataset.alexExec,10)); return true; }
+  const dis = e.target.closest('[data-alex-discard]');
+  if(dis){ const m = aiChat[parseInt(dis.dataset.alexDiscard,10)]; if(m){ m.draftState='discarded'; renderAiPanel(); } return true; }
+  return false;
+}
+
+/* ---------- Portal-Link per E-Mail ---------- */
+async function sendPortalLink(){
+  const o = getSelectedOrder(); if(!o) return;
+  if(!o.email){ showUpdateToast('Beim Kunden ist keine E-Mail-Adresse hinterlegt – Zugangscode bitte direkt weitergeben.'); return; }
+  const btn = document.getElementById('sendPortalBtn'); if(btn){ btn.style.pointerEvents='none'; btn.style.opacity='.6'; }
+  const r = await tabletRequest('send_portal_link', { order_id: o.id }, 20000);
+  if(btn){ btn.style.pointerEvents=''; btn.style.opacity=''; }
+  if(r.ok) showUpdateToast(`Portal-Link gesendet an ${r.data.sent_to || o.email}`);
+  else showUpdateToast({ no_email:'Keine E-Mail-Adresse beim Kunden hinterlegt.', no_portal:'Für diesen Auftrag gibt es noch keinen Portal-Zugang.', forbidden:'Nur Admin und Serviceberater können den Link senden.' }[r.data && r.data.error] || (r.missing ? 'E-Mail-Versand ist noch nicht eingerichtet.' : `Link nicht gesendet (${r.reason}).`));
+}
+
+/* ---------- OBD-Diagnose (ELM327 über Bluetooth LE, Web Bluetooth – iPad: Bluefy-Browser; mit Simulationsmodus) ---------- */
+// Bekannte Funkmodul-Dienste von ELM327-BLE-Adaptern (OBDLink CX / Veepeak BLE+: FFF0, HM-10-Klone: FFE0, Vgate: E781…)
+const OBD_BLE_SERVICES = [0xfff0, 0xffe0, 0x18f0, 'e7810a71-73ae-499d-8c15-faa9aef0c3f2', '6e400001-b5a3-f393-e0a9-e50e24dcca9e'];
+const DTC_TEXT = {
+  P0010:'Nockenwellenverstellung Einlass Bank 1 – Stromkreis', P0011:'Nockenwellenverstellung Einlass Bank 1 – Verstellung zu weit früh',
+  P0016:'Kurbelwelle/Nockenwelle Bank 1 – Lage unplausibel', P0030:'Lambdasonde vor Kat (Bank 1) – Heizung Stromkreis',
+  P0087:'Kraftstoffdruck (Rail) zu niedrig', P0088:'Kraftstoffdruck (Rail) zu hoch', P0093:'Kraftstoffsystem – großes Leck erkannt',
+  P0100:'Luftmassenmesser – Stromkreis', P0101:'Luftmassenmesser – Messbereich/Funktion', P0102:'Luftmassenmesser – Signal zu niedrig',
+  P0106:'Saugrohrdrucksensor – Messbereich/Funktion', P0110:'Ansauglufttemperatursensor – Stromkreis',
+  P0113:'Ansauglufttemperatursensor – Signal zu hoch', P0115:'Kühlmitteltemperatursensor – Stromkreis',
+  P0117:'Kühlmitteltemperatursensor – Signal zu niedrig', P0118:'Kühlmitteltemperatursensor – Signal zu hoch',
+  P0120:'Drosselklappen-/Pedalsensor A – Stromkreis', P0121:'Drosselklappensensor A – Messbereich/Funktion',
+  P0128:'Kühlmitteltemperatur unter Regeltemperatur (Thermostat)', P0130:'Lambdasonde vor Kat (Bank 1) – Stromkreis',
+  P0133:'Lambdasonde vor Kat (Bank 1) – Reaktion zu langsam', P0135:'Lambdasonde vor Kat (Bank 1) – Heizung',
+  P0136:'Lambdasonde nach Kat (Bank 1) – Stromkreis', P0141:'Lambdasonde nach Kat (Bank 1) – Heizung',
+  P0171:'Gemisch zu mager (Bank 1)', P0172:'Gemisch zu fett (Bank 1)', P0174:'Gemisch zu mager (Bank 2)', P0175:'Gemisch zu fett (Bank 2)',
+  P0190:'Kraftstoffdrucksensor (Rail) – Stromkreis', P0201:'Einspritzventil Zylinder 1 – Stromkreis',
+  P0234:'Ladedruck zu hoch (Overboost)', P0299:'Ladedruck zu niedrig (Underboost)',
+  P0300:'Zündaussetzer – mehrere/zufällige Zylinder', P0301:'Zündaussetzer Zylinder 1', P0302:'Zündaussetzer Zylinder 2',
+  P0303:'Zündaussetzer Zylinder 3', P0304:'Zündaussetzer Zylinder 4', P0305:'Zündaussetzer Zylinder 5', P0306:'Zündaussetzer Zylinder 6',
+  P0325:'Klopfsensor 1 – Stromkreis', P0335:'Kurbelwellensensor – Stromkreis', P0340:'Nockenwellensensor – Stromkreis',
+  P0351:'Zündspule A – Stromkreis', P0380:'Glühkerzen – Stromkreis', P0400:'Abgasrückführung (AGR) – Durchfluss',
+  P0401:'AGR – Durchfluss zu gering', P0402:'AGR – Durchfluss zu hoch', P0403:'AGR-Ventil – Stromkreis',
+  P0410:'Sekundärluftsystem', P0420:'Katalysator (Bank 1) – Wirkungsgrad unter Grenzwert', P0430:'Katalysator (Bank 2) – Wirkungsgrad unter Grenzwert',
+  P0440:'Tankentlüftung (EVAP) – Fehlfunktion', P0441:'Tankentlüftung – Durchfluss fehlerhaft', P0442:'Tankentlüftung – kleines Leck',
+  P0455:'Tankentlüftung – großes Leck', P0456:'Tankentlüftung – sehr kleines Leck', P0480:'Kühlerlüfter 1 – Ansteuerung',
+  P0500:'Geschwindigkeitssensor Fahrzeug', P0505:'Leerlaufregelung – Fehlfunktion', P0506:'Leerlaufdrehzahl zu niedrig', P0507:'Leerlaufdrehzahl zu hoch',
+  P0520:'Öldrucksensor/-schalter – Stromkreis', P0562:'Bordspannung zu niedrig', P0563:'Bordspannung zu hoch',
+  P0571:'Bremslichtschalter – Stromkreis', P0600:'Datenbus-Verbindung Steuergerät', P0606:'Motorsteuergerät – Prozessorfehler',
+  P0615:'Anlasserrelais – Stromkreis', P0700:'Getriebesteuerung – Fehler gespeichert (Getriebe-SG auslesen)',
+  P0715:'Getriebe-Eingangsdrehzahlsensor', P0741:'Wandlerkupplung – Funktion/hängt offen',
+  P2002:'Dieselpartikelfilter (Bank 1) – Wirkungsgrad unter Grenzwert', P2004:'Saugrohrklappen – hängen offen',
+  P2135:'Drosselklappen-/Pedalsensor A/B – Signale unplausibel', P2187:'Gemisch im Leerlauf zu mager (Bank 1)',
+  P2279:'Ansaugsystem – Falschluft', P2463:'Dieselpartikelfilter – Rußbeladung zu hoch',
+  P242F:'Dieselpartikelfilter – Ascheablagerung zu hoch', P20EE:'SCR-Katalysator (Bank 1) – Wirkungsgrad unter Grenzwert',
+  U0001:'CAN-Bus (High-Speed) – Kommunikation', U0073:'Steuergeräte-Datenbus A – aus', U0100:'Keine Kommunikation mit Motorsteuergerät',
+  U0101:'Keine Kommunikation mit Getriebesteuergerät', U0121:'Keine Kommunikation mit ABS-Steuergerät',
+  U0140:'Keine Kommunikation mit Bordnetzsteuergerät', U0155:'Keine Kommunikation mit Kombiinstrument',
+  C0035:'Raddrehzahlsensor vorne links', C0040:'Raddrehzahlsensor vorne rechts', C0045:'Raddrehzahlsensor hinten links', C0050:'Raddrehzahlsensor hinten rechts',
+  B0001:'Fahrer-Frontairbag – Zündkreis',
+};
+function dtcDescription(code){
+  if(DTC_TEXT[code]) return DTC_TEXT[code];
+  const L = code[0], d = code[1], grp = code[2];
+  if(d==='1' || d==='3' && L!=='P') return `Herstellerspezifischer Code (${L==='P'?'Antrieb':L==='C'?'Fahrwerk':L==='B'?'Karosserie':'Netzwerk'}) – Herstellerdaten nötig`;
+  if(L==='P'){
+    if(d==='2' || d==='3') return 'Antrieb – erweiterter generischer Code (Herstellerdaten prüfen)';
+    return ({ '0':'Kraftstoff-/Luftzumessung, Abgasrückführung', '1':'Kraftstoff-/Luftzumessung', '2':'Kraftstoff-/Luftzumessung (Einspritzung)', '3':'Zündung/Zündaussetzer', '4':'Abgasnachbehandlung', '5':'Geschwindigkeit, Leerlauf, Eingangssignale', '6':'Steuergerät/Ausgänge', '7':'Getriebe', '8':'Getriebe', '9':'Getriebe', 'A':'Hybrid-/Elektroantrieb', 'B':'Hybrid-/Elektroantrieb', 'C':'Hybrid-/Elektroantrieb' })[grp] || 'Antrieb';
+  }
+  return L==='C' ? 'Fahrwerk (ABS/ESP/Lenkung)' : L==='B' ? 'Karosserie (Airbag, Komfort, Klima)' : 'Netzwerk/Kommunikation zwischen Steuergeräten';
+}
+const DTC_TYPE_LABEL = { stored:'gespeichert', pending:'sporadisch', permanent:'permanent' };
+
+/* --- Fehlercode-Wissen: Bedeutung, häufige Ursachen (wahrscheinlichste zuerst), Prüfen & Beheben ---
+   Generisch (markenunabhängig). Herstellerdaten/Reparaturleitfaden haben immer Vorrang. */
+const DTC_KB = {
+  P0011:{ m:'Die Einlassnockenwelle steht weiter auf „früh“ als vom Steuergerät gefordert.',
+    u:['Ölstand zu niedrig oder falsche Ölviskosität','Magnetventil Nockenwellenverstellung verschmutzt/hängt','Sieb im Ölkanal zum Ventil zugesetzt','Steuerkette gelängt / Versteller defekt'],
+    p:['Ölstand und Ölqualität prüfen, ggf. Ölwechsel mit Freigabe-Öl','Magnetventil ausbauen, Sieb reinigen, Ansteuerung per Stellglieddiagnose testen','Soll-/Ist-Winkel der Nockenwelle in den Messwerten vergleichen','Bei Kettengeräusch beim Kaltstart: Steuertrieb prüfen'] },
+  P0016:{ m:'Kurbelwellen- und Nockenwellensignal passen zeitlich nicht zusammen.',
+    u:['Steuerkette/Zahnriemen gelängt oder übersprungen','Nockenwellenversteller defekt','Kurbel- oder Nockenwellensensor / Geberrad beschädigt'],
+    p:['Messwert „Abweichung Nockenwelle/Kurbelwelle“ auslesen','Steuerzeiten mit Arretierwerkzeug prüfen','Sensoren und Geberräder sichtprüfen, Signal mit Oszilloskop vergleichen','Nicht weiterfahren lassen, wenn Kette übersprungen sein könnte (Motorschaden)'] },
+  P0087:{ m:'Der Kraftstoffdruck im Rail ist niedriger als gefordert.',
+    u:['Kraftstofffilter zugesetzt','Vorförderpumpe (Tank) schwach','Hochdruckpumpe verschlissen','Druckregelventil/Raildrucksensor defekt','Luft im System (Diesel) / Tank fast leer'],
+    p:['Tankinhalt prüfen, Filter tauschen','Vordruck messen (Herstellerwert)','Soll/Ist-Raildruck unter Last in Live-Daten vergleichen','Rücklaufmengen der Injektoren prüfen (Diesel)'] },
+  P0101:{ m:'Das Luftmassen-Signal passt nicht zur berechneten Luftmenge.',
+    u:['Luftmassenmesser verschmutzt/defekt','Falschluft nach dem LMM (Schlauch, Ansaugbrücke, KGE)','Luftfilter stark verschmutzt','AGR-Ventil hängt offen'],
+    p:['Luftfilter und Ansaugtrakt auf Risse/Undichtigkeit prüfen','LMM-Wert im Leerlauf und bei 3000 1/min mit Sollwert vergleichen','Rauchtest auf Falschluft','LMM nur mit Spezialreiniger reinigen oder tauschen'] },
+  P0128:{ m:'Der Motor erreicht nicht rechtzeitig Betriebstemperatur.',
+    u:['Thermostat hängt offen','Kühlmitteltemperatursensor ungenau','Kühlerlüfter läuft dauerhaft'],
+    p:['Temperaturverlauf nach Kaltstart in Live-Daten beobachten','Kühlerschlauch oben fühlen: wird er früh warm, öffnet Thermostat zu früh','Sensorwert mit Infrarot-Thermometer vergleichen','Thermostat erneuern, Kühlsystem entlüften'] },
+  P0130:{ m:'Die Lambdasonde vor Kat liefert ein fehlerhaftes Signal.',
+    u:['Lambdasonde gealtert','Kabel/Stecker beschädigt','Abgasleck vor der Sonde'],
+    p:['Sondenspannung im Leerlauf und bei 2500 1/min beobachten (Sprungsonde pendelt 0,1–0,9 V)','Leitung und Stecker prüfen','Abgasanlage vor der Sonde auf Undichtigkeit prüfen'] },
+  P0133:{ m:'Die Lambdasonde vor Kat reagiert zu langsam.',
+    u:['Sonde gealtert/verrußt','Abgasleck vor der Sonde','Motor läuft dauerhaft zu fett (Öl-/Kühlmittelverbrennung vergiftet Sonde)'],
+    p:['Reaktionszeit der Sonde in Live-Daten prüfen','Ursache für Verrußung klären (Ölverbrauch, Kühlmittel)','Sonde erneuern'] },
+  P0135:{ m:'Die Heizung der Lambdasonde vor Kat funktioniert nicht.',
+    u:['Heizelement in der Sonde durchgebrannt','Sicherung/Relais der Sondenheizung','Kabel oder Stecker beschädigt'],
+    p:['Widerstand des Heizelements messen (meist wenige Ohm)','Versorgungsspannung am Stecker bei Motor an prüfen','Sicherung prüfen, Sonde ggf. tauschen'] },
+  P0141:{ m:'Die Heizung der Lambdasonde nach Kat funktioniert nicht.',
+    u:['Heizelement der Sonde defekt','Sicherung/Kabel'],
+    p:['Widerstand Heizelement messen','Spannungsversorgung und Masse prüfen','Sonde tauschen'] },
+  P0171:{ m:'Das Gemisch ist zu mager – das Steuergerät muss dauerhaft Kraftstoff hinzufügen (Langzeit-Trim hoch).',
+    u:['Falschluft (Unterdruckschlauch, Ansaugdichtung, Kurbelgehäuseentlüftung, Bremskraftverstärker)','Luftmassenmesser misst zu wenig','Kraftstoffdruck zu niedrig / Filter','Einspritzventile verschmutzt'],
+    p:['Trims prüfen: hoch im Leerlauf, normal bei Drehzahl → eher Falschluft; überall hoch → eher Kraftstoff/LMM','Rauchtest oder Bremsenreiniger-Test an Ansaugung','KGE-Ventil prüfen (häufige Ursache)','Kraftstoffdruck messen, LMM-Wert prüfen'] },
+  P0172:{ m:'Das Gemisch ist zu fett – das Steuergerät muss dauerhaft Kraftstoff wegnehmen.',
+    u:['Einspritzventil tropft','Kraftstoffdruck zu hoch','Luftmassenmesser misst zu viel','Aktivkohlefilter-Ventil hängt offen','Kühlmitteltemperatursensor meldet zu kalt'],
+    p:['Trims und LMM-Wert prüfen','Tankentlüftungsventil auf Dichtheit prüfen','Kraftstoffdruck und Haltedruck messen','Kühlmitteltemperatur-Wert plausibilisieren'] },
+  P0234:{ m:'Der Ladedruck ist höher als zulässig (Überladung).',
+    u:['Wastegate/VTG-Verstellung hängt','Ladedruckregelventil/Unterdruckleitung defekt','Ladedrucksensor falsch'],
+    p:['Soll/Ist-Ladedruck bei Volllast-Beschleunigung vergleichen','Unterdruckleitungen und Steller prüfen','Stellglieddiagnose Ladedrucksteller','Turbolader-Verstellung auf Gängigkeit prüfen (Verkokung beim Diesel)'] },
+  P0299:{ m:'Der Ladedruck ist niedriger als gefordert (Unterladung).',
+    u:['Ladeluftschlauch/Ladeluftkühler undicht','VTG/Wastegate hängt','Unterdruck für Steller fehlt','Turbolader verschlissen'],
+    p:['Ladeluftstrecke abdrücken und auf Ölspuren/Risse prüfen','Soll/Ist-Ladedruck unter Last vergleichen','Unterdruck am Steller messen','Turbolader auf Axial-/Radialspiel prüfen'] },
+  P0300:{ m:'Es werden Verbrennungsaussetzer auf mehreren/wechselnden Zylindern erkannt.',
+    u:['Zündkerzen verschlissen','Falschluft','Kraftstoffdruck zu niedrig','Zündspulen','mechanisch: Kompression/Ventile'],
+    p:['Aussetzerzähler je Zylinder in Live-Daten ansehen','Zündkerzen und Spulen prüfen','Falschluft und Kraftstoffdruck prüfen','Kompressionstest bei Verdacht auf Mechanik','Mit Aussetzern nicht lange fahren – Katalysator kann überhitzen'] },
+  P0335:{ m:'Kein oder fehlerhaftes Signal vom Kurbelwellensensor.',
+    u:['Sensor defekt','Kabel/Stecker (oft durch Hitze/Öl)','Geberrad beschädigt oder verschmutzt'],
+    p:['Startet der Motor nicht: Drehzahlanzeige beim Starten prüfen','Sensorwiderstand/Signal (Oszilloskop) prüfen','Stecker auf Öl/Korrosion prüfen, Sensor tauschen'] },
+  P0340:{ m:'Kein oder fehlerhaftes Signal vom Nockenwellensensor.',
+    u:['Sensor defekt','Kabel/Stecker','Geberrad / Steuerzeiten'],
+    p:['Versorgung und Signal am Sensor messen','Stecker prüfen','Bei gleichzeitigem P0016: Steuerzeiten prüfen'] },
+  P0380:{ m:'Störung im Stromkreis der Glühanlage (Diesel).',
+    u:['Glühkerze(n) defekt','Glühzeitsteuergerät/-relais','Kabel/Stecker'],
+    p:['Widerstand jeder Glühkerze messen (meist < 2 Ω)','Stromaufnahme beim Vorglühen prüfen','Glühkerzen vorsichtig lösen (Abrissgefahr, warm ausbauen)'] },
+  P0401:{ m:'Die Abgasrückführung bringt zu wenig Durchfluss.',
+    u:['AGR-Ventil verkokt/klemmt','AGR-Kanäle oder AGR-Kühler zugesetzt','Unterdruck/Ansteuerung fehlt'],
+    p:['Stellglieddiagnose AGR-Ventil, Bewegung sichtprüfen','Ventil und Kanäle auf Verkokung prüfen, reinigen oder tauschen','Bei Diesel: Ansaugbrücke auf Verkokung prüfen'] },
+  P0402:{ m:'Die Abgasrückführung bringt zu viel Durchfluss.',
+    u:['AGR-Ventil hängt offen','Positionssensor am Ventil defekt'],
+    p:['Ist-Position des AGR-Ventils im Leerlauf prüfen','Ventil ausbauen und Sitz prüfen','Ventil erneuern, danach anlernen'] },
+  P0420:{ m:'Der Katalysator speichert zu wenig Sauerstoff – die Lambdasonde hinter Kat schwankt fast so stark wie die vor Kat.',
+    u:['Katalysator gealtert/beschädigt','Lambdasonde nach Kat defekt oder träge','Abgasleck vor der hinteren Sonde','Vorangegangene Aussetzer oder hoher Ölverbrauch'],
+    p:['Erst andere Fehler (Aussetzer, Gemisch) beheben','Sondenspannungen vergleichen: hintere Sonde sollte ruhig bei ca. 0,6–0,7 V liegen','Abgasanlage auf Undichtigkeit prüfen','Hintere Sonde prüfen, dann Kat beurteilen','AU-Relevanz beachten'] },
+  P0442:{ m:'Kleines Leck in der Tankentlüftung (EVAP).',
+    u:['Tankdeckel undicht/nicht richtig geschlossen','Schläuche der Tankentlüftung porös','Aktivkohlefilter/Ventil undicht'],
+    p:['Tankdeckel und Dichtung prüfen','Leitungen sichtprüfen','Rauchtest der Tankentlüftung'] },
+  P0455:{ m:'Großes Leck in der Tankentlüftung (EVAP).',
+    u:['Tankdeckel fehlt/offen','Schlauch abgerutscht','Ventil der Tankentlüftung defekt'],
+    p:['Tankdeckel prüfen','Schlauchverbindungen am Aktivkohlefilter prüfen','Stellglieddiagnose Tankentlüftungsventil'] },
+  P0456:{ m:'Sehr kleines Leck in der Tankentlüftung (EVAP).',
+    u:['Tankdeckeldichtung','Minimale Undichtigkeit an Leitungen'],
+    p:['Tankdeckel tauschen/prüfen','Rauchtest','Fehler tritt oft nur sporadisch auf – nach Reparatur Fahrzyklen abwarten'] },
+  P0500:{ m:'Kein oder fehlerhaftes Geschwindigkeitssignal.',
+    u:['Raddrehzahlsensor / ABS-Fehler (Signal kommt meist vom ABS)','Datenbus-Problem','Tachosensor (ältere Fahrzeuge)'],
+    p:['ABS-Steuergerät auslesen','Raddrehzahlen in Live-Daten vergleichen','Bus-Fehler (U-Codes) zuerst prüfen'] },
+  P0505:{ m:'Die Leerlaufregelung funktioniert nicht richtig.',
+    u:['Drosselklappe verschmutzt','Falschluft','Leerlaufsteller/Drosselklappe nicht angelernt'],
+    p:['Drosselklappe reinigen','Drosselklappe/Leerlauf anlernen (Grundeinstellung)','Falschluft prüfen'] },
+  P0562:{ m:'Das Steuergerät misst zu niedrige Bordspannung.',
+    u:['Batterie schwach','Lichtmaschine/Regler defekt','Masseverbindung oder Pluskabel korrodiert'],
+    p:['Batterie testen (Ruhespannung, Kaltstartstrom)','Ladespannung bei laufendem Motor messen (ca. 13,8–14,7 V)','Spannungsabfall an Masse- und Plusleitung messen'] },
+  P0606:{ m:'Das Motorsteuergerät meldet einen internen Fehler.',
+    u:['Spannungseinbrüche/Unterspannung','Softwarefehler','Steuergerät defekt'],
+    p:['Bordspannung und Massen prüfen','Software-Update laut Hersteller prüfen','Fehler löschen und beobachten, bevor das Steuergerät getauscht wird'] },
+  P0700:{ m:'Das Getriebesteuergerät hat einen Fehler gespeichert.',
+    u:['Fehler liegt im Getriebe-Steuergerät – P0700 ist nur der Hinweis'],
+    p:['Getriebesteuergerät separat auslesen (beim VW-Konzern: Steuergeräte-Scan)','Ölstand und Ölzustand des Getriebes prüfen'] },
+  P2002:{ m:'Der Partikelfilter filtert nicht mehr ausreichend.',
+    u:['DPF beschädigt/gerissen','Differenzdrucksensor oder Schläuche defekt'],
+    p:['Differenzdruck in Live-Daten bei Leerlauf und Last prüfen','Schläuche zum Drucksensor prüfen','DPF-Zustand beurteilen'] },
+  P2187:{ m:'Gemisch im Leerlauf zu mager.',
+    u:['Falschluft (häufigste Ursache)','Kurbelgehäuseentlüftung defekt','LMM'],
+    p:['Rauchtest der Ansaugung','KGE-Membran prüfen','Trims im Leerlauf und bei Drehzahl vergleichen'] },
+  P2279:{ m:'Falschluft im Ansaugsystem erkannt.',
+    u:['Ansaugschlauch/Dichtung undicht','Kurbelgehäuseentlüftung','Unterdruckleitung'],
+    p:['Rauchtest','Schläuche nach dem LMM prüfen','KGE-Ventil prüfen'] },
+  P2463:{ m:'Der Partikelfilter ist zu stark mit Ruß beladen.',
+    u:['Viele Kurzstrecken, Regeneration bricht ab','Fehler, der die Regeneration verhindert (AGR, Sensoren, Glühanlage)','Differenzdrucksensor misst falsch'],
+    p:['Andere Fehler zuerst beheben','Rußbeladung und letzte Regeneration in Live-Daten prüfen','Service-Regeneration über Diagnosegerät','Bei sehr hoher Beladung: DPF reinigen/tauschen'] },
+  P242F:{ m:'Der Partikelfilter ist mit Asche zugesetzt (nicht regenerierbar).',
+    u:['Hohe Laufleistung','Ölverbrauch / falsches Öl (Low-SAPS beachten)'],
+    p:['Ascheberechnung/Laufleistung prüfen','DPF reinigen lassen oder tauschen, danach Werte zurücksetzen/anlernen'] },
+  P20EE:{ m:'Der SCR-Katalysator (AdBlue) reduziert zu wenig NOx.',
+    u:['AdBlue-Qualität/Kristallisation','Dosierventil verstopft','NOx-Sensor defekt','SCR-Kat gealtert'],
+    p:['AdBlue-Konzentration prüfen (Refraktometer)','Dosiermenge prüfen (Stellglieddiagnose)','NOx-Sensorwerte vor/nach SCR vergleichen'] },
+  U0100:{ m:'Ein Steuergerät bekommt keine Botschaften vom Motorsteuergerät.',
+    u:['Spannungsversorgung/Masse des Motorsteuergeräts','CAN-Leitung oder Stecker','Steuergerät war kurz ohne Spannung (z. B. Batterie abgeklemmt, Starthilfe)'],
+    p:['Prüfen, ob der Fehler sporadisch ist (oft nach Batteriearbeiten)','Versorgung und Masse am Motorsteuergerät messen','CAN-Widerstand (ca. 60 Ω) und Pegel messen','Fehler löschen, Probefahrt'] },
+  U0121:{ m:'Ein Steuergerät bekommt keine Botschaften vom ABS/ESP-Steuergerät.',
+    u:['Versorgung/Masse ABS-Steuergerät','CAN-Leitung','Unterspannung beim Start'],
+    p:['ABS-Steuergerät auslesen: erreichbar?','Sicherungen und Massen prüfen','Bei sporadischem Auftreten: Batterie testen'] },
+  C0035:{ m:'Störung am Raddrehzahlsensor vorne links.',
+    u:['Sensor defekt','Kabel am Radhaus beschädigt (Scheuerstelle, Marder)','Geber-/Magnetring verschmutzt oder beschädigt','Radlagerspiel'],
+    p:['Raddrehzahlen aller Räder bei langsamer Fahrt vergleichen','Kabel bis zum Stecker sichtprüfen','Sensor ausbauen, Magnetring/Lager prüfen','Sensor tauschen, Fehler löschen, Probefahrt'] },
+  C0040:{ m:'Störung am Raddrehzahlsensor vorne rechts.', ref:'C0035' },
+  C0045:{ m:'Störung am Raddrehzahlsensor hinten links.', ref:'C0035' },
+  C0050:{ m:'Störung am Raddrehzahlsensor hinten rechts.', ref:'C0035' },
+  B0001:{ m:'Störung im Zündkreis des Fahrer-Frontairbags.',
+    u:['Wickelfeder (Schleifring) im Lenkrad defekt','Stecker am Airbag-Modul','Airbag-Modul'],
+    p:['Sicherheitsregeln beachten: Batterie abklemmen, Wartezeit einhalten, Airbag nur geschult ausbauen','Widerstand nur mit Airbag-Ersatzwiderstand messen, nie direkt am Airbag','Wickelfeder prüfen (oft auch Hupe/Lenkradtasten ohne Funktion)','Nach Reparatur Fehler löschen, Airbag-Leuchte muss ausgehen'] },
+};
+// Zündaussetzer einzelner Zylinder
+for(let z=1; z<=8; z++) DTC_KB['P030'+z] = { m:`Verbrennungsaussetzer auf Zylinder ${z}.`,
+  u:[`Zündkerze Zylinder ${z}`,`Zündspule Zylinder ${z}`,`Einspritzventil Zylinder ${z}`,'Kompression (Ventile, Kolbenringe)'],
+  p:[`Zündspule mit Nachbarzylinder tauschen: wandert der Fehler mit, ist die Spule defekt`,'Zündkerze prüfen/erneuern','Einspritzventil prüfen bzw. ebenfalls tauschen und testen',`Kompression Zylinder ${z} messen`,'Mit Aussetzern nicht lange fahren – Katalysator kann überhitzen'] };
+DTC_KB.P0174 = { m:'Das Gemisch auf Bank 2 ist zu mager (Langzeit-Trim hoch).', ref:'P0171' };
+DTC_KB.P0175 = { m:'Das Gemisch auf Bank 2 ist zu fett.', ref:'P0172' };
+DTC_KB.P0136 = { m:'Die Lambdasonde nach Kat liefert ein fehlerhaftes Signal.', ref:'P0130' };
+
+// Allgemeine Hilfe nach Codegruppe, wenn kein Eintrag existiert
+function dtcGroupHelp(code){
+  const L = code[0], d = code[1], g = code[2];
+  const manu = d==='1' || (d==='3' && L!=='P');
+  if(L==='U') return { u:['Spannungsversorgung oder Masse des genannten Steuergeräts','CAN-/Bus-Leitung, Stecker, Feuchtigkeit','Unterspannung (Batterie, Starthilfe, Batteriewechsel)'],
+    p:['Prüfen, ob das genannte Steuergerät erreichbar ist','Batterie und Massen prüfen','Busleitungen messen (CAN-Widerstand ca. 60 Ω)','Fehler löschen und prüfen, ob er wiederkommt'] };
+  if(L==='C') return { u:['Sensor (Raddrehzahl, Lenkwinkel, Drehrate)','Kabel/Stecker im Radhaus','Fehlende Grundeinstellung (z. B. Lenkwinkelsensor nach Achsvermessung)'],
+    p:['ABS/ESP-Messwerte vergleichen','Leitungen sichtprüfen','Grundeinstellung/Anlernen laut Hersteller'] };
+  if(L==='B') return { u:['Stecker/Kabel (Sitze, Türen, Lenkrad)','Bauteil defekt','Codierung/Anlernen fehlt'],
+    p:['Bei Airbag-Fehlern Sicherheitsregeln beachten','Stecker unter Sitzen/an Türen prüfen','Herstellerdaten für genaue Bedeutung nutzen'] };
+  if(g==='3') return { u:['Zündkerzen/Zündspulen','Einspritzventile','Falschluft','Kompression'], p:['Aussetzerzähler je Zylinder prüfen','Zündung und Einspritzung prüfen','Kompressionstest'] };
+  if(g==='1' || g==='2' || g==='0') return { u:['Sensor im Luft-/Kraftstoffsystem','Falschluft','Kraftstoffdruck','Kabel/Stecker'], p:['Live-Daten (Trims, LMM, Drücke) mit Sollwerten vergleichen','Leitungen prüfen','Rauchtest auf Falschluft'] };
+  if(g==='4') return { u:['Abgasnachbehandlung (Kat, AGR, Tankentlüftung, DPF, SCR)','Sensoren der Abgasanlage'], p:['Andere Motorfehler zuerst beheben','Stellglieddiagnose der betroffenen Komponente','AU-Relevanz beachten'] };
+  if(g==='5') return { u:['Leerlaufregelung, Geschwindigkeitssignal, Bordspannung'], p:['Bordspannung und Ladung prüfen','Drosselklappe reinigen/anlernen'] };
+  if(g==='6') return { u:['Steuergerät oder dessen Versorgung'], p:['Spannung und Massen prüfen','Software-Stand prüfen'] };
+  if(g==='7' || g==='8' || g==='9') return { u:['Getriebe: Sensor, Magnetventil, Ölstand'], p:['Getriebesteuergerät auslesen','Getriebeöl prüfen'] };
+  return manu ? { u:['Herstellerspezifisch – Bedeutung je Marke unterschiedlich'], p:['Herstellerdaten oder ALEX fragen'] } : null;
+}
+// Zusatz nach Fehlerart (UDS, 3. Byte)
+const FTB_HELP = {
+  '11':'Kurzschluss nach Masse: Leitung auf Scheuerstellen prüfen, Widerstand gegen Masse messen.',
+  '12':'Kurzschluss nach Plus: Leitung auf Kontakt mit Plusleitungen prüfen.',
+  '13':'Unterbrechung: Durchgang der Leitung messen, Stecker auf Korrosion/zurückgeschobene Pins prüfen.',
+  '14':'Kurzschluss nach Masse oder Unterbrechung: Leitung und Stecker durchmessen.',
+  '15':'Kurzschluss nach Plus oder Unterbrechung: Leitung und Stecker durchmessen.',
+  '16':'Spannung zu niedrig: Versorgung, Masse und Batterie prüfen.', '17':'Spannung zu hoch: Ladespannung/Regler prüfen.',
+  '1C':'Spannung außerhalb des Bereichs: Versorgung und Signalleitung messen.', '1D':'Strom außerhalb des Bereichs: Bauteilwiderstand und Leitung messen.',
+  '29':'Signal ungültig: Sensor, Geber und Steckverbindung prüfen; Signal mit Oszilloskop ansehen.',
+  '2F':'Signal unregelmäßig: Wackelkontakt – Stecker und Kabel unter Bewegung prüfen.',
+  '31':'Kein Signal: Versorgung des Sensors und Signalleitung prüfen.',
+  '54':'Grundeinstellung fehlt: Anlernen/Grundeinstellung mit Diagnosegerät durchführen.',
+  '55':'Nicht codiert/angelernt: Codierung oder Anlernvorgang laut Hersteller.',
+  '64':'Signal unplausibel: Wert mit anderen Sensoren vergleichen, Sensor prüfen.',
+  '71':'Stellglied blockiert: Mechanik auf Gängigkeit prüfen, Stellglieddiagnose.',
+  '87':'Botschaft fehlt: Sender-Steuergerät und Busleitung prüfen.',
+  '96':'Bauteil intern defekt: Versorgung prüfen, sonst Bauteil tauschen.',
+};
+function dtcHelp(code, ftb){
+  let e = DTC_KB[code];
+  if(e && e.ref){ const base = DTC_KB[e.ref] || {}; e = { m: e.m || base.m, u: base.u, p: base.p }; }
+  const g = e ? null : dtcGroupHelp(code);
+  return { m: e ? e.m : '', u: (e ? e.u : g && g.u) || [], p: (e ? e.p : g && g.p) || [], specific: !!e, ftb: ftb && FTB_HELP[ftb] || '' };
+}
+
+/* --- Messwerte (Mode 01) – gleiche Tabelle für Live-Daten, Freeze-Frame und Protokoll ---
+   fast: wird bei jedem Live-Durchlauf abgefragt, sonst reihum (schont langsame BLE-Adapter) */
+const LIVE_PIDS = [
+  { pid:'0C', n:2, key:'rpm',          label:'Drehzahl',         unit:'1/min',   d:0, fast:true, f:b=>(b[0]*256+b[1])/4 },
+  { pid:'0D', key:'speed_kmh',    label:'Geschwindigkeit',  unit:'km/h',    d:0, fast:true, f:b=>b[0] },
+  { pid:'05', key:'coolant_c',    label:'Kühlmittel',       unit:'°C',      d:0, fast:true, f:b=>b[0]-40, warn:v=>v>110 },
+  { pid:'04', key:'load_pct',     label:'Motorlast',        unit:'%',       d:0, fast:true, f:b=>b[0]*100/255 },
+  { pid:'11', key:'throttle_pct', label:'Drosselklappe',    unit:'%',       d:0, fast:true, f:b=>b[0]*100/255 },
+  { pid:'06', key:'stft1',        label:'Kurzzeit-Trim B1', unit:'%',       d:1, fast:true, f:b=>(b[0]-128)*100/128, warn:v=>Math.abs(v)>20 },
+  { pid:'07', key:'ltft1',        label:'Langzeit-Trim B1', unit:'%',       d:1, f:b=>(b[0]-128)*100/128, warn:v=>Math.abs(v)>10 },
+  { pid:'08', key:'stft2',        label:'Kurzzeit-Trim B2', unit:'%',       d:1, f:b=>(b[0]-128)*100/128, warn:v=>Math.abs(v)>20 },
+  { pid:'09', key:'ltft2',        label:'Langzeit-Trim B2', unit:'%',       d:1, f:b=>(b[0]-128)*100/128, warn:v=>Math.abs(v)>10 },
+  { pid:'0B', key:'map_kpa',      label:'Saugrohrdruck',    unit:'kPa',     d:0, f:b=>b[0] },
+  { pid:'10', n:2, key:'maf_gs',       label:'Luftmasse',        unit:'g/s',     d:1, f:b=>(b[0]*256+b[1])/100 },
+  { pid:'0F', key:'intake_c',     label:'Ansaugluft',       unit:'°C',      d:0, f:b=>b[0]-40 },
+  { pid:'0E', key:'timing_deg',   label:'Zündwinkel',       unit:'° v. OT', d:1, f:b=>b[0]/2-64 },
+  { pid:'5C', key:'oil_c',        label:'Öltemperatur',     unit:'°C',      d:0, f:b=>b[0]-40, warn:v=>v>130 },
+  { pid:'23', n:2, key:'rail_bar',     label:'Raildruck',        unit:'bar',     d:0, f:b=>(b[0]*256+b[1])/10 },
+  { pid:'46', key:'ambient_c',    label:'Außentemperatur',  unit:'°C',      d:0, f:b=>b[0]-40 },
+  { pid:'2F', key:'fuel_pct',     label:'Tankinhalt',       unit:'%',       d:0, f:b=>b[0]*100/255 },
+  { pid:'42', n:2, key:'ecu_v',        label:'Spannung SG',      unit:'V',       d:1, f:b=>(b[0]*256+b[1])/1000 },
+];
+// Freeze-Frame: Umgebungsbedingungen im Moment, als der Fehler gespeichert wurde
+const FREEZE_PIDS = ['0C','0D','05','04','11','06','07','0B','10','0F'];
+
+// Rohbytes einer PID-Antwort; Mode 02 (Freeze-Frame) hat nach der PID noch die Frame-Nummer
+function pidData(raw, mode, pid){
+  const lines = elmClean(raw);
+  if(elmNoData(lines)) return null;
+  for(const msg of elmMessages(lines)){
+    const i = msg.indexOf(mode+pid); if(i<0) continue;
+    let b = (msg.slice(i+4).match(/../g)||[]).map(h=>parseInt(h,16));
+    if(mode==='42') b = b.slice(1);
+    if(b.length) return b;
+  }
+  return null;
+}
+function pidValue(def, bytes){
+  if(!bytes || bytes.length < (def.n||1)) return null;
+  const v = def.f(bytes); if(!Number.isFinite(v)) return null;
+  const p = Math.pow(10, def.d||0); return Math.round(v*p)/p;
+}
+// Unterstützte PIDs aus 0100/0120/0140 (je 32 Bit, höchstes Bit = PID base+1)
+function parseSupported(raw, base){
+  const b = pidData(raw, '41', base); const out = [];
+  if(!b || b.length<4) return out;
+  const start = parseInt(base,16);
+  for(let i=0;i<32;i++) if(b[i>>3] & (0x80 >> (i&7))) out.push((start+i+1).toString(16).toUpperCase().padStart(2,'0'));
+  return out;
+}
+/* --- Readiness (AU-Bereitschaft): PID 01, Bytes B–D. Bit gesetzt in "unterstützt" + Bit gesetzt in "unvollständig" = noch nicht abgeschlossen --- */
+const READINESS_CONT = [ ['misfire','Verbrennungsaussetzer'], ['fuel','Kraftstoffsystem'], ['components','Bauteile (Comprehensive)'] ];
+const READINESS_SPARK = [ ['catalyst','Katalysator'], ['heated_cat','Kat-Heizung'], ['evap','Tankentlüftung (EVAP)'], ['sec_air','Sekundärluft'], ['ac','Klimaanlage'], ['o2','Lambdasonden'], ['o2_heater','Lambdasonden-Heizung'], ['egr','Abgasrückführung (AGR)'] ];
+const READINESS_DIESEL = [ ['nmhc','NMHC-Katalysator'], ['nox','NOx/SCR-Nachbehandlung'], null, ['boost','Ladedruck'], null, ['exhaust_sensor','Abgassensoren'], ['dpf','Partikelfilter (DPF)'], ['egr','AGR / Nockenwellenverstellung'] ];
+function parseReadiness(raw){
+  const b = pidData(raw, '41', '01');
+  if(!b || b.length<4) return null;
+  const diesel = !!(b[1] & 0x08);
+  const items = [];
+  READINESS_CONT.forEach(([key,label],i)=>{ if(b[1] & (1<<i)) items.push({ key, label, ok: !(b[1] & (0x10<<i)) }); });
+  (diesel ? READINESS_DIESEL : READINESS_SPARK).forEach((def,i)=>{ if(def && (b[2] & (1<<i))) items.push({ key:def[0], label:def[1], ok: !(b[3] & (1<<i)) }); });
+  return { diesel, items, open: items.filter(x=>!x.ok).length };
+}
+
+/* --- Steuergeräte-Scan VW-Konzern (VW, Audi, Skoda, Seat/Cupra) über UDS auf dem Diagnose-CAN ---
+   Anfrage-ID → Antwort-ID: Motor/Getriebe +8 (OBD-Standard), alle anderen +0x6A (VW-Schema).
+   Adressen gelten für CAN-Fahrzeuge mit UDS (v. a. MQB/MLB ab ca. 2012); ältere KWP-Steuergeräte antworten nicht. */
+const VAG_ECUS = [
+  { id:'01', name:'Motorelektronik',          tx:0x7E0, rx:0x7E8 },
+  { id:'02', name:'Getriebeelektronik',       tx:0x7E1, rx:0x7E9 },
+  { id:'03', name:'Bremsenelektronik (ABS/ESP)', tx:0x713 },
+  { id:'15', name:'Airbag',                   tx:0x715 },
+  { id:'17', name:'Schalttafeleinsatz',       tx:0x714 },
+  { id:'19', name:'Diagnose-Interface (Gateway)', tx:0x710 },
+  { id:'09', name:'Elektronische Zentralelektrik', tx:0x70E },
+  { id:'44', name:'Lenkhilfe',                tx:0x712 },
+  { id:'16', name:'Lenksäulenelektronik',     tx:0x70C },
+  { id:'08', name:'Klima-/Heizungselektronik', tx:0x746 },
+  { id:'13', name:'Abstandsregelung (ACC)',   tx:0x757 },
+  { id:'5F', name:'Informationselektronik',   tx:0x773 },
+];
+const VAG_WMI = /^(WVW|WV1|WV2|WV3|WAU|WA1|WUA|TRU|VSS|TMB)/;
+function isVagVehicle(o, vin){
+  if(VAG_WMI.test(String(vin||'').toUpperCase())) return true;
+  return /\b(vw|volkswagen|audi|skoda|škoda|seat|cupra)\b/i.test(String((o && o.vehicle) || ''));
+}
+// Fehlerart (3. Byte des UDS-Fehlercodes, SAE J2012) – nur die häufigsten
+const FTB_TEXT = {
+  '01':'allgemeiner elektrischer Fehler', '11':'Kurzschluss nach Masse', '12':'Kurzschluss nach Plus', '13':'Unterbrechung',
+  '14':'Kurzschluss nach Masse oder Unterbrechung', '15':'Kurzschluss nach Plus oder Unterbrechung', '16':'Spannung unter Grenzwert',
+  '17':'Spannung über Grenzwert', '1C':'Spannung außerhalb des Bereichs', '1D':'Strom außerhalb des Bereichs', '21':'Signal zu klein',
+  '22':'Signal zu groß', '23':'Signal ständig niedrig', '24':'Signal ständig hoch', '29':'Signal ungültig', '2F':'Signal unregelmäßig',
+  '31':'kein Signal', '4B':'Übertemperatur', '54':'Grundeinstellung/Kalibrierung fehlt', '55':'nicht codiert/angelernt',
+  '62':'Signalvergleich fehlerhaft', '64':'Signal unplausibel', '71':'Stellglied blockiert', '87':'Botschaft fehlt', '96':'Bauteil intern defekt',
+};
+const UDS_NRC = { '11':'Dienst nicht unterstützt', '12':'Funktion nicht unterstützt', '13':'falsche Anfrage', '22':'Bedingungen nicht erfüllt', '31':'Bereich nicht unterstützt', '33':'Zugriff gesperrt', '7F':'Dienst in dieser Sitzung nicht unterstützt' };
+// Antwort auf 19 02 <Maske>: 59 02 <Verfügbarkeitsmaske> dann je 4 Byte: DTC (3) + Status
+function parseUdsDtcs(raw){
+  const lines = elmClean(raw);
+  if(!lines.length || elmNoData(lines)) return { status:'nodata' };
+  const msgs = elmMessages(lines);
+  const all = msgs.join('');
+  const neg = all.match(/7F19([0-9A-F]{2})/);
+  const i = all.indexOf('5902');
+  if(i<0){ if(neg && neg[1]==='78') return { status:'pending' }; if(neg) return { status:'neg', nrc:neg[1] }; return { status:'nodata' }; }
+  const msg = msgs.find(m=>m.includes('5902')) || all;
+  const b = (msg.slice(msg.indexOf('5902')+6).match(/../g)||[]).map(h=>parseInt(h,16));
+  const codes = []; const seen = new Set();
+  for(let k=0; k+3<b.length; k+=4){
+    const code = decodeDtc(b[k], b[k+1]); if(!code) continue;
+    const ftb = b[k+2].toString(16).toUpperCase().padStart(2,'0'); const st = b[k+3];
+    if(!(st & 0x0D)) continue; // weder aktiv noch bestätigt noch ausstehend → historisch, nicht anzeigen
+    if(seen.has(code+ftb)) continue; seen.add(code+ftb);
+    codes.push({ code, ftb, active: !!(st & 0x01), status: st, desc: dtcDescription(code), ftb_text: FTB_TEXT[ftb] || '' });
+  }
+  return { status:'ok', codes };
+}
+// ReadDataByIdentifier (22 xx xx) → Rohdaten als Hex (z. B. 0600 = Codierung)
+function parseUdsHex(raw, did){
+  const lines = elmClean(raw); if(elmNoData(lines)) return '';
+  const all = elmMessages(lines).join(''); const i = all.indexOf('62'+did); if(i<0) return '';
+  return all.slice(i+6).replace(/[^0-9A-F]/gi,'').toUpperCase().slice(0,128);
+}
+// ReadDataByIdentifier (22 xx xx) → ASCII, z. B. F187 Teilenummer, F197 Systembezeichnung
+function parseUdsAscii(raw, did){
+  const lines = elmClean(raw); if(elmNoData(lines)) return '';
+  const all = elmMessages(lines).join(''); const i = all.indexOf('62'+did); if(i<0) return '';
+  return (all.slice(i+6).match(/../g)||[]).map(h=>parseInt(h,16)).filter(c=>c>=32 && c<127).map(c=>String.fromCharCode(c)).join('').trim().slice(0,40);
+}
+
+/* --- Antwort-Parser (gleich für echten Adapter und Simulation) --- */
+function elmClean(raw){
+  return String(raw||'').replace(/>/g,'').split(/[\r\n]+/).map(l=>l.trim()).filter(l=>l && !/^(SEARCHING\.*|BUS INIT:?.*|STOPPED|OK)$/i.test(l));
+}
+function elmNoData(lines){ return lines.some(l=>/NO DATA|UNABLE TO CONNECT|CAN ERROR|BUS ERROR|^\?$|ERROR/i.test(l)); }
+// Mehrteilige CAN-Antworten ("014" / "0: 49 02 01 …" / "1: …") zu einem Datenblock zusammenfügen; sonst eine Nachricht pro Zeile
+function elmMessages(lines){
+  const multi = lines.some(l=>/^[0-9A-F]\s*:/i.test(l));
+  if(!multi) return lines.map(l=>l.replace(/[^0-9A-F]/gi,'').toUpperCase()).filter(Boolean);
+  return [lines.filter(l=>!/^[0-9A-F]{3}$/i.test(l)).map(l=>l.replace(/^[0-9A-F]\s*:/i,'').replace(/[^0-9A-F]/gi,'')).join('').toUpperCase()];
+}
+function decodeDtc(b1, b2){
+  if(!b1 && !b2) return null;
+  return 'PCBU'[b1>>6] + ((b1>>4)&3) + (b1&15).toString(16).toUpperCase() + b2.toString(16).toUpperCase().padStart(2,'0');
+}
+function parseDtcs(raw, mode, isCan){
+  const lines = elmClean(raw);
+  if(elmNoData(lines)) return [];
+  const out = new Set();
+  for(const msg of elmMessages(lines)){
+    let i = msg.indexOf(mode); if(i<0) continue;
+    let hex = msg.slice(i+2);
+    const bytes = (hex.match(/../g)||[]).map(h=>parseInt(h,16));
+    let start = 0, n = Math.floor(bytes.length/2);
+    // CAN: erstes Byte = Anzahl Codes; ältere Protokolle: immer 3 Codes je Zeile ohne Anzahl
+    const looksCan = bytes[0]*2 <= bytes.length-1 && (bytes.length % 2 === 1 || bytes.length !== 6); // Altprotokolle liefern immer genau 6 Datenbytes
+    if(isCan===true || (isCan!==false && looksCan)){ n = Math.min(bytes[0], Math.floor((bytes.length-1)/2)); start = 1; }
+    for(let k=0;k<n;k++){ const c = decodeDtc(bytes[start+2*k], bytes[start+2*k+1]); if(c) out.add(c); }
+  }
+  return [...out];
+}
+function parseVin(raw){
+  const lines = elmClean(raw);
+  if(elmNoData(lines)) return '';
+  const msg = elmMessages(lines).join('');
+  const i = msg.indexOf('4902'); if(i<0) return '';
+  const ascii = (msg.slice(i+4).match(/../g)||[]).map(h=>String.fromCharCode(parseInt(h,16))).join('').replace(/[^A-HJ-NPR-Z0-9]/g,'');
+  return ascii.length>=17 ? ascii.slice(-17) : '';
+}
+function parsePid(raw, pid){
+  const lines = elmClean(raw);
+  if(elmNoData(lines)) return null;
+  for(const msg of elmMessages(lines)){
+    const i = msg.indexOf('41'+pid); if(i<0) continue;
+    const b = (msg.slice(i+4).match(/../g)||[]).map(h=>parseInt(h,16));
+    if(!b.length) continue;
+    switch(pid){
+      case '01': return { mil: !!(b[0]&0x80), dtc_count: b[0]&0x7f };
+      case '0C': return b.length>1 ? (b[0]*256+b[1])/4 : null;
+      case '05': case '0F': return b[0]-40;
+      case '04': case '2F': return Math.round(b[0]*1000/255)/10;
+      case '0D': return b[0];
+      case '21': case '31': return b.length>1 ? b[0]*256+b[1] : null;
+    }
+  }
+  return null;
+}
+
+/* --- Verbindung: echter Adapter über Web Bluetooth --- */
+class ElmBle {
+  constructor(){ this.buf=''; this.waiter=null; this.queue=Promise.resolve(); this.name=''; }
+  async connect(){
+    const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices: OBD_BLE_SERVICES });
+    this.device = dev; this.name = dev.name || 'OBD-Adapter';
+    dev.addEventListener('gattserverdisconnected', ()=>diagOnDisconnect());
+    const server = await dev.gatt.connect();
+    let rx=null, tx=null;
+    for(const uuid of OBD_BLE_SERVICES){
+      let svc; try{ svc = await server.getPrimaryService(uuid); }catch(_){ continue; }
+      const chars = await svc.getCharacteristics();
+      const n = chars.find(c=>c.properties.notify||c.properties.indicate);
+      const w = chars.find(c=>c.properties.write||c.properties.writeWithoutResponse);
+      if(n && w){ rx=n; tx=w; break; }
+    }
+    if(!rx || !tx){ try{ server.disconnect(); }catch(_){} throw new Error('Adapter erkannt, aber kein OBD-Datenkanal gefunden. Bitte einen ELM327-kompatiblen BLE-Adapter verwenden (z. B. OBDLink CX, Veepeak OBDCheck BLE+).'); }
+    this.tx = tx;
+    await rx.startNotifications();
+    const dec = new TextDecoder();
+    rx.addEventListener('characteristicvaluechanged', ev=>{
+      this.buf += dec.decode(ev.target.value);
+      if(this.waiter && this.buf.includes('>')){ const w=this.waiter; this.waiter=null; w(this.buf); }
+    });
+  }
+  send(cmd, timeoutMs){
+    const run = async ()=>{
+      this.buf = '';
+      const p = new Promise((resolve)=>{
+        const t = setTimeout(()=>{ this.waiter=null; resolve(this.buf + '\nTIMEOUT'); }, timeoutMs || 5000);
+        this.waiter = (b)=>{ clearTimeout(t); resolve(b); };
+      });
+      const data = new TextEncoder().encode(cmd + '\r');
+      for(let i=0;i<data.length;i+=20){
+        const chunk = data.slice(i,i+20);
+        if(this.tx.properties.writeWithoutResponse && this.tx.writeValueWithoutResponse) await this.tx.writeValueWithoutResponse(chunk);
+        else await this.tx.writeValue(chunk);
+      }
+      return p;
+    };
+    const r = this.queue.then(run, run); this.queue = r.catch(()=>{}); return r;
+  }
+  disconnect(){ try{ this.device && this.device.gatt.connected && this.device.gatt.disconnect(); }catch(_){} }
+}
+/* --- Simulation: antwortet wie ein ELM327 an einem CAN-Fahrzeug (Benziner) --- */
+// Simulierte Steuergeräte eines Golf 7: DTC (3 Byte) + Status (09 = aktiv, 08 = sporadisch)
+const SIM_VAG = {
+  '7E0': { part:'04E906016DE', sys:'R4 1.4l TFSI', sw:'4019', coding:'01170032242401082000' },
+  '7E1': { part:'0CW300049H', sys:'DQ200-MQB', sw:'4625', coding:'0014' },
+  '713': { part:'5Q0907379BA', sys:'ESC', dtcs:['40352909'], slow:true, sw:'0610', coding:'B0B2F5A3C1A4440C0C34E04B3E0410024A3D00C2B8' },
+  '715': { part:'5Q0959655AB', sys:'Airbag VW8', dtcs:['80011D08'], sw:'0602', coding:'0000312E1D04' },
+  '714': { part:'5G1920741A', sys:'KOMBI', dtcs:[], sw:'5410', coding:'2B0D0004000400000000' },
+  '710': { part:'5Q0907530AA', sys:'GW MQB High', dtcs:['C1210008'], sw:'1219', coding:'0300003F1C' },
+  '70E': { part:'5Q0937084BD', sys:'BCM MQB', dtcs:[], sw:'0254', coding:'1D1C1A47A10C1A5B7C0C2C8A51ABCA00402000441700' },
+  '712': { part:'5Q0909144R', sys:'EPS_ZFLS Kl.', dtcs:[], sw:'3060', coding:'0021' },
+  '746': { part:'5G0907044BT', sys:'CLIMA', dtcs:['90AB7109'], sw:'1012', coding:'09000000' },
+};
+const SIM_SUPPORTED = ['01','03','04','05','06','07','0B','0C','0D','0E','0F','10','11','13','1C','20','21','2F','30','31','40','42','46','5C'];
+class ElmSim {
+  constructor(vin){ this.name='Simulation'; this.sim=true; this.codes=['0420','0171']; this.pending=['C100']; this.mil=true; this.t0=Date.now(); this.vin=vin;
+    this.incomplete=0x04; this.warmups=37; this.distClear=1840; }
+  async connect(){ await new Promise(r=>setTimeout(r,600)); }
+  // Messwerte des laufenden Motors (leicht schwankend); Ausgabe als Rohbytes je PID
+  liveBytes(pid, sec){
+    const h1 = n=>[Math.max(0,Math.min(255,Math.round(n)))], h2 = n=>{ n=Math.max(0,Math.round(n)); return [(n>>8)&255, n&255]; };
+    const rpm = 780+Math.sin(sec*1.7)*35+Math.random()*20;
+    switch(pid){
+      case '0C': return h2(rpm*4);
+      case '0D': return h1(0);
+      case '05': return h1(Math.min(90, 62+sec*0.6)+40);
+      case '04': return h1((19+Math.random()*4)*2.55);
+      case '11': return h1(14.5*2.55);
+      case '06': return h1(128 + (9+Math.sin(sec*3)*4)*1.28);
+      case '07': return h1(128 + 11.7*1.28);
+      case '0B': return h1(31+Math.random()*2);
+      case '10': return h2((3.1+Math.random()*0.3)*100);
+      case '0F': return h1(24+40);
+      case '0E': return h1((6+Math.random()*2+64)*2);
+      case '5C': return h1(Math.min(96, 55+sec*0.4)+40);
+      case '46': return h1(12+40);
+      case '2F': return h1(0.42*255);
+      case '42': return h2((this.cranked?14.1:12.5)*1000);
+    }
+    return null;
+  }
+  async send(cmd){
+    await new Promise(r=>setTimeout(r, 60 + Math.random()*90));
+    const c = cmd.toUpperCase().replace(/\s/g,''); const h = (n,l)=>Math.max(0,Math.round(n)).toString(16).toUpperCase().padStart(l,'0');
+    const hx = arr=>arr.map(x=>h(x,2)).join('');
+    const sec = (Date.now()-this.t0)/1000;
+    if(c==='ATZ') return 'ELM327 v1.5\r\r>';
+    if(c==='ATRV'){
+      if(this.simCrankAt){ const t = (Date.now()-this.simCrankAt)/1000;
+        if(t<1.2) return '12.5V\r\r>'; if(t<2.2) return (9.9+Math.random()*0.5).toFixed(1)+'V\r\r>'; this.cranked = true; this.simCrankAt = null; }
+      return (this.cranked ? (14.0+Math.sin(sec)*0.15) : 12.6).toFixed(1)+'V\r\r>';
+    }
+    if(c==='ATI') return 'ELM327 v1.5\r\r>';
+    if(c==='090A') return '490A01'+[...'ECM-EngineControl'].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+    if(c==='0904') return '490401'+[...'04E906016DE 0003'].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+    if(c==='ATDPN') return 'A6\r\r>';
+    if(c==='ATDP') return 'AUTO, ISO 15765-4 (CAN 11/500)\r\r>';
+    if(c.startsWith('ATSH')) this.hdr = c.slice(4);
+    if(c.startsWith('AT')) return 'OK\r\r>';
+    // UDS an einzelne Steuergeräte (VW-Konzern): Fehlerspeicher 19 02, Kennung 22 F187/F197
+    if(this.hdr && this.hdr!=='7DF' && /^(19|22)/.test(c)){
+      const ecu = SIM_VAG[this.hdr];
+      if(!ecu) return 'NO DATA\r\r>';
+      if(c==='22F187') return '62F187'+[...ecu.part].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c==='22F197') return '62F197'+[...ecu.sys].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c==='22F189') return '62F189'+[...(ecu.sw||'0001')].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c==='22F191') return '62F191'+[...(ecu.hw||ecu.part)].map(ch=>h(ch.charCodeAt(0),2)).join('')+'\r\r>';
+      if(c==='220600') return ecu.coding ? '620600'+ecu.coding+'\r\r>' : '7F2231\r\r>';
+      if(c.startsWith('1902')){
+        if(ecu.slow && !this['_slow'+this.hdr]){ this['_slow'+this.hdr]=1; return '7F1978\r\r>'; }
+        const list = this.hdr==='7E0' ? this.codes.map(x=>x+'0009') : (ecu.dtcs || []);
+        return '5902FF'+list.join('')+'\r\r>';
+      }
+      return '7F'+c.slice(0,2)+'11\r\r>';
+    }
+    if(/^01(00|20|40)$/.test(c)){
+      const base = parseInt(c.slice(2),16); const bytes=[0,0,0,0];
+      SIM_SUPPORTED.forEach(p=>{ const i=parseInt(p,16)-base-1; if(i>=0 && i<32) bytes[i>>3] |= 0x80>>(i&7); });
+      return '41'+c.slice(2)+hx(bytes)+'\r\r>';
+    }
+    // B: Funken (Bit3=0), alle Daueraufgaben unterstützt; C: Kat, EVAP, Lambda, Lambda-Heizung; D: offene Prüfungen
+    if(c==='0101') return '4101'+h((this.mil?0x80:0)+this.codes.length,2)+'07'+'65'+h(this.incomplete,2)+'\r\r>';
+    if(c==='0130') return '4130'+h(this.warmups,2)+'\r\r>';
+    if(c==='0131') return '4131'+h(this.distClear,4)+'\r\r>';
+    if(c==='03') return '43'+h(this.codes.length,2)+this.codes.join('')+'\r\r>';
+    if(c==='07') return '47'+h(this.pending.length,2)+this.pending.join('')+'\r\r>';
+    if(c==='0A') return '4A00\r\r>';
+    if(c==='04'){ this.codes=[]; this.pending=[]; this.mil=false; this.incomplete=0x65; this.warmups=0; this.distClear=0; return '44\r\r>'; }
+    if(c==='0902'){
+      const hex = '01' + [...this.vin].map(ch=>h(ch.charCodeAt(0),2)).join('');
+      const all = '4902' + hex; const parts = []; parts.push('0:'+all.slice(0,12)); let rest = all.slice(12), i=1;
+      while(rest.length){ parts.push(((i++)%16).toString(16).toUpperCase()+':'+rest.slice(0,14)); rest = rest.slice(14); }
+      return '014\r' + parts.join('\r') + '\r\r>';
+    }
+    if(c==='0121') return '4121'+h(this.mil?412:0,4)+'\r\r>';
+    // Freeze-Frame (Frame 0) gehört zum ersten gespeicherten Code: warmer Motor, Teillast bei 50 km/h
+    const ff = c.match(/^02([0-9A-F]{2})00$/);
+    if(ff){
+      if(!this.codes.length) return 'NO DATA\r\r>';
+      const FF = { '02':[parseInt(this.codes[0].slice(0,2),16), parseInt(this.codes[0].slice(2),16)], '0C':[0x1C,0x20], '0D':[50], '05':[128], '04':[0x6B], '11':[0x33], '06':[128+16], '07':[128+15], '0B':[58], '10':[0x05,0xDC], '0F':[58] };
+      return FF[ff[1]] ? '42'+ff[1]+'00'+hx(FF[ff[1]])+'\r\r>' : 'NO DATA\r\r>';
+    }
+    const m = c.match(/^01([0-9A-F]{2})$/);
+    if(m){ this.cranked = true; const b = this.liveBytes(m[1], sec); if(b) return '41'+m[1]+hx(b)+'\r\r>'; }
+    return 'NO DATA\r\r>';
+  }
+  disconnect(){}
+}
+
+/* --- Zustand & Ablauf --- */
+var diag = { codingHist:{}, orderId:null, conn:null, connecting:false, busy:'', error:'', protocol:'', isCan:null, supported:null, results:{}, history:{}, liveOn:false, liveTimer:null, liveRound:0, confirmClear:false, openInfo:{}, screen:'menu' };
+diag.simQuiet = (()=>{ try{ return localStorage.getItem('autoleitwerk.diagSimQuiet')==='1'; }catch(_){ return false; } })();
+function diagSetSimQuiet(on){ diag.simQuiet = on; try{ localStorage.setItem('autoleitwerk.diagSimQuiet', on ? '1' : '0'); }catch(_){} rerenderDiagPanel(); }
+function diagOrder(){ return diag.orderId ? orders.find(o=>o.id===diag.orderId) || null : null; }
+function diagRes(o){ const k = o ? o.id : '_none'; return diag.results[k] || (diag.results[k] = { codes:null, vin:'', live:{}, readAt:null, saved:false, remark:'', cleared:false, readiness:null, freeze:null, sinceClear:null, tasks:{}, ecus:null, ecuScanAt:null, info:null, battery:null, clearedAt:null }); }
+function diagOnDisconnect(){
+  if(!diag.conn || diag.conn.sim) return;
+  diagStopLive(); diag.conn = null; diag.error = 'Verbindung zum Adapter getrennt.'; rerenderDiagPanel();
+}
+function diagVinFor(o){ const v = String((o && o.vin)||'').toUpperCase(); return /^[A-HJ-NPR-Z0-9]{17}$/.test(v) ? v : 'WVWZZZAUZLW000123'; }
+async function diagConnect(sim){
+  const o = diagOrder(); if(diag.connecting) return;
+  diag.error=''; diag.connecting=true; rerenderDiagPanel();
+  try{
+    let conn;
+    if(sim) conn = new ElmSim(diagVinFor(o));
+    else {
+      if(!navigator.bluetooth) throw new Error('nobt');
+      conn = new ElmBle();
+    }
+    await conn.connect();
+    for(const c of ['ATZ','ATE0','ATL0','ATS0','ATH0','ATAT1','ATSP0']) await conn.send(c, c==='ATZ'?3000:2000);
+    const probe = elmClean(await conn.send('0100', 12000));
+    if(elmNoData(probe) || probe.some(l=>/TIMEOUT/.test(l))){ conn.disconnect(); throw new Error('Adapter verbunden, aber keine Antwort vom Fahrzeug. Zündung einschalten und erneut verbinden.'); }
+    const dpn = elmClean(await conn.send('ATDPN')).join('').replace(/^A/,'');
+    diag.isCan = /^[6-9AB]$/i.test(dpn) ? true : /^[1-5]$/.test(dpn) ? false : null;
+    diag.protocol = elmClean(await conn.send('ATDP')).join(' ').replace(/^AUTO,\s*/,'');
+    // Welche Messwerte liefert dieses Steuergerät? (0100 → PIDs 01–20, 0120 → 21–40, 0140 → 41–60)
+    const sup = parseSupported(probe.join('\r'), '00');
+    if(sup.includes('20')){ const s2 = parseSupported(await conn.send('0120', 6000), '20'); sup.push(...s2); if(s2.includes('40')) sup.push(...parseSupported(await conn.send('0140', 6000), '40')); }
+    diag.supported = sup.length ? new Set(sup) : null;
+    diag.conn = conn;
+    showUpdateToast(sim ? (diag.simQuiet ? 'Fahrzeug verbunden' : 'Simulation gestartet') : `Verbunden mit ${conn.name}`);
+  }catch(err){
+    const m = String(err && err.message || err);
+    diag.error = m==='nobt' ? 'nobt'
+      : /cancel|chosen|User/i.test(m) ? ''
+      : /pair|bond|auth|security/i.test(m) ? 'Kopplung fehlgeschlagen. Adapter kurz ab- und wieder einstecken und innerhalb von 5 Minuten verbinden.'
+      : m;
+  }
+  diag.connecting=false; rerenderDiagPanel();
+}
+function diagDisconnect(){ diagStopLive(); if(diag.conn) diag.conn.disconnect(); diag.conn=null; diag.confirmClear=false; rerenderDiagPanel(); }
+async function diagRead(){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  const r = diagRes(o); diag.busy='read'; diag.error=''; diag.confirmClear=false; rerenderDiagPanel();
+  try{
+    const raw01 = await diag.conn.send('0101', 6000);
+    const st = parsePid(raw01, '01');
+    r.readiness = parseReadiness(raw01);
+    const stored = parseDtcs(await diag.conn.send('03', 8000), '43', diag.isCan);
+    const pending = parseDtcs(await diag.conn.send('07', 8000), '47', diag.isCan);
+    const perm = parseDtcs(await diag.conn.send('0A', 8000), '4A', diag.isCan);
+    const codes = [];
+    stored.forEach(c=>codes.push({ code:c, type:'stored' }));
+    pending.filter(c=>!stored.includes(c)).forEach(c=>codes.push({ code:c, type:'pending' }));
+    perm.filter(c=>!stored.includes(c) && !pending.includes(c)).forEach(c=>codes.push({ code:c, type:'permanent' }));
+    codes.forEach(c=>c.desc = dtcDescription(c.code));
+    r.codes = codes; r.cleared=false; r.saved=false; r.readAt = new Date().toISOString();
+    r.vin = parseVin(await diag.conn.send('0902', 8000)) || r.vin;
+    r.live = { ...r.live, ...(st||{}) };
+    const v = parseFloat(elmClean(await diag.conn.send('ATRV')).join('')); if(Number.isFinite(v)) r.live.voltage = v;
+    const dm = parsePid(await diag.conn.send('0121'), '21'); if(dm!==null) r.live.distance_mil_km = dm;
+    // Seit dem letzten Löschen (zeigt z. B. beim Gebrauchtwagen-Check, ob kurz vorher gelöscht wurde)
+    const sc = {};
+    if(diagSup('30')){ const b = pidData(await diag.conn.send('0130'), '41', '30'); if(b) sc.warmups = b[0]; }
+    if(diagSup('31')){ const b = pidData(await diag.conn.send('0131'), '41', '31'); if(b && b.length>1) sc.km = b[0]*256+b[1]; }
+    r.sinceClear = Object.keys(sc).length ? sc : null;
+    r.freeze = stored.length ? await diagReadFreeze() : null;
+  }catch(err){ diag.error = 'Auslesen fehlgeschlagen: ' + (err && err.message || err); }
+  diag.busy=''; rerenderDiagPanel();
+}
+function diagSup(pid){ return !diag.supported || diag.supported.has(pid); }
+async function diagReadFreeze(){
+  const head = pidData(await diag.conn.send('020200', 6000), '42', '02');
+  if(!head || head.length<2) return null;
+  const code = decodeDtc(head[0], head[1]); if(!code) return null;
+  const values = {};
+  for(const pid of FREEZE_PIDS){
+    if(!diagSup(pid)) continue;
+    const def = LIVE_PIDS.find(x=>x.pid===pid);
+    const v = pidValue(def, pidData(await diag.conn.send('02'+pid+'00', 4000), '42', pid));
+    if(v!==null) values[def.key] = v;
+  }
+  return { code, values };
+}
+/* Steuergeräte-Scan VW-Konzern: jedes Steuergerät einzeln per UDS ansprechen, danach Adapter zurück auf OBD-Standard */
+async function diagScanVag(){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  if(diag.isCan===false){ diag.error = 'Der Steuergeräte-Scan geht nur bei CAN-Fahrzeugen (VW-Konzern etwa ab Golf 5 / 2004, vollständig ab ca. 2012).'; rerenderDiagPanel(); return; }
+  const r = diagRes(o); diagStopLive();
+  diag.busy='scan'; diag.error=''; r.ecus = []; r.ecusStale = false; r.saved = false; rerenderDiagPanel();
+  const send = (c,t)=>diag.conn.send(c, t||2000);
+  const hex = n=>n.toString(16).toUpperCase();
+  try{
+    for(const c of ['ATCAF1','ATH0','ATS0']) await send(c);
+    for(let i=0;i<VAG_ECUS.length;i++){
+      const ecu = VAG_ECUS[i]; const tx = hex(ecu.tx), rx = hex(ecu.rx || ecu.tx+0x6A);
+      diag.scanStep = `${i+1}/${VAG_ECUS.length} · ${ecu.name}`; rerenderDiagPanel();
+      for(const c of ['ATSH'+tx, 'ATCRA'+rx, 'ATFCSH'+tx, 'ATFCSD300000', 'ATFCSM1']) await send(c);
+      let res = parseUdsDtcs(await send('1902FF', 5000));
+      if(res.status==='pending'){ await new Promise(z=>setTimeout(z, 900)); res = parseUdsDtcs(await send('1902FF', 8000)); }
+      if(res.status==='pending') res = { status:'neg', nrc:'78' };
+      const e = { id:ecu.id, name:ecu.name, addr:tx, status:res.status, nrc:res.nrc||'', codes:res.codes||[], part:'', sys:'' };
+      if(res.status!=='nodata'){
+        e.part = parseUdsAscii(await send('22F187', 3000), 'F187');
+        e.sys = parseUdsAscii(await send('22F197', 3000), 'F197');
+      }
+      r.ecus.push(e);
+    }
+    r.ecuScanAt = new Date().toISOString();
+  }catch(err){ diag.error = 'Scan abgebrochen: ' + (err && err.message || err); }
+  // Adapter zurück auf OBD-Standard (Funktionsadresse 7DF, kein Filter, Standard-Flusskontrolle)
+  try{ for(const c of ['ATCRA','ATFCSM0','ATSH7DF']) await send(c); }catch(_){}
+  diag.busy=''; diag.scanStep='';
+  const n = (r.ecus||[]).reduce((s,e)=>s+e.codes.length,0), found = (r.ecus||[]).filter(e=>e.status!=='nodata').length;
+  if(r.ecus && r.ecus.length) showUpdateToast(`${found} Steuergeräte gefunden · ${n} Fehlereinträge`);
+  rerenderDiagPanel();
+}
+// Mode 09 als Text (0A = Steuergerätename, 04 = Kalibrierungs-ID); erstes Byte nach der PID = Anzahl Datenelemente
+function parseMode09Ascii(raw, pid){
+  const lines = elmClean(raw); if(elmNoData(lines)) return '';
+  const msg = elmMessages(lines).join(''); const i = msg.indexOf('49'+pid); if(i<0) return '';
+  return (msg.slice(i+6).match(/../g)||[]).map(h=>parseInt(h,16)).map(c=>c>=32 && c<127 ? String.fromCharCode(c) : ' ').join('').replace(/\s+/g,' ').trim().slice(0,60);
+}
+async function diagReadInfo(){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  const r = diagRes(o); diag.busy='info'; rerenderDiagPanel();
+  try{
+    const vin = parseVin(await diag.conn.send('0902', 8000)); if(vin) r.vin = vin;
+    const info = { ecu_name: parseMode09Ascii(await diag.conn.send('090A', 6000), '0A'), calid: parseMode09Ascii(await diag.conn.send('0904', 6000), '04') };
+    const v = parseFloat(elmClean(await diag.conn.send('ATRV')).join('')); if(Number.isFinite(v)) r.live.voltage = v;
+    info.adapter_version = elmClean(await diag.conn.send('ATI')).join(' ').slice(0,40);
+    r.info = info;
+  }catch(err){ diag.error = 'Lesen fehlgeschlagen: ' + (err && err.message || err); }
+  diag.busy=''; rerenderDiagPanel();
+}
+function renderDiagInfo(o, r){
+  const i = r.info || {};
+  const row = (k,v,extra)=> `<div class="dg-kv"><span>${k}</span><b>${v ? escHtml(v) : '–'}</b>${extra||''}</div>`;
+  const supported = diag.supported ? LIVE_PIDS.filter(p=>diag.supported.has(p.pid)).map(p=>p.label) : [];
+  const mis = r.vin && o && o.vin && o.vin!=='–' && o.vin.toUpperCase()!==r.vin;
+  return `${diag.busy==='info' ? `<div class="dg-scan-run"><span class="dg-spin"></span>Lese Fahrzeugdaten…</div>` : ''}
+    <div class="dg-kvs">
+      ${row('FIN (Steuergerät)', r.vin, mis ? ' <em class="dg-mis">weicht vom Auftrag ab</em>' : '')}
+      ${row('FIN am Auftrag', o && o.vin !== '–' ? o.vin : '')}
+      ${row('Fahrzeug (Auftrag)', o ? [o.vehicle, o.plate].filter(Boolean).join(' · ') : '')}
+      ${row('Steuergerät', i.ecu_name)}
+      ${row('Kalibrierung / Software', i.calid)}
+      ${row('Protokoll', diag.protocol)}
+      ${row('Adapter', diag.conn ? diag.conn.name + (i.adapter_version ? ' (' + i.adapter_version + ')' : '') : '')}
+      ${row('Bordspannung', r.live.voltage!==undefined ? diagFmt(r.live.voltage,1) + ' V' : '')}
+      ${row('Marke erkannt', isVagVehicle(o, r.vin) ? 'VW-Konzern – Steuergeräte-Scan möglich' : 'Standard-OBD')}
+    </div>
+    ${supported.length ? `<div class="dg-block"><div class="dg-head"><b>Unterstützte Live-Werte</b><span>${supported.length} von ${LIVE_PIDS.length}</span></div><div class="dg-chips">${supported.map(x=>`<span>${escHtml(x)}</span>`).join('')}</div></div>` : ''}
+    ${r.ecus ? `<div class="dg-block"><div class="dg-head"><b>Steuergeräte (aus dem Scan)</b></div><div class="dg-kvs">${r.ecus.filter(e=>e.status!=='nodata').map(e=>row(e.id+' '+e.name, [e.sys, e.part].filter(Boolean).join(' · '))).join('')}</div></div>` : ''}
+    <div class="dg-bar"><button class="btn" id="diagInfoBtn" ${diag.busy?'disabled':''}>Erneut lesen</button></div>`;
+}
+
+/* --- Batterie & Ladesystem: Spannung an der OBD-Buchse (Pin 16) über ATRV --- */
+function batVerdict(kind, v){
+  if(kind==='rest'){
+    if(v>13.2) return ['Motor läuft? Ruhespannung nur bei Motor aus messen', 'warn'];
+    if(v>=12.5) return ['gut geladen', 'ok']; if(v>=12.3) return ['teilentladen – nachladen', 'warn']; return ['schwach/tiefentladen – laden und Batterie testen', 'err'];
+  }
+  if(kind==='crank'){ if(v>=10) return ['gut', 'ok']; if(v>=9.6) return ['grenzwertig', 'warn']; return ['zu tief – Batterie, Anlasser oder Kabel prüfen', 'err']; }
+  if(v<13.2) return ['zu niedrig – Lichtmaschine/Regler/Riemen prüfen (Ausnahme: intelligentes Generatormanagement)', 'err'];
+  if(v<13.6) return ['niedrig – bei Start-Stopp/Generatormanagement teils normal', 'warn'];
+  if(v<=14.9) return ['Lichtmaschine lädt', 'ok']; return ['zu hoch – Regler prüfen', 'err'];
+}
+async function batReadV(){ const v = parseFloat(elmClean(await diag.conn.send('ATRV', 2000)).join('')); return Number.isFinite(v) ? v : null; }
+async function batMeasure(kind){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  const r = diagRes(o); r.battery = r.battery || {};
+  diagStopLive(); diag.busy='bat'; diag.batKind = kind; diag.batNow = null; rerenderDiagPanel();
+  try{
+    if(kind==='crank'){
+      // 15 s so schnell wie möglich messen, tiefsten Wert merken; Ende, wenn Motor läuft (Ladespannung)
+      if(diag.conn.sim) diag.conn.simCrankAt = Date.now();
+      let min = null; const t0 = Date.now(); let ran = false;
+      while(Date.now()-t0 < 15000){
+        const v = await batReadV(); if(v===null) continue;
+        diag.batNow = v; if(min===null || v<min) min = v;
+        const el = document.getElementById('batNow'); if(el) el.textContent = diagFmt(v,1) + ' V';
+        if(min < 11.8 && v > 13.2){ ran = true; break; }
+      }
+      if(min!==null && min < 11.8) r.battery.crank = { kind, v:min, at:new Date().toISOString() };
+      else diag.error = ran ? '' : 'Kein Startvorgang erkannt. „Messen“ tippen und dann innerhalb von 15 Sekunden den Motor starten.';
+    } else {
+      const vals = []; for(let i=0;i<5;i++){ const v = await batReadV(); if(v!==null) vals.push(v); await new Promise(z=>setTimeout(z,250)); }
+      if(vals.length) r.battery[kind] = { kind, v: Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*100)/100, at:new Date().toISOString() };
+    }
+    r.saved = false;
+  }catch(err){ diag.error = 'Messung fehlgeschlagen: ' + (err && err.message || err); }
+  diag.busy=''; diag.batKind=''; rerenderDiagPanel();
+}
+function renderBatTest(r){
+  const b = r.battery || {};
+  const step = (kind, n, title, how)=>{
+    const m = b[kind]; const vd = m ? batVerdict(kind, m.v) : null; const run = diag.busy==='bat' && diag.batKind===kind;
+    return `<div class="dg-bat ${vd ? vd[1] : ''}">
+      <span class="dg-bat-n">${n}</span>
+      <div class="dg-bat-t"><b>${title}</b><span>${how}</span>${vd ? `<em>${escHtml(vd[0])}</em>` : ''}</div>
+      <div class="dg-bat-v">${run ? `<b id="batNow">${kind==='crank' ? 'Jetzt starten!' : '…'}</b>` : m ? `<b>${diagFmt(m.v, kind==='crank'?1:2)} V</b>${kind==='crank'?'<i>tiefster Wert</i>':''}` : '<b>–</b>'}</div>
+      <button class="btn ${m?'':'primary'}" data-batmeasure="${kind}" ${diag.busy?'disabled':''}>${run ? 'Misst…' : m ? 'Neu messen' : 'Messen'}</button>
+    </div>`;
+  };
+  return `<div class="dg-bats">
+      ${step('rest', 1, 'Ruhespannung', 'Motor aus, Zündung an, Verbraucher aus')}
+      ${step('crank', 2, 'Startspannung', '„Messen“ tippen, dann Motor starten')}
+      ${step('charge', 3, 'Ladespannung', 'Motor läuft im Leerlauf, gern mit Licht/Gebläse an')}
+    </div>
+    <div class="alex-hint">Gemessen an der OBD-Buchse – liegt meist 0,1–0,2 V unter dem Wert direkt an der Batterie. Die Ruhespannung ist erst aussagekräftig, wenn das Fahrzeug einige Stunden stand. Ein Batterietester mit Lasttest ersetzt diese Messung nicht.</div>`;
+}
+/* --- Codierung sichern (VW-Konzern): nur Lesen (UDS 22), es wird nichts ins Fahrzeug geschrieben --- */
+async function diagReadCoding(){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  if(diag.isCan===false){ diag.error = 'Nur bei CAN-Fahrzeugen möglich (VW-Konzern etwa ab 2012 vollständig).'; rerenderDiagPanel(); return; }
+  const r = diagRes(o); diagStopLive();
+  diag.busy='coding'; diag.error=''; rerenderDiagPanel();
+  const send = (c,t)=>diag.conn.send(c, t||2000); const hex = n=>n.toString(16).toUpperCase();
+  const res = { at:new Date().toISOString(), voltage:null, ecus:[], saved:false };
+  try{
+    res.voltage = parseFloat(elmClean(await send('ATRV')).join('')) || null;
+    for(const c of ['ATCAF1','ATH0','ATS0']) await send(c);
+    // Wenn schon gescannt: nur Steuergeräte, die geantwortet haben
+    const list = r.ecus && r.ecus.length ? VAG_ECUS.filter(e=>r.ecus.some(x=>x.id===e.id && x.status!=='nodata')) : VAG_ECUS;
+    for(let i=0;i<list.length;i++){
+      const ecu = list[i]; const tx = hex(ecu.tx), rx = hex(ecu.rx || ecu.tx+0x6A);
+      diag.scanStep = `${i+1}/${list.length} · ${ecu.name}`; rerenderDiagPanel();
+      for(const c of ['ATSH'+tx, 'ATCRA'+rx, 'ATFCSH'+tx, 'ATFCSD300000', 'ATFCSM1']) await send(c);
+      const part = parseUdsAscii(await send('22F187', 3000), 'F187');
+      if(!part){ continue; } // nicht verbaut / keine Antwort
+      res.ecus.push({ id:ecu.id, name:ecu.name, addr:tx, part,
+        sw: parseUdsAscii(await send('22F189', 3000), 'F189'),
+        hw: parseUdsAscii(await send('22F191', 3000), 'F191'),
+        sys: parseUdsAscii(await send('22F197', 3000), 'F197'),
+        coding: parseUdsHex(await send('220600', 3000), '0600') });
+    }
+  }catch(err){ diag.error = 'Lesen abgebrochen: ' + (err && err.message || err); }
+  try{ for(const c of ['ATCRA','ATFCSM0','ATSH7DF']) await send(c); }catch(_){}
+  r.coding = res; diag.busy=''; diag.scanStep='';
+  if(res.ecus.length) showUpdateToast(`${res.ecus.length} Steuergeräte gelesen · ${res.ecus.filter(e=>e.coding).length} mit Codierung`);
+  rerenderDiagPanel();
+}
+async function diagSaveCoding(){
+  const o = diagOrder(); const r = diagRes(o);
+  if(!o){ diag.error = 'Bitte oben einen Auftrag wählen, um die Sicherung zu speichern.'; rerenderDiagPanel(); return; }
+  if(!r.coding || !r.coding.ecus.length || diag.busy) return;
+  diag.busy='save'; rerenderDiagPanel();
+  const res = await tabletRequest('coding_backup_save', { order_id:o.id, vin:r.vin, voltage:r.coding.voltage, simulated: !!(diag.conn && diag.conn.sim), ecus:r.coding.ecus }, 20000);
+  diag.busy='';
+  if(res.ok){ r.coding.saved = true; (diag.codingHist[o.id] = diag.codingHist[o.id] || []).unshift(res.data.entry); showUpdateToast('Codierung am Auftrag gesichert'); }
+  else diag.error = 'Speichern fehlgeschlagen: ' + res.reason;
+  rerenderDiagPanel();
+}
+async function loadCodingHist(o){
+  if(!o || diag.codingHist[o.id]) return;
+  diag.codingHist[o.id] = [];
+  const r = await tabletRequest('coding_backup_list', { order_id:o.id }, 15000);
+  if(r.ok){ diag.codingHist[o.id] = r.data.items || []; rerenderDiagPanel(); }
+}
+const codingBytes = h => (String(h||'').match(/../g)||[]).join(' ');
+function renderDiagCoding(o, r){
+  const c = r.coding; const hist = o ? (diag.codingHist[o.id] || []) : [];
+  // Vergleich mit der letzten Sicherung (nicht der gerade gespeicherten)
+  const ref = hist.find(h=>!c || !c.saved || h.saved_at !== hist[0].saved_at) || null;
+  const refOf = id => ref && ref.ecus.find(e=>e.id===id);
+  const v = c && c.voltage;
+  let html = `<div class="dg-warnbox dg-infobox">${iconInfo}<div><b>Nur Lesen – es wird nichts im Fahrzeug geändert.</b> Liest Codierung, Teilenummer und Software-Stand aller Steuergeräte und sichert sie am Auftrag. So lässt sich nach jeder späteren Änderung prüfen, was vorher eingestellt war.</div></div>`;
+  html += `<div class="dg-bar"><button class="btn primary" id="diagCodingBtn" ${diag.busy?'disabled':''}>${c ? 'Erneut lesen' : 'Codierungen auslesen'}</button>
+    ${c && c.ecus.length && o ? (c.saved ? `<span class="alex-done">${iconCheck} Am Auftrag gesichert</span>` : `<button class="btn" id="diagCodingSave" ${diag.busy?'disabled':''}>${iconCheck} Als Sicherung am Auftrag speichern</button>`) : ''}
+    ${c && !o ? '<span class="alex-muted">Zum Sichern oben einen Auftrag wählen.</span>' : ''}</div>`;
+  if(diag.busy==='coding') html += `<div class="dg-scan-run"><span class="dg-spin"></span>Lese ${escHtml(diag.scanStep||'')}</div>`;
+  if(c){
+    html += `<div class="dg-head"><b>${c.ecus.length} Steuergeräte gelesen</b><span>${escHtml(fmtSavedAt(c.at))}${v ? ` · Bordspannung <b class="${v<12.2?'dg-warn-t':''}">${diagFmt(v,1)} V</b>` : ''}${ref ? ` · verglichen mit Sicherung vom ${escHtml(fmtSavedAt(ref.saved_at))}` : ''}</span></div>`;
+    if(v && v<12.2) html += `<div class="alex-warn">${iconWarn} Bordspannung niedrig – für spätere Arbeiten am Steuergerät unbedingt ein Ladegerät anschließen.</div>`;
+    html += `<div class="dg-ecus">${c.ecus.map(e=>{
+      const old = refOf(e.id); const changed = old && old.coding && e.coding && old.coding !== e.coding; const swChanged = old && old.sw && e.sw && old.sw !== e.sw;
+      return `<div class="dg-ecu ${changed?'has':''}">
+        <div class="dg-ecu-h"><span class="dg-ecu-id">${escHtml(e.id)}</span><div><b>${escHtml(e.name)}</b><span>${escHtml([e.sys, e.part, e.sw && 'SW ' + e.sw, e.hw && e.hw!==e.part && 'HW ' + e.hw].filter(Boolean).join(' · '))}</span></div>
+          ${changed ? '<span class="dg-ecu-st err">Codierung geändert</span>' : old ? '<span class="dg-ecu-st ok">' + iconCheck + ' wie Sicherung</span>' : ''}</div>
+        <div class="dg-coding"><span>Codierung</span><code>${e.coding ? escHtml(codingBytes(e.coding)) : '– nicht lesbar –'}</code></div>
+        ${changed ? `<div class="dg-coding old"><span>vorher</span><code>${escHtml(codingBytes(old.coding))}</code></div>` : ''}
+        ${swChanged ? `<div class="alex-muted">Software geändert: ${escHtml(old.sw)} → ${escHtml(e.sw)}</div>` : ''}
+      </div>`; }).join('')}</div>`;
+  }
+  if(hist.length) html += `<div class="dg-hist"><b>Gespeicherte Sicherungen (Auftrag und Fahrzeug)</b>${hist.slice(0,8).map(h=>`<div class="dg-hist-row"><span>${escHtml(fmtSavedAt(h.saved_at))}${h.saved_by?' – '+escHtml(h.saved_by):''}${h.simulated?' <em class="dg-simtag">Simulation</em>':''}</span><span>${h.ecus.length} Steuergeräte${o && h.order_id && h.order_id!==o.id ? ' · früherer Auftrag' : ''}</span></div>`).join('')}</div>`;
+  return html;
+}
+async function diagLiveTick(){
+  const o = diagOrder(); if(!diag.conn || !diag.liveOn) return;
+  const r = diagRes(o);
+  const avail = LIVE_PIDS.filter(p=>diagSup(p.pid) && r.live['_no_'+p.key]!==true);
+  const slow = avail.filter(p=>!p.fast);
+  // schnelle Werte jedes Mal, von den übrigen zwei reihum
+  const batch = avail.filter(p=>p.fast).concat(slow.length ? [slow[diag.liveRound % slow.length], slow[(diag.liveRound+1) % slow.length]] : []);
+  diag.liveRound += 2;
+  try{
+    for(const p of [...new Set(batch)]){
+      if(!diag.liveOn) break;
+      const v = pidValue(p, pidData(await diag.conn.send('01'+p.pid), '41', p.pid));
+      if(v===null){ if(!diag.supported) r.live['_no_'+p.key] = true; continue; }
+      r.live[p.key] = v;
+    }
+    const v = parseFloat(elmClean(await diag.conn.send('ATRV')).join('')); if(Number.isFinite(v)) r.live.voltage = v;
+  }catch(_){}
+  const box = document.getElementById('diagLive'); if(box) box.innerHTML = renderDiagLive(r.live);
+  if(diag.liveOn) diag.liveTimer = setTimeout(diagLiveTick, 500);
+}
+function diagStopLive(){ diag.liveOn=false; clearTimeout(diag.liveTimer); }
+function diagToggleLive(){ if(diag.liveOn){ diagStopLive(); rerenderDiagPanel(); return; } if(!diag.conn) return; diag.liveOn=true; rerenderDiagPanel(); diagLiveTick(); }
+async function diagClear(){
+  const o = diagOrder(); if(!diag.conn || diag.busy) return;
+  const r = diagRes(o); diag.busy='clear'; diag.confirmClear=false; diagStopLive(); rerenderDiagPanel();
+  const before = r.codes || [];
+  const res = elmClean(await diag.conn.send('04', 10000));
+  if(!res.some(l=>/^44/.test(l.replace(/\s/g,'')))){ diag.busy=''; diag.error='Fehlerspeicher konnte nicht gelöscht werden (Zündung an, Motor aus?).'; rerenderDiagPanel(); return; }
+  diag.busy=''; r.clearedAt = new Date().toISOString(); if(r.ecus) r.ecusStale = true;
+  if(o) await diagSave({ cleared:true, codes: before });
+  r.remark=''; r.share=false;
+  await diagRead();
+  showUpdateToast('Fehlerspeicher gelöscht – Readiness ist zurückgesetzt, vor der AU Fahrzyklus fahren.');
+}
+async function diagSave(extra){
+  const o = diagOrder(); if(!o){ diag.error='Bitte oben einen Auftrag wählen, um die Diagnose zu speichern.'; rerenderDiagPanel(); return; }
+  const r = diagRes(o);
+  const box = document.getElementById('diagRemark'); if(box) r.remark = box.value;
+  const codes = (extra && extra.codes) || r.codes || [];
+  diag.busy='save'; rerenderDiagPanel();
+  const res = await tabletRequest('diagnosis_save', {
+    order_id:o.id, codes, vin:r.vin, live:r.live, simulated: !!(diag.conn && diag.conn.sim), cleared: !!(extra && extra.cleared),
+    readiness: r.readiness, freeze: r.freeze, since_clear: r.sinceClear,
+    battery: r.battery ? Object.fromEntries(Object.entries(r.battery).map(([k,m])=>[k, m.v])) : null,
+    ecus: r.ecus ? r.ecus.filter(e=>e.status!=='nodata').map(e=>({ id:e.id, name:e.name, part:e.part, sys:e.sys, status:e.status, codes:e.codes.map(x=>({ code:x.code, ftb:x.ftb, active:x.active, desc:x.desc, ftb_text:x.ftb_text })) })) : null,
+    adapter: diag.conn ? diag.conn.name : '', protocol: diag.protocol, remark: r.remark, share: !!r.share && !(extra && extra.cleared),
+  }, 20000);
+  diag.busy='';
+  if(res.ok){
+    if(!(extra && extra.cleared)) r.saved = true;
+    const d = res.data;
+    (diag.history[o.id] = diag.history[o.id] || []).unshift(d.entry);
+    if(d.vin_set){ o.vin = d.entry.vin; }
+    showUpdateToast(extra && extra.cleared ? 'Löschen am Auftrag protokolliert' : d.vin_mismatch ? `Gespeichert – Achtung: FIN weicht vom Auftrag ab (${d.vin_mismatch})` : d.vin_set ? 'Diagnose gespeichert, FIN am Auftrag ergänzt' : 'Diagnose am Auftrag gespeichert');
+  } else diag.error = 'Speichern fehlgeschlagen: ' + res.reason;
+  rerenderDiagPanel();
+}
+async function loadDiagHistory(o){
+  if(!o || diag.history[o.id]) return;
+  diag.history[o.id] = [];
+  const r = await tabletRequest('diagnosis_list', { order_id:o.id }, 15000);
+  if(r.ok){ diag.history[o.id] = r.data.items || []; rerenderDiagPanel(); }
+}
+function diagAskAlex(code){
+  const o = diagOrder();
+  const r = diagRes(o); const c = (r.codes||[]).find(x=>x.code===code);
+  if(code.includes(':')){
+    const [eid, dc, ftb] = code.split(':'); const e = (r.ecus||[]).find(x=>x.id===eid); const x = e && e.codes.find(y=>y.code===dc && y.ftb===ftb);
+    openAlexPanel(o ? o.id : null);
+    aiAsk(`Fehler ${dc}${x && x.ftb_text ? ' ('+x.ftb_text+')' : ''} im Steuergerät ${e ? e.id+' '+e.name : ''} bei ${(o && o.vehicle)||'einem Fahrzeug aus dem VW-Konzern'}: Was sind die häufigsten Ursachen und in welcher Reihenfolge sollte ich prüfen?`);
+    return;
+  }
+  openAlexPanel(o ? o.id : null);
+  aiAsk(`Fehlercode ${code}${c ? ` (${c.desc}, ${DTC_TYPE_LABEL[c.type]})` : ''} bei ${(o && o.vehicle)||'diesem Fahrzeug'}${o && o.motor && o.motor!=='–' ? ', '+o.motor : ''}: Was sind die häufigsten Ursachen und in welcher Reihenfolge sollte ich prüfen?`);
+}
+
+/* --- Darstellung --- */
+function diagFmt(v,d=0){ return v===undefined||v===null ? '–' : Number(v).toLocaleString('de-DE',{minimumFractionDigits:0, maximumFractionDigits:d}); }
+function renderDiagLive(L){
+  const cell = (lbl,val,unit,warn)=>`<div class="dg-live-c ${warn?'warn':''}"><span>${lbl}</span><b>${val}</b><i>${unit}</i></div>`;
+  let html = cell('Bordspannung', diagFmt(L.voltage,1), 'V', L.voltage!==undefined && (L.voltage<11.8 || L.voltage>15))
+    + cell('Motorleuchte', L.mil===undefined?'–':L.mil?'AN':'aus', '', L.mil);
+  LIVE_PIDS.forEach(p=>{
+    if(L['_no_'+p.key]) return;
+    if(L[p.key]===undefined && !(diag.liveOn && diagSup(p.pid) && diag.supported)) return;
+    html += cell(p.label, diagFmt(L[p.key], p.d), p.unit, L[p.key]!==undefined && p.warn && p.warn(L[p.key]));
+  });
+  return html;
+}
+/* ===== Tester-Hauptmenü: Kacheln → eigenes Fenster je Funktion ===== */
+const dgIc = {
+  codes: iconWarn, clear: iconTrash, history: iconClock, report: iconDoc, info: iconCar,
+  scan: svg('<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>'),
+  live: svg('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
+  ready: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>'),
+  freeze: svg('<path d="M12 2v20M4.9 4.9l14.2 14.2M2 12h20M4.9 19.1 19.1 4.9"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2M4 9l2 3-2 3M20 9l-2 3 2 3"/>'),
+  coding: svg('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>'),
+  battery: svg('<rect x="2" y="7" width="18" height="11" rx="2"/><path d="M22 11v3M7 12.5h4M9 10.5v4M14 12.5h3"/>'),
+};
+const DIAG_SCREENS = {
+  codes:     { t:'Fehlerspeicher lesen',  d:'Motor & Abgas: gespeicherte, sporadische und permanente Fehler', ic:'codes', conn:true },
+  scan:      { t:'Steuergeräte-Scan',     d:'Alle Steuergeräte einzeln (VW, Audi, Skoda, Seat/Cupra)', ic:'scan', conn:true },
+  coding:    { t:'Codierung sichern',     d:'Codierung, Teilenummer und Software aller Steuergeräte lesen und am Auftrag sichern (VW-Konzern)', ic:'coding', conn:true },
+  live:      { t:'Live-Daten / Istwerte', d:'Drehzahl, Temperaturen, Gemisch, Luftmasse, Drücke …', ic:'live', conn:true },
+  readiness: { t:'AU-Bereitschaft',       d:'Readiness-Monitore vor AU/HU prüfen', ic:'ready', conn:true },
+  freeze:    { t:'Freeze-Frame',          d:'Bedingungen beim Speichern des Fehlers', ic:'freeze', conn:true },
+  clear:     { t:'Fehlerspeicher löschen', d:'Motor-Fehlerspeicher nach der Reparatur löschen', ic:'clear', conn:true },
+  battery:   { t:'Batterie & Ladung',     d:'Ruhespannung, Starteinbruch, Ladespannung', ic:'battery', conn:true },
+  info:      { t:'Fahrzeug-Info',         d:'FIN, Steuergerät, Protokoll, unterstützte Werte', ic:'info', conn:true },
+  report:    { t:'Protokoll & Speichern', d:'Am Auftrag speichern, Kundenportal, Drucken/PDF', ic:'report' },
+  history:   { t:'Verlauf',               d:'Gespeicherte Diagnosen zu diesem Auftrag', ic:'history' },
+};
+function diagBadge(key, o, r){
+  const hist = o ? (diag.history[o.id] || []) : [];
+  switch(key){
+    case 'codes': return r.codes ? (r.codes.length ? [`${r.codes.length} Fehler`, 'err'] : ['keine Fehler', 'ok']) : null;
+    case 'scan': { if(!r.ecus) return null; if(r.ecusStale) return ['neu scannen', 'warn']; const n = r.ecus.reduce((s,e)=>s+e.codes.length,0); return n ? [`${n} Fehler`, 'err'] : ['alles i. O.', 'ok']; }
+    case 'readiness': return r.readiness ? (r.readiness.open ? [`${r.readiness.open} offen`, 'warn'] : ['alle fertig', 'ok']) : null;
+    case 'freeze': return r.freeze ? [r.freeze.code, 'warn'] : (r.codes && !r.codes.some(c=>c.type==='stored') ? ['kein Fehler', 'ok'] : null);
+    case 'live': return diag.liveOn ? ['läuft', 'ok'] : null;
+    case 'battery': { const b = r.battery; if(!b) return null; const v = [b.rest, b.crank, b.charge].filter(Boolean).map(x=>batVerdict(x.kind, x.v)[1]); return v.includes('err') ? ['prüfen', 'err'] : v.includes('warn') ? ['grenzwertig', 'warn'] : v.length ? ['i. O.', 'ok'] : null; }
+    case 'info': return r.vin ? [r.vin.slice(-6), ''] : null;
+    case 'coding': return r.coding ? (r.coding.saved ? ['gesichert', 'ok'] : [`${r.coding.ecus.length} gelesen`, 'warn']) : null;
+    case 'report': return r.saved ? ['gespeichert', 'ok'] : null;
+    case 'history': return hist.length ? [`${hist.length}×`, ''] : null;
+  }
+  return null;
+}
+function renderDiagMenu(o, r){
+  const c = diag.conn;
+  return `<div class="dg-menu">${Object.entries(DIAG_SCREENS).map(([k,d])=>{
+    const off = d.conn && !c; const bd = diagBadge(k, o, r);
+    return `<button class="dg-tile ${off?'off':''}" data-diagscreen="${k}" ${off?'disabled':''}>
+      <span class="dg-tile-ic">${dgIc[d.ic]}</span>
+      <span class="dg-tile-t">${escHtml(d.t)}</span><span class="dg-tile-d">${escHtml(d.d)}</span>
+      ${bd ? `<span class="dg-tile-b ${bd[1]}">${escHtml(bd[0])}</span>` : ''}
+    </button>`; }).join('')}</div>
+    ${!c ? `<div class="alex-hint">Grau = erst Fahrzeug verbinden (oder Simulation starten).</div>` : ''}`;
+}
+function renderDiagConn(){
+  const c = diag.conn; const noBt = diag.error==='nobt';
+  if(!c) return `<div class="dg-connect">
+      <button class="btn primary" id="diagConnectBtn" ${diag.connecting?'disabled':''}>${iconObd} ${diag.connecting?'Verbinde…':'Fahrzeug verbinden'}</button>
+      <button class="btn" id="diagSimBtn" ${diag.connecting?'disabled':''}>Simulation starten</button>
+    </div>
+    <div class="dg-steps"><b>So geht's:</b> Adapter in die OBD-Buchse (meist unter dem Lenkrad) stecken · Zündung an · „Fahrzeug verbinden“ tippen und den Adapter in der Liste wählen.</div>
+    ${noBt ? `<div class="alex-warn">${iconWarn} <span>Dieser Browser kann kein Bluetooth. Auf dem iPad das Tablet in der kostenlosen App <b>„Bluefy – Web BLE Browser“</b> öffnen (gleiche Adresse, gleiche Anmeldung). Die Simulation funktioniert auch hier.</span></div>` : ''}`;
+  // Vorführmodus: Simulationshinweis ausgeblendet → Leiste wie eine normale Verbindung (das Protokoll bleibt als Simulation gekennzeichnet)
+  if(c.sim && diag.simQuiet) return `<div class="dg-conn"><span class="dg-dot"></span><div><b>Fahrzeug verbunden</b><span>${escHtml(diag.protocol || 'verbunden')}</span></div><button class="btn dg-ic-btn" id="diagSimShow" title="Simulationshinweis einblenden" aria-label="Simulationshinweis einblenden">${iconInfo}</button><button class="btn" id="diagDisconnectBtn">Trennen</button></div>`;
+  return `<div class="dg-conn ${c.sim?'sim':''}"><span class="dg-dot"></span><div><b>${escHtml(c.sim ? 'Simulationsmodus' : c.name)}</b><span>${escHtml(c.sim ? 'Keine echten Fahrzeugdaten – nur zum Üben und Vorführen' : (diag.protocol || 'verbunden'))}</span></div>${c.sim ? `<button class="btn" id="diagSimHide">Hinweis ausblenden</button>` : ''}<button class="btn" id="diagDisconnectBtn">Trennen</button></div>`;
+}
+function renderDiagCodeList(o, r){
+  const sim = diag.conn && diag.conn.sim;
+  return r.codes.length ? `<div class="dg-table">${r.codes.map(x=>`<div class="dg-row">
+      <span class="dg-code ${x.type}">${x.code}</span>
+      <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${DTC_TYPE_LABEL[x.type]}</span></div>
+      <div class="dg-row-acts">
+        <button class="btn ${diag.openInfo[x.code]?'primary':''}" data-diaginfo="${x.code}">${diag.openInfo[x.code]?'Schließen':'Anzeigen'}</button>
+        <button class="btn" data-diagalex="${x.code}">ALEX fragen</button>
+        ${o && !sim ? (r.tasks[x.code] ? `<span class="dg-task-done">${iconCheck} Aufgabe angelegt</span>` : `<button class="btn" data-diagtask="${x.code}" ${diag.busy==='task'?'disabled':''}>${iconPlus} Aufgabe</button>`) : ''}
+      </div>
+    </div>${diag.openInfo[x.code] ? renderDtcInfo(x.code, x.code, '') : ''}`).join('')}</div>` : `<div class="alex-done">${iconCheck} Keine Fehlercodes gespeichert.</div>`;
+}
+function renderDiagSave(o, r){
+  const sim = diag.conn && diag.conn.sim;
+  return `<textarea id="diagRemark" class="dg-remark" rows="2" placeholder="Bemerkung (optional), z. B. Ursache gefunden, Teil bestellt…">${escHtml(r.remark||'')}</textarea>
+    ${sim || !o || !r.codes ? '' : `<label class="dg-share"><input type="checkbox" id="diagShare" ${r.share?'checked':''} ${r.saved?'disabled':''}> Im Kundenportal anzeigen (Fehlercodes mit Beschreibung, ohne Bemerkung)</label>`}
+    <div class="dg-save-row">
+      ${!o ? `<span class="alex-muted">Zum Speichern oben einen Auftrag wählen.</span>` : r.saved ? `<span class="alex-done">${iconCheck} Am Auftrag gespeichert${r.share && !sim ? ' – im Kundenportal sichtbar' : ''}</span>` : `<button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} ${diag.busy==='save'?'Speichere…':'Am Auftrag speichern'}</button>`}
+      <button class="btn" id="diagPrintBtn">${iconDoc} Diagnoseprotokoll (Drucken/PDF)</button>
+    </div>`;
+}
+const diagBusyText = { coding:'Lese Codierungen…', read:'Lese Fehlerspeicher…', clear:'Lösche…', scan:'Scan läuft…', info:'Lese Fahrzeugdaten…', bat:'Messe…', save:'Speichere…', task:'Lege Aufgabe an…' };
+function renderDiagScreen(o, r){
+  const c = diag.conn; const sim = c && c.sim; const busy = diag.busy;
+  const need = (fn)=> !c && DIAG_SCREENS[diag.screen].conn ? `<div class="alex-muted">Bitte zuerst das Fahrzeug verbinden.</div>` : fn();
+  const working = busy ? `<div class="dg-scan-run"><span class="dg-spin"></span>${escHtml(diagBusyText[busy] || 'Bitte warten…')}</div>` : '';
+  switch(diag.screen){
+    case 'codes': return need(()=>`
+      <div class="dg-bar"><button class="btn primary" id="diagReadBtn" ${busy?'disabled':''}>${r.codes ? 'Erneut lesen' : 'Fehlerspeicher lesen'}</button>
+        ${r.codes && r.codes.length ? `<button class="btn" data-diagscreen="clear">${iconTrash} Löschen…</button>` : ''}</div>
+      ${working}
+      ${r.codes ? `<div class="dg-head"><b>${r.codes.length ? r.codes.length + ' Fehler gefunden' : 'Fehlerspeicher leer'}</b><span>${r.readAt ? 'gelesen ' + escHtml(fmtSavedAt(r.readAt)) : ''}${r.live.mil!==undefined ? ` · Motorkontrollleuchte <b>${r.live.mil?'AN':'aus'}</b>` : ''}${r.live.distance_mil_km ? ` · ${diagFmt(r.live.distance_mil_km)} km mit MIL` : ''}</span></div>
+        ${renderDiagCodeList(o, r)}
+        ${renderDiagExtras(r, ['sc'])}
+        <div class="dg-links">${r.freeze ? `<button class="btn" data-diagscreen="freeze">${dgIc.freeze} Freeze-Frame zu ${escHtml(r.freeze.code)}</button>` : ''}${r.readiness ? `<button class="btn" data-diagscreen="readiness">${dgIc.ready} AU-Bereitschaft${r.readiness.open ? ' ('+r.readiness.open+' offen)' : ''}</button>` : ''}</div>
+        ${renderDiagSave(o, r)}
+        <div class="alex-hint">${sim && !diag.simQuiet ? 'Simulation – diese Werte stammen nicht aus dem Fahrzeug. ' : ''}Generische OBD-Beschreibungen. Herstellerspezifische Codes und Ursachen immer mit Herstellerdaten prüfen.</div>` : ''}`);
+    case 'scan': return need(()=>renderDiagEcus(o, r));
+    case 'coding': return need(()=>renderDiagCoding(o, r));
+    case 'live': return need(()=>`
+      <div class="dg-bar"><button class="btn ${diag.liveOn?'':'primary'}" id="diagLiveBtn">${diag.liveOn?'Anhalten':'Starten'}</button><span class="alex-muted">${diag.liveOn ? 'Werte werden laufend aktualisiert' : 'angehalten'}</span></div>
+      <div class="dg-live" id="diagLive">${renderDiagLive(r.live)}</div>
+      <div class="alex-hint">Rot = außerhalb des üblichen Bereichs. Trims: Kurzzeit ±20 %, Langzeit ±10 % als Richtwert.</div>`);
+    case 'readiness': return need(()=>`
+      <div class="dg-bar"><button class="btn" id="diagReadBtn" ${busy?'disabled':''}>Erneut lesen</button></div>${working}
+      ${r.readiness ? renderDiagExtras(r, ['rd']) + renderDiagExtras(r, ['sc']) + `<div class="alex-hint">„Offen“ heißt: Das Fahrzeug hat diese Selbstprüfung seit dem letzten Löschen noch nicht abgeschlossen. Abhilfe: Fahrzyklus (Kaltstart, Stadt, Landstraße, konstante Autobahnfahrt, Leerlauf). Nach dem Löschen sind alle Prüfungen zurückgesetzt.</div>`
+        : (busy ? '' : '<div class="alex-muted">Keine Readiness-Daten vom Steuergerät.</div>')}`);
+    case 'freeze': return need(()=>`
+      <div class="dg-bar"><button class="btn" id="diagReadBtn" ${busy?'disabled':''}>Erneut lesen</button></div>${working}
+      ${r.freeze ? renderDiagExtras(r, ['ff']) + `<div class="alex-hint">Hilft beim Nachstellen: Bei welcher Drehzahl, Last und Temperatur ist der Fehler aufgetreten? Für die Probefahrt nach der Reparatur diese Bedingungen wieder anfahren.</div>`
+        : (busy ? '' : `<div class="alex-muted">${r.codes && !r.codes.some(x=>x.type==='stored') ? 'Kein gespeicherter Fehler – daher kein Freeze-Frame.' : 'Das Steuergerät liefert keinen Freeze-Frame.'}</div>`)}`);
+    case 'clear': return need(()=>`
+      <div class="dg-warnbox">${iconWarn}<div><b>Vor dem Löschen beachten</b><ul>
+        <li>Erst löschen, wenn die Ursache behoben ist – sonst kommt der Fehler wieder.</li>
+        <li>Alle AU-Bereitschafts-Prüfungen werden zurückgesetzt. Vor einer AU/HU Fahrzyklus fahren.</li>
+        <li>Permanente Fehler verschwinden erst, wenn das Fahrzeug den Fehler selbst als behoben erkennt.</li>
+        <li>Motor aus, Zündung an.</li></ul></div></div>
+      ${r.codes ? `<div class="alex-muted">Aktuell im Speicher: ${r.codes.length ? r.codes.map(x=>x.code).join(', ') : 'keine Fehler'}</div>` : '<div class="alex-muted">Tipp: vorher „Fehlerspeicher lesen“ – die Codes werden dann beim Löschen am Auftrag protokolliert.</div>'}
+      ${working}
+      ${r.clearedAt && !busy ? `<div class="alex-done">${iconCheck} Gelöscht ${escHtml(fmtSavedAt(r.clearedAt))}. ${r.codes && r.codes.length ? 'Noch im Speicher: ' + r.codes.map(x=>x.code).join(', ') + ' (Ursache besteht oder permanenter Fehler).' : 'Fehlerspeicher ist jetzt leer.'}</div>` : ''}
+      <div class="dg-bar"><button class="btn danger" id="diagClearYes" ${busy?'disabled':''}>${iconTrash} Fehlerspeicher jetzt löschen</button></div>`);
+    case 'battery': return need(()=>renderBatTest(r));
+    case 'info': return need(()=>renderDiagInfo(o, r));
+    case 'report': return `
+      <div class="dg-sum">
+        ${[['Fehlerspeicher', r.codes ? (r.codes.length ? r.codes.map(x=>x.code).join(', ') : 'keine Fehler') : 'nicht gelesen'],
+           ['Steuergeräte', r.ecus ? r.ecus.filter(e=>e.status!=='nodata').length + ' gescannt, ' + r.ecus.reduce((s,e)=>s+e.codes.length,0) + ' Fehler' : 'nicht gescannt'],
+           ['AU-Bereitschaft', r.readiness ? (r.readiness.open ? r.readiness.open + ' von ' + r.readiness.items.length + ' offen' : 'alle fertig') : '–'],
+           ['Batterie & Ladung', r.battery ? [r.battery.rest && 'Ruhe '+diagFmt(r.battery.rest.v,2)+' V', r.battery.crank && 'Start min. '+diagFmt(r.battery.crank.v,1)+' V', r.battery.charge && 'Laden '+diagFmt(r.battery.charge.v,2)+' V'].filter(Boolean).join(' · ') : '–'],
+           ['Codierung', r.coding ? r.coding.ecus.length + ' Steuergeräte gelesen' + (r.coding.saved ? ', gesichert' : '') : '–'],
+           ['FIN', r.vin || '–']].map(([k,v])=>`<div><span>${k}</span><b>${escHtml(v)}</b></div>`).join('')}
+      </div>
+      ${renderDiagSave(o, r)}`;
+    case 'history': {
+      const hist = o ? (diag.history[o.id] || []) : [];
+      if(!o) return '<div class="alex-muted">Oben einen Auftrag wählen, um gespeicherte Diagnosen zu sehen.</div>';
+      return hist.length ? `<div class="dg-hist">${hist.map(h=>`<div class="dg-hist-row">
+          <span>${escHtml(fmtSavedAt(h.saved_at))}${h.saved_by?' – '+escHtml(h.saved_by):''}${h.simulated?' <em class="dg-simtag">Simulation</em>':''}</span>
+          <span>${h.cleared ? 'Fehlerspeicher gelöscht' : h.codes.length ? h.codes.map(x=>x.code).join(', ') : 'keine Fehlercodes'}${h.ecus ? ' · Scan: ' + h.ecus.reduce((s,e)=>s+e.codes.length,0) + ' Fehler' : ''}</span>
+        </div>`).join('')}</div>` : '<div class="alex-muted">Zu diesem Auftrag ist noch keine Diagnose gespeichert.</div>';
+    }
+  }
+  return '';
+}
+function renderDiagPanel(o){
+  const r = diagRes(o);
+  if(!DIAG_SCREENS[diag.screen]) diag.screen = 'menu';
+  const noBt = diag.error==='nobt';
+  const err = diag.error && !noBt ? `<div class="alex-warn">${iconWarn} ${escHtml(diag.error)}</div>` : '';
+  if(diag.screen==='menu') return `<div class="ts-wrap">${renderDiagConn()}${err}${renderDiagMenu(o, r)}</div>`;
+  const sc = DIAG_SCREENS[diag.screen];
+  return `<div class="ts-wrap">
+    ${renderDiagConn()}
+    <div class="dg-screen-h"><button class="btn" data-diagscreen="menu">${iconArrowLeft} Hauptmenü</button><span class="dg-screen-ic">${dgIc[sc.ic]}</span><b>${escHtml(sc.t)}</b></div>
+    ${err}
+    ${renderDiagScreen(o, r)}
+  </div>`;
+}
+// Beim Öffnen eines Fensters gleich das Passende auslesen
+function diagOpenScreen(k){
+  if(diag.screen==='live' && k!=='live') diagStopLive();
+  diag.screen = k; diag.error = diag.error==='nobt' ? 'nobt' : ''; 
+  const r = diagRes(diagOrder());
+  rerenderDiagPanel();
+  const el = document.getElementById('diagPanel'); if(el && el.scrollIntoView) try{ el.scrollIntoView({ block:'start', behavior:'smooth' }); }catch(_){}
+  if(k==='coding') loadCodingHist(diagOrder());
+  if(!diag.conn || diag.busy) return;
+  if((k==='codes' || k==='readiness' || k==='freeze') && !r.codes) diagRead();
+  else if(k==='live' && !diag.liveOn) diagToggleLive();
+  else if(k==='info' && !r.info) diagReadInfo();
+}
+function renderDtcInfo(key, code, ftb){
+  const h = dtcHelp(code, ftb);
+  const li = a=>a.map(x=>`<li>${escHtml(x)}</li>`).join('');
+  return `<div class="dg-info">
+    ${h.m ? `<div class="dg-info-m">${escHtml(h.m)}</div>` : ''}
+    ${h.u.length ? `<div><b>Häufige Ursachen</b><ol>${li(h.u)}</ol></div>` : ''}
+    ${h.p.length ? `<div><b>Prüfen &amp; beheben</b><ol>${li(h.p)}</ol></div>` : ''}
+    ${h.ftb ? `<div class="dg-info-ftb"><b>Fehlerart ${escHtml(ftb)}:</b> ${escHtml(h.ftb)}</div>` : ''}
+    ${!h.u.length && !h.p.length ? '<div class="alex-muted">Für diesen Code liegt noch keine Beschreibung vor.</div>' : ''}
+    <div class="dg-info-foot"><span>${h.specific ? 'Allgemeine Werkstatterfahrung' : 'Allgemeine Hinweise zur Fehlergruppe'} – Herstellerdaten und Reparaturleitfaden haben Vorrang.</span>
+      <button class="btn" data-diagalex="${escHtml(key)}">Ausführlich mit ALEX</button></div>
+  </div>`;
+}
+function renderDiagEcus(o, r){
+  const c = diag.conn; const sim = c && c.sim;
+  const vag = isVagVehicle(o, r.vin);
+  const scanning = diag.busy==='scan';
+  if(!c && !r.ecus) return '';
+  let head = `<div class="dg-head"><b>Alle Steuergeräte (VW-Konzern)</b><span>${r.ecuScanAt ? 'gescannt ' + escHtml(fmtSavedAt(r.ecuScanAt)) : 'VW · Audi · Skoda · Seat/Cupra'}</span></div>`;
+  let body = '';
+  if(scanning) body = `<div class="dg-scan-run"><span class="dg-spin"></span>Scanne ${escHtml(diag.scanStep||'')}</div>`;
+  else if(!r.ecus) body = `<div class="dg-scan-intro">${vag ? '' : '<div class="alex-muted">Fahrzeug nicht eindeutig als VW-Konzern erkannt – der Scan funktioniert nur bei VW, Audi, Skoda, Seat/Cupra.</div>'}
+      <span>Liest ABS/ESP, Airbag, Kombiinstrument, Gateway, Zentralelektrik, Lenkung, Klima u. a. einzeln aus. Dauer ca. 20–40 Sekunden, Zündung an.</span></div>`;
+  if(r.ecus && r.ecus.length){
+    const found = r.ecus.filter(e=>e.status!=='nodata');
+    body += `<div class="dg-ecus">${found.map(e=>{
+      const st = e.status==='neg' ? `<span class="dg-ecu-st neg">nicht lesbar${e.nrc ? ' – ' + escHtml(UDS_NRC[e.nrc] || 'Code '+e.nrc) : ''}</span>`
+        : e.codes.length ? `<span class="dg-ecu-st err">${e.codes.length} Fehler</span>` : `<span class="dg-ecu-st ok">${iconCheck} i. O.</span>`;
+      return `<div class="dg-ecu ${e.codes.length?'has':''}">
+        <div class="dg-ecu-h"><span class="dg-ecu-id">${escHtml(e.id)}</span><div><b>${escHtml(e.name)}</b><span>${escHtml([e.sys, e.part].filter(Boolean).join(' · '))}</span></div>${st}</div>
+        ${e.codes.map(x=>{ const key = `${e.id}:${x.code}:${x.ftb}`; return `<div class="dg-row">
+          <span class="dg-code ${x.active?'stored':'pending'}">${x.code}<small>${x.ftb!=='00'?x.ftb:''}</small></span>
+          <div class="dg-desc"><b>${escHtml(x.desc)}</b><span>${x.active?'aktiv':'sporadisch'}${x.ftb_text ? ' · ' + escHtml(x.ftb_text) : ''}</span></div>
+          <div class="dg-row-acts">
+            <button class="btn ${diag.openInfo[key]?'primary':''}" data-diaginfo="${escHtml(key)}">${diag.openInfo[key]?'Schließen':'Anzeigen'}</button>
+            <button class="btn" data-diagalex="${escHtml(key)}">ALEX fragen</button>
+            ${o && !sim ? (r.tasks[key] ? `<span class="dg-task-done">${iconCheck} Aufgabe angelegt</span>` : `<button class="btn" data-diagtask="${escHtml(key)}" ${diag.busy==='task'?'disabled':''}>${iconPlus} Aufgabe</button>`) : ''}
+          </div></div>${diag.openInfo[key] ? renderDtcInfo(key, x.code, x.ftb) : ''}`; }).join('')}
+      </div>`; }).join('')}</div>
+      <div class="alex-hint">${r.ecus.length - found.length} von ${r.ecus.length} abgefragten Adressen ohne Antwort (nicht verbaut oder ältere Steuergeräte-Generation). Beschreibungen generisch – Herstellerdaten beachten.</div>`;
+  }
+  const btn = c ? `<button class="btn ${r.ecus?'':'primary'}" id="diagScanBtn" ${diag.busy?'disabled':''}>${scanning ? 'Scan läuft…' : r.ecus ? 'Erneut scannen' : 'Steuergeräte scannen'}</button>` : '';
+  // Speichern auch ohne vorheriges Lesen des Motor-Fehlerspeichers (sonst übernimmt das der Block darüber)
+  const save = r.ecus && r.ecus.length && !r.codes && o && !scanning
+    ? (r.saved ? `<div class="alex-done">${iconCheck} Am Auftrag gespeichert</div>` : `<button class="btn primary" id="diagSaveBtn" ${diag.busy?'disabled':''}>${iconCheck} Am Auftrag speichern</button>`) : '';
+  return `<div class="dg-block dg-ecu-block">${head}${body}<div class="dg-scan-act">${save}${btn}</div></div>`;
+}
+/* Readiness, "seit Löschen", Freeze-Frame */
+function renderDiagExtras(r, only){
+  let html = '';
+  const want = k => !only || only.includes(k);
+  const rd = r.readiness;
+  if(rd && rd.items.length && want('rd')){
+    const verdict = rd.open===0
+      ? `<span class="dg-rd-ok">${iconCheck} Alle ${rd.items.length} Prüfungen abgeschlossen</span>`
+      : `<span class="dg-rd-open">${rd.open} von ${rd.items.length} Prüfungen noch offen – vor der AU ggf. Fahrzyklus fahren</span>`;
+    html += `<div class="dg-block"><div class="dg-head"><b>AU-Bereitschaft (Readiness, ${rd.diesel?'Diesel':'Benziner'})</b>${verdict}</div>
+      <div class="dg-rd">${rd.items.map(x=>`<div class="dg-rd-i ${x.ok?'ok':'open'}"><span class="dg-rd-dot"></span>${escHtml(x.label)}<em>${x.ok?'fertig':'offen'}</em></div>`).join('')}</div></div>`;
+  }
+  const sc = r.sinceClear;
+  if(sc && want('sc')){
+    const recent = (sc.km!==undefined && sc.km<100) || (sc.warmups!==undefined && sc.warmups<10);
+    html += `<div class="dg-since ${recent?'warn':''}">Seit letztem Löschen des Fehlerspeichers: <b>${sc.km!==undefined ? diagFmt(sc.km)+' km' : '–'}</b>${sc.warmups!==undefined ? ` · <b>${sc.warmups}</b> Warmlaufzyklen` : ''}${recent ? ' – <b>wurde kürzlich gelöscht</b> (Fehler evtl. noch nicht wieder erkannt)' : ''}</div>`;
+  }
+  const ff = r.freeze;
+  if(ff && Object.keys(ff.values).length && want('ff')){
+    html += `<div class="dg-block"><div class="dg-head"><b>Freeze-Frame zu ${escHtml(ff.code)}</b><span>Bedingungen, als der Fehler gespeichert wurde</span></div>
+      <div class="dg-ff">${LIVE_PIDS.filter(p=>ff.values[p.key]!==undefined).map(p=>`<div><span>${escHtml(p.label)}</span><b>${diagFmt(ff.values[p.key],p.d)} <i>${escHtml(p.unit)}</i></b></div>`).join('')}</div></div>`;
+  }
+  return html;
+}
+async function diagCreateTask(code){
+  const o = diagOrder(); if(!o || diag.busy) return;
+  const r = diagRes(o); let c = (r.codes||[]).find(x=>x.code===code), ecu = null;
+  if(!c && code.includes(':')){
+    const [eid, dc, ftb] = code.split(':'); ecu = (r.ecus||[]).find(e=>e.id===eid);
+    const x = ecu && ecu.codes.find(y=>y.code===dc && y.ftb===ftb);
+    if(x) c = { code:dc, desc: x.desc + (x.ftb_text ? ' – ' + x.ftb_text : ''), type: x.active ? 'stored' : 'pending' };
+  }
+  if(!c) return;
+  diag.busy='task'; rerenderDiagPanel();
+  const ff = r.freeze && r.freeze.code===code ? Object.entries(r.freeze.values).map(([k,v])=>{ const p = LIVE_PIDS.find(x=>x.key===k); return p ? `${p.label} ${diagFmt(v,p.d)} ${p.unit}` : ''; }).filter(Boolean).join(', ') : '';
+  const res = await tabletRequest('task_create', {
+    order_id:o.id,
+    title:`Fehler ${c.code} prüfen${ecu ? ' ('+ecu.name+')' : ''} – ${c.desc}`.slice(0,120),
+    description:`Aus ${ecu ? 'Steuergeräte-Scan, '+ecu.id+' '+ecu.name+(ecu.part?' ('+ecu.part+')':'') : 'OBD-Diagnose'}: ${c.code} (${ecu ? (c.type==='stored'?'aktiv':'sporadisch') : DTC_TYPE_LABEL[c.type]}) – ${c.desc}.${ff ? ' Freeze-Frame: '+ff+'.' : ''} Ursache prüfen, Herstellerdaten beachten.`,
+    estimated_minutes:30,
+  }, 15000);
+  diag.busy='';
+  if(res.ok){
+    r.tasks[code] = res.data.task_id;
+    showUpdateToast(`Aufgabe „Fehler ${c.code} prüfen“ am Auftrag angelegt`);
+    try{ await loadFromBase44(); }catch(_){}
+  } else diag.error = 'Aufgabe konnte nicht angelegt werden: ' + res.reason;
+  rerenderDiagPanel();
+}
+/* Druckbares Protokoll (iPad: Teilen → Drucken → als PDF sichern) */
+function diagPrint(){
+  const o = diagOrder(); const r = diagRes(o); const sim = diag.conn && diag.conn.sim;
+  const ws = (state.base44Data && state.base44Data.workshop) || {};
+  const e = escHtml, now = new Date();
+  const row = (k,v)=> v && v!=='–' ? `<tr><th>${e(k)}</th><td>${e(v)}</td></tr>` : '';
+  const liveRows = [['Bordspannung', r.live.voltage, 'V', 1], ...LIVE_PIDS.map(p=>[p.label, r.live[p.key], p.unit, p.d])]
+    .filter(x=>x[1]!==undefined).map(x=>`<tr><th>${e(x[0])}</th><td>${diagFmt(x[1],x[3])} ${e(x[2])}</td></tr>`).join('');
+  const rd = r.readiness, ff = r.freeze, sc = r.sinceClear;
+  const html = `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Diagnoseprotokoll ${e(o ? o.plate : '')}</title>
+  <style>body{font:13px/1.45 -apple-system,Helvetica,Arial,sans-serif;color:#111;margin:28px;} h1{font-size:20px;margin:0 0 2px} .sub{color:#555;margin-bottom:18px}
+  h2{font-size:14px;margin:20px 0 6px;border-bottom:1px solid #ccc;padding-bottom:3px} table{border-collapse:collapse;width:100%} th,td{text-align:left;padding:4px 6px;border-bottom:1px solid #eee;vertical-align:top} th{width:38%;font-weight:600;color:#333}
+  .code{font-family:Menlo,monospace;font-weight:700} .ok{color:#15803d} .open{color:#b45309} .sim{background:#fef3c7;border:1px solid #f59e0b;padding:8px 10px;border-radius:6px;margin-bottom:14px}
+  .foot{margin-top:28px;color:#666;font-size:11px} .sig{margin-top:40px;display:flex;gap:40px} .sig div{flex:1;border-top:1px solid #999;padding-top:4px;font-size:11px;color:#555}
+  @media print{body{margin:12mm}} </style></head><body>
+  <h1>Diagnoseprotokoll</h1><div class="sub">${e(ws.name || 'Werkstatt')} · ${now.toLocaleDateString('de-DE')} ${now.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}${state.currentUser ? ' · ' + e(state.currentUser.name) : ''}</div>
+  ${sim ? '<div class="sim"><b>Simulation</b> – keine echten Fahrzeugdaten, nur zur Vorführung.</div>' : ''}
+  <h2>Fahrzeug</h2><table>${o ? row('Auftrag', '#'+o.orderNumber) + row('Kunde', o.customer) + row('Fahrzeug', o.vehicle) + row('Kennzeichen', o.plate) + row('Km-Stand', o.km) : ''}${row('FIN (Steuergerät)', r.vin)}${row('Protokoll', diag.protocol)}${row('Adapter', diag.conn ? diag.conn.name : '')}</table>
+  <h2>Fehlerspeicher</h2>${r.codes && r.codes.length ? `<table>${r.codes.map(c=>`<tr><th class="code">${e(c.code)}</th><td>${e(c.desc)}<br><small>${e(DTC_TYPE_LABEL[c.type])}</small></td></tr>`).join('')}</table>` : '<p>Keine Fehlercodes gespeichert.</p>'}
+  ${r.live.mil!==undefined ? `<p>Motorkontrollleuchte: <b>${r.live.mil?'AN':'aus'}</b>${r.live.distance_mil_km ? ` · gefahren mit leuchtender MIL: ${diagFmt(r.live.distance_mil_km)} km` : ''}</p>` : ''}
+  ${sc ? `<p>Seit letztem Löschen: ${sc.km!==undefined ? diagFmt(sc.km)+' km' : '–'}${sc.warmups!==undefined ? ', '+sc.warmups+' Warmlaufzyklen' : ''}</p>` : ''}
+  ${ff && Object.keys(ff.values).length ? `<h2>Freeze-Frame zu ${e(ff.code)}</h2><table>${LIVE_PIDS.filter(p=>ff.values[p.key]!==undefined).map(p=>`<tr><th>${e(p.label)}</th><td>${diagFmt(ff.values[p.key],p.d)} ${e(p.unit)}</td></tr>`).join('')}</table>` : ''}
+  ${r.ecus && r.ecus.length ? `<h2>Steuergeräte (VW-Konzern)</h2><table>${r.ecus.filter(x=>x.status!=='nodata').map(x=>`<tr><th>${e(x.id)} ${e(x.name)}${x.part ? `<br><small>${e(x.part)}${x.sys?' · '+e(x.sys):''}</small>` : ''}</th><td>${x.status==='neg' ? 'nicht lesbar' : x.codes.length ? x.codes.map(y=>`<span class="code">${e(y.code)}${y.ftb!=='00'?' '+e(y.ftb):''}</span> ${e(y.desc)}${y.ftb_text?' – '+e(y.ftb_text):''} <small>(${y.active?'aktiv':'sporadisch'})</small>`).join('<br>') : '<span class="ok">i. O.</span>'}</td></tr>`).join('')}</table>` : ''}
+  ${rd && rd.items.length ? `<h2>AU-Bereitschaft (Readiness)</h2><table>${rd.items.map(x=>`<tr><th>${e(x.label)}</th><td class="${x.ok?'ok':'open'}">${x.ok?'abgeschlossen':'offen'}</td></tr>`).join('')}</table><p>${rd.open ? rd.open+' Prüfung(en) offen.' : 'Alle unterstützten Prüfungen abgeschlossen.'}</p>` : ''}
+  ${r.battery ? `<h2>Batterie &amp; Ladung</h2><table>${[['rest','Ruhespannung'],['crank','Startspannung (tiefster Wert)'],['charge','Ladespannung']].filter(([k])=>r.battery[k]).map(([k,l])=>`<tr><th>${l}</th><td>${diagFmt(r.battery[k].v, k==='crank'?1:2)} V – ${e(batVerdict(k, r.battery[k].v)[0])}</td></tr>`).join('')}</table>` : ''}
+  ${r.info && (r.info.ecu_name || r.info.calid) ? `<h2>Steuergerät</h2><table>${row('Bezeichnung', r.info.ecu_name)}${row('Kalibrierung', r.info.calid)}</table>` : ''}
+  ${liveRows ? `<h2>Messwerte</h2><table>${liveRows}</table>` : ''}
+  ${r.remark ? `<h2>Bemerkung</h2><p>${e(r.remark).replace(/\n/g,'<br>')}</p>` : ''}
+  <div class="sig"><div>Datum, Unterschrift Mechaniker</div><div>Datum, Unterschrift Kunde</div></div>
+  <div class="foot">Ausgelesen über die genormte OBD-II-Schnittstelle. Generische Fehlerbeschreibungen – herstellerspezifische Codes und Ursachen sind mit Herstellerdaten zu prüfen. Erstellt mit AutoLeitwerk.</div>
+  <script>setTimeout(function(){window.print()},300)<\/script></body></html>`;
+  const w = window.open('', '_blank');
+  if(!w){ showUpdateToast('Bitte Pop-ups für diese Seite erlauben, um das Protokoll zu öffnen.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+function rerenderDiagPanel(){ if(state.mainView!=='diagnose') return; const el = document.getElementById('diagPanel'); if(el) el.innerHTML = renderDiagPanel(diagOrder()); }
+/* ===== Berichtsheft (Azubis): Hauptmenü → Lernwelt (Vogel) / Tätigkeiten der Woche / Tipps ===== */
+const BERICHTSHEFT_URL = 'https://app.lernwelt.vogel.de/';   // leitet selbst zur Anmeldung (SSO) weiter
+var bh = { screen:'menu', weekOffset:0, date:null, drafts:{} };
+const bhIso = d => d.toLocaleDateString('en-CA');
+const bhStoreKey = date => `autoleitwerk.bh.${(state.currentUser && state.currentUser.name) || '-'}.${date}`;
+function bhTodayCount(){ const today = bhIso(new Date()); const w = bhActivities(0); const d = w.days.find(x=>bhIso(x.date)===today); return d ? d.items.length : 0; }
+// ALEX-Vorschlag vom Server holen (formuliert mit KI, sonst aus den Aufgaben); eigene Änderungen bleiben auf dem Gerät gespeichert
+async function bhLoadDraft(date, force){
+  const cur = bh.drafts[date];
+  if(cur && (cur.loading || (cur.text!==undefined && !force))) return;
+  let saved = null; try{ saved = localStorage.getItem(bhStoreKey(date)); }catch(_){}
+  if(saved && !force){ bh.drafts[date] = { text:saved, edited:true, items:null, ai:null }; }
+  bh.drafts[date] = { ...(bh.drafts[date]||{}), loading:true, error:'' }; bhRerender();
+  const r = await tabletRequest('berichtsheft_draft', { date }, 45000);
+  const d = bh.drafts[date] || {};
+  if(r.ok){
+    const keep = d.edited && !force;
+    bh.drafts[date] = { loading:false, items:r.data.items, minutes:r.data.minutes, ai:r.data.ai, text: keep ? d.text : r.data.text, edited: keep };
+    if(force){ try{ localStorage.removeItem(bhStoreKey(date)); }catch(_){} }
+  } else bh.drafts[date] = { ...d, loading:false, error: r.reason || 'Fehler' };
+  bhRerender();
+}
+function bhRerender(){ if(state.mainView==='berichtsheft') renderBerichtsheftView(document.getElementById('otherView')); }
+function bhOpenAlex(date){ bh.screen = 'alex'; bh.date = date; bhRerender(); bhLoadDraft(date); }
+async function bhCopyDraft(){
+  const box = document.getElementById('bhDraft'); const txt = box ? box.value : '';
+  if(!txt.trim()){ showUpdateToast('Noch kein Text zum Kopieren'); return; }
+  let ok = false;
+  try{ await navigator.clipboard.writeText(txt); ok = true; }catch(_){ try{ box.select(); ok = document.execCommand('copy'); }catch(__){} }
+  showUpdateToast(ok ? 'Kopiert – jetzt im Berichtsheft einfügen' : 'Kopieren nicht möglich – Text markieren und kopieren');
+}
+function renderBhAlex(){
+  const date = bh.date || bhIso(new Date()); const d = bh.drafts[date] || {};
+  const w = bhWeek(bh.weekOffset); const days = [0,1,2,3,4].map(i=>{ const x = new Date(w.mon); x.setDate(w.mon.getDate()+i); return x; });
+  const dt = new Date(date + 'T12:00:00');
+  return `<div class="bh-chips">${days.map(x=>{ const iso = bhIso(x); return `<button class="bh-chip ${iso===date?'on':''}" data-bhday="${iso}" ${x > new Date() ? 'disabled' : ''}>${x.toLocaleDateString('de-DE',{weekday:'short'})} ${x.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})}</button>`; }).join('')}</div>
+    <div class="bh-alex">
+      <div class="bh-alex-h"><span class="bh-alex-av">${alexAvatar(32)}</span><div><b>ALEX-Vorschlag für ${dt.toLocaleDateString('de-DE',{weekday:'long', day:'2-digit', month:'2-digit'})}</b>
+        <span>${d.loading ? 'ALEX sammelt deine Tätigkeiten…' : d.error ? escHtml(d.error) : d.items ? (d.items.length ? `${d.items.length} Tätigkeit${d.items.length>1?'en':''} erfasst${d.minutes ? ' · ' + minutesToLabel(d.minutes) : ''}${d.ai ? ' · von ALEX formuliert' : ''}` : 'An diesem Tag hast du am Tablet keine Aufgaben abgeschlossen.') : d.edited ? 'deine gespeicherte Fassung' : ''}</span></div></div>
+      ${d.loading && !d.text ? '<div class="dg-scan-run"><span class="dg-spin"></span>Einen Moment…</div>' : ''}
+      <textarea id="bhDraft" class="bh-draft" rows="9" placeholder="Hier erscheint der Vorschlag. Ergänze Berufsschule, Unterweisungen oder Arbeiten ohne Tablet einfach selbst.">${escHtml(d.text||'')}</textarea>
+      ${d.items && d.items.length ? `<details class="bh-src"><summary>Erfasst aus AutoLeitwerk</summary>${d.items.map(x=>`<div>${escHtml(x.title)}${x.vehicle?' · '+escHtml(x.vehicle):''}${x.kind==='mitgearbeitet'?' · mitgearbeitet':''}${x.kind==='diagnose'?' · Diagnose':''}${x.minutes?' · '+minutesToLabel(x.minutes):''}</div>`).join('')}</details>` : ''}
+      <div class="dg-bar"><button class="btn primary" id="bhCopyDraft">${iconDoc} Kopieren</button><button class="btn" id="bhOpenBtn">${iconBook} Berichtsheft öffnen</button><button class="btn" id="bhRedo" ${d.loading?'disabled':''}>Neu vorschlagen</button></div>
+      <div class="alex-hint">Vorschlag ohne Kundennamen und Kennzeichen. Bitte prüfen und ergänzen – du bist für dein Berichtsheft selbst verantwortlich.</div>
+    </div>`;
+}
+// Nachmittags-Hinweis: einmal pro Tag, nur für Nutzer, die das Berichtsheft schon einmal geöffnet haben
+function bhMaybeNudge(){
+  try{
+    if(!state.currentUser || localStorage.getItem('autoleitwerk.bhUsed.' + state.currentUser.name)!=='1') return;
+    const now = new Date(); if(now.getHours()*60 + now.getMinutes() < 15*60+30 || now.getDay()===0) return;
+    const key = 'autoleitwerk.bhNudge.' + state.currentUser.name + '.' + bhIso(now);
+    if(localStorage.getItem(key)) return;
+    const n = bhTodayCount(); if(!n) return;
+    localStorage.setItem(key, '1');
+    if(document.getElementById('bhNudge')) return;
+    const el = document.createElement('div'); el.id = 'bhNudge'; el.className = 'bh-nudge';
+    el.innerHTML = `<span class="bh-alex-av">${alexAvatar(32)}</span><div><b>ALEX</b><span>${n>1 ? `Deine ${n} Tätigkeiten von heute sind` : 'Deine Tätigkeit von heute ist'} fürs Berichtsheft vorbereitet.</span></div><button class="btn primary" id="bhNudgeGo">Ansehen</button><button class="btn" id="bhNudgeX" aria-label="Schließen">✕</button>`;
+    document.body.appendChild(el);
+  }catch(_){}
+}
+document.addEventListener('click', (e)=>{
+  if(e.target.closest('#bhNudgeX')){ const n = document.getElementById('bhNudge'); if(n) n.remove(); return; }
+  if(e.target.closest('#bhNudgeGo')){ const n = document.getElementById('bhNudge'); if(n) n.remove(); bh.weekOffset = 0; setMainView('berichtsheft'); bhOpenAlex(bhIso(new Date())); }
+});
+function bhWeek(offset){
+  const now = new Date(); const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7) + offset*7);
+  const sun = new Date(mon); sun.setDate(mon.getDate()+6); sun.setHours(23,59,59,999);
+  // ISO-Kalenderwoche
+  const t = new Date(Date.UTC(mon.getFullYear(), mon.getMonth(), mon.getDate()+3)); const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,4));
+  const kw = 1 + Math.round(((t - y0)/864e5 - 3 + ((y0.getUTCDay()+6)%7))/7);
+  return { mon, sun, kw };
+}
+function bhMs(x){ const v = String(x||''); return Date.parse(/Z|[+-]\d\d:?\d\d$/.test(v) ? v : v + 'Z') || 0; }
+// Erledigte Aufgaben des angemeldeten Mitarbeiters in der Woche, mit gebuchter Zeit (sonst Vorgabezeit)
+function bhActivities(offset){
+  const me = state.currentUser ? state.currentUser.name : ''; const data = state.base44Data || {};
+  const { mon, sun, kw } = bhWeek(offset);
+  const tasks = (data.tasks||[]).filter(t=>t.status==='erledigt' && t.completed_by===me && t.completed_date);
+  const wts = (data.worktimes||[]).filter(w=>w.employee_name===me);
+  const ordersById = Object.fromEntries((data.orders||[]).map(o=>[o.id,o]));
+  const days = [0,1,2,3,4,5].map(i=>{ const d = new Date(mon); d.setDate(mon.getDate()+i); return { date:d, items:[] }; });
+  tasks.forEach(t=>{
+    const at = new Date(bhMs(t.completed_date)); if(at < mon || at > sun) return;
+    const day = days[(at.getDay()+6)%7]; if(!day) return;
+    const o = ordersById[t.order_id] || {};
+    const booked = wts.filter(w=>w.task_id===t.id).reduce((s,w)=>s+(Number(w.duration_minutes)||0),0);
+    day.items.push({ title:t.title || 'Aufgabe', vehicle:[o.vehicle_brand, o.vehicle_model].filter(Boolean).join(' '), minutes: booked || Number(t.estimated_minutes) || 0, booked: !!booked, at });
+  });
+  days.forEach(d=>d.items.sort((a,b)=>a.at-b.at));
+  return { days: days.filter((d,i)=>i<5 || d.items.length), kw, mon, sun, me };
+}
+function bhText(w){
+  const f = d=>d.toLocaleDateString('de-DE',{weekday:'long', day:'2-digit', month:'2-digit'});
+  const lines = [`Betriebliche Tätigkeiten – KW ${w.kw} (${w.mon.toLocaleDateString('de-DE')} bis ${w.sun.toLocaleDateString('de-DE')})`, ''];
+  w.days.forEach(d=>{
+    lines.push(f(d.date) + ':');
+    if(!d.items.length) lines.push('- ');
+    d.items.forEach(x=>lines.push(`- ${x.title}${x.vehicle ? ' (' + x.vehicle + ')' : ''}${x.minutes ? ', ' + minutesToLabel(x.minutes) : ''}`));
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+}
+async function bhCopy(){
+  const txt = bhText(bhActivities(bh.weekOffset));
+  let ok = false;
+  try{ await navigator.clipboard.writeText(txt); ok = true; }catch(_){
+    try{ const ta = document.createElement('textarea'); ta.value = txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); }catch(__){}
+  }
+  showUpdateToast(ok ? 'Woche kopiert – jetzt in der Lernwelt einfügen' : 'Kopieren nicht möglich – Text bitte markieren und kopieren');
+}
+function bhOpen(){
+  const w = window.open(BERICHTSHEFT_URL, '_blank', 'noopener');
+  if(!w) location.href = BERICHTSHEFT_URL;
+}
+function renderBerichtsheftView(ov){
+  const head = `<div class="ov-head"><div><h1>Berichtsheft</h1><div class="sub">Ausbildungsnachweis führen – mit deinen Tätigkeiten aus AutoLeitwerk</div></div></div>`;
+  const back = (t, ic)=>`<div class="dg-screen-h"><button class="btn" data-bh="menu">${iconArrowLeft} Hauptmenü</button><span class="dg-screen-ic">${ic}</span><b>${t}</b></div>`;
+  let body = '';
+  if(bh.screen==='alex'){
+    body = `${back('Heute von ALEX', iconSpark)}${renderBhAlex()}`;
+  } else if(bh.screen==='woche'){
+    const w = bhActivities(bh.weekOffset);
+    const total = w.days.reduce((s,d)=>s+d.items.reduce((a,x)=>a+x.minutes,0),0);
+    const n = w.days.reduce((s,d)=>s+d.items.length,0);
+    body = `${back('Meine Tätigkeiten', iconTasks)}
+      <div class="bh-week">
+        <button class="btn" data-bhweek="-1">${iconArrowLeft}</button>
+        <div><b>KW ${w.kw}</b><span>${w.mon.toLocaleDateString('de-DE')} – ${w.sun.toLocaleDateString('de-DE')}</span></div>
+        <button class="btn" data-bhweek="1" ${bh.weekOffset>=0?'disabled':''} style="transform:scaleX(-1)">${iconArrowLeft}</button>
+      </div>
+      <div class="bh-sum"><span>${n} erledigte Aufgaben</span><span>${total ? minutesToLabel(total) + ' gebucht/geplant' : ''}</span></div>
+      <div class="bh-days">${w.days.map(d=>`<div class="bh-day">
+          <div class="bh-day-h">${d.date.toLocaleDateString('de-DE',{weekday:'long'})}<span>${d.date.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})}${d.items.length ? ` <button class="btn bh-day-alex" data-bhalex="${bhIso(d.date)}">${iconSpark} ALEX-Vorschlag</button>` : ''}</span></div>
+          ${d.items.length ? d.items.map(x=>`<div class="bh-item"><b>${escHtml(x.title)}</b><span>${escHtml(x.vehicle||'')}</span><em>${x.minutes ? minutesToLabel(x.minutes) : ''}</em></div>`).join('') : '<div class="bh-empty">keine erledigten Aufgaben – z. B. Berufsschule, Unterweisung oder Werkstattpflege selbst eintragen</div>'}
+        </div>`).join('')}</div>
+      <div class="dg-bar"><button class="btn primary" id="bhCopyBtn">${iconDoc} Woche kopieren</button><button class="btn" id="bhOpenBtn">${iconBook} Berichtsheft öffnen</button></div>
+      <div class="alex-hint">Grundlage sind die Aufgaben, die du am Tablet als erledigt markiert hast${w.me ? ' (als ' + escHtml(w.me) + ')' : ''}. Zeiten: gebuchte Arbeitszeit, sonst Vorgabezeit. Bitte vor dem Eintragen prüfen und ergänzen.</div>`;
+  } else if(bh.screen==='tipps'){
+    body = `${back('So schreibst du dein Berichtsheft', iconInfo)}
+      <div class="bh-tips">
+        <div><b>Regelmäßig</b><span>Am besten jede Woche – nachträglich wird es ungenau. Das Berichtsheft ist Voraussetzung für die Zulassung zur Gesellenprüfung.</span></div>
+        <div><b>Was gehört rein?</b><span>Betriebliche Tätigkeiten (was hast du an welchem Fahrzeug gemacht), Unterweisungen und Schulungen, Berufsschulthemen.</span></div>
+        <div><b>Konkret statt allgemein</b><span>Statt „Werkstatt“ lieber „Bremsbeläge und -scheiben VA erneuert, Bremsflüssigkeit gewechselt“.</span></div>
+        <div><b>Abzeichnen lassen</b><span>Dein Ausbilder prüft und zeichnet das Berichtsheft regelmäßig ab.</span></div>
+      </div>`;
+  } else {
+    const tiles = [
+      ['alex', alexAvatar(34, { ring:false }), 'Heute von ALEX', 'ALEX hat deine Tätigkeiten von heute erfasst und berichtsheft-tauglich formuliert'],
+      ['open', iconBook, 'Berichtsheft öffnen', 'Online-Berichtsheft in der Vogel Lernwelt – Anmeldung mit deinen Lernwelt-Zugangsdaten'],
+      ['woche', iconTasks, 'Meine Tätigkeiten', 'Deine erledigten Aufgaben der Woche als Vorlage zum Eintragen'],
+      ['tipps', iconInfo, 'So schreibst du es', 'Was ins Berichtsheft gehört und worauf der Ausbilder achtet'],
+    ];
+    const n = bhActivities(0).days.reduce((s,d)=>s+d.items.length,0); const nToday = bhTodayCount();
+    body = `<div class="dg-menu bh-menu">${tiles.map(([k,ic,t,d])=>`<button class="dg-tile" data-bh="${k}">
+        <span class="dg-tile-ic">${ic}</span><span class="dg-tile-t">${t}</span><span class="dg-tile-d">${d}</span>
+        ${k==='woche' && n ? `<span class="dg-tile-b ok">${n} diese Woche</span>` : ''}${k==='alex' && nToday ? `<span class="dg-tile-b ok">${nToday} heute</span>` : ''}${k==='open' ? '<span class="dg-tile-b">extern ↗</span>' : ''}
+      </button>`).join('')}</div>
+      <div class="alex-hint">Das Berichtsheft öffnet sich in einem eigenen Fenster (die Lernwelt erlaubt aus Sicherheitsgründen keine Anzeige innerhalb anderer Apps). Zurück zu AutoLeitwerk: Fenster schließen bzw. „Fertig“ tippen.</div>`;
+  }
+  ov.innerHTML = head + `<div class="dg-view">${body}</div>`;
+  try{ if(state.currentUser) localStorage.setItem('autoleitwerk.bhUsed.' + state.currentUser.name, '1'); }catch(_){}
+}
+document.addEventListener('click', (e)=>{
+  if(state.mainView!=='berichtsheft') return;
+  const t = e.target;
+  const b = t.closest('[data-bh]'); if(b){ if(b.dataset.bh==='open'){ bhOpen(); return; } if(b.dataset.bh==='alex'){ bh.weekOffset = 0; bhOpenAlex(bhIso(new Date())); return; } bh.screen = b.dataset.bh; renderBerichtsheftView(document.getElementById('otherView')); return; }
+  const wk = t.closest('[data-bhweek]'); if(wk){ bh.weekOffset = Math.min(0, bh.weekOffset + Number(wk.dataset.bhweek)); renderBerichtsheftView(document.getElementById('otherView')); return; }
+  if(t.closest('#bhCopyBtn')){ bhCopy(); return; }
+  if(t.closest('#bhOpenBtn')){ bhOpen(); return; }
+  const ba = t.closest('[data-bhalex]'); if(ba){ bhOpenAlex(ba.dataset.bhalex); return; }
+  const bd = t.closest('[data-bhday]'); if(bd){ bhOpenAlex(bd.dataset.bhday); return; }
+  if(t.closest('#bhCopyDraft')){ bhCopyDraft(); return; }
+  if(t.closest('#bhRedo')){ bhLoadDraft(bh.date, true); return; }
+});
+document.addEventListener('input', (e)=>{
+  if(e.target && e.target.id==='bhDraft' && bh.date){ const d = bh.drafts[bh.date] = bh.drafts[bh.date] || {}; d.text = e.target.value; d.edited = true; try{ localStorage.setItem(bhStoreKey(bh.date), e.target.value); }catch(_){} }
+});
+function renderDiagnoseView(ov){
+  if(diag.orderId && !orders.some(o=>o.id===diag.orderId)) diag.orderId = null;
+  const open = orders.filter(o=>o.status!=='erledigt');
+  const o = diagOrder();
+  ov.innerHTML = `
+    <div class="ov-head"><div><h1>Fahrzeugdiagnose</h1><div class="sub">Fehlerspeicher und Messwerte über einen Bluetooth-OBD-Adapter auslesen</div></div></div>
+    <div class="dg-view">
+      <div class="dg-pick">
+        <label for="diagOrderSel">Auftrag</label>
+        <select id="diagOrderSel">
+          <option value="">– ohne Auftrag (nur ansehen) –</option>
+          ${open.map(x=>`<option value="${escHtml(x.id)}" ${x.id===diag.orderId?'selected':''}>#${escHtml(String(x.orderNumber))} · ${escHtml(x.vehicle||'Fahrzeug')} · ${escHtml(x.plate)}</option>`).join('')}
+        </select>
+        ${o ? `<div class="dg-pick-sub">${escHtml(o.customer)}${o.vin && o.vin!=='–' ? ' · FIN ' + escHtml(o.vin) : ''}</div>` : ''}
+      </div>
+      <div id="diagPanel">${renderDiagPanel(o)}</div>
+    </div>`;
+  if(o) loadDiagHistory(o);
+}
+function handleDiagClick(e){
+  const t = e.target;
+  if(t.closest('#diagConnectBtn')){ diagConnect(false); return true; }
+  if(t.closest('#diagSimBtn')){ diagConnect(true); return true; }
+  if(t.closest('#diagDisconnectBtn')){ diagDisconnect(); return true; }
+  if(t.closest('#diagReadBtn')){ diagStopLive(); diagRead(); return true; }
+  if(t.closest('#diagLiveBtn')){ diagToggleLive(); return true; }
+  if(t.closest('#diagClearBtn')){ diag.confirmClear=true; rerenderDiagPanel(); return true; }
+  if(t.closest('#diagClearNo')){ diag.confirmClear=false; rerenderDiagPanel(); return true; }
+  if(t.closest('#diagClearYes')){ diagClear(); return true; }
+  if(t.closest('#diagSaveBtn')){ diagSave(); return true; }
+  if(t.closest('#diagPrintBtn')){ diagPrint(); return true; }
+  if(t.closest('#diagScanBtn')){ diagScanVag(); return true; }
+  if(t.closest('#diagSimHide')){ diagSetSimQuiet(true); return true; }
+  if(t.closest('#diagSimShow')){ diagSetSimQuiet(false); return true; }
+  const scr = t.closest('[data-diagscreen]'); if(scr){ diagOpenScreen(scr.dataset.diagscreen); return true; }
+  const bm = t.closest('[data-batmeasure]'); if(bm){ batMeasure(bm.dataset.batmeasure); return true; }
+  if(t.closest('#diagInfoBtn')){ diagReadInfo(); return true; }
+  if(t.closest('#diagCodingBtn')){ diagReadCoding(); return true; }
+  if(t.closest('#diagCodingSave')){ diagSaveCoding(); return true; }
+  const inf = t.closest('[data-diaginfo]'); if(inf){ const k = inf.dataset.diaginfo; if(diag.openInfo[k]) delete diag.openInfo[k]; else diag.openInfo[k] = true; rerenderDiagPanel(); return true; }
+  const tk = t.closest('[data-diagtask]'); if(tk){ diagCreateTask(tk.dataset.diagtask); return true; }
+  const a = t.closest('[data-diagalex]'); if(a){ diagAskAlex(a.dataset.diagalex); return true; }
+  return false;
+}
+document.addEventListener('input', (e)=>{ if(e.target && e.target.id==='diagRemark') diagRes(diagOrder()).remark = e.target.value; });
+document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='diagOrderSel'){ diagStopLive(); diag.orderId = e.target.value || null; diag.error=''; renderDiagnoseView(document.getElementById('otherView')); return; } if(e.target && e.target.id==='diagShare'){ diagRes(diagOrder()).share = e.target.checked; return; } if(e.target && e.target.id==='diagRemark'){ const r = diagRes(diagOrder()); if(r.saved){ r.saved = false; rerenderDiagPanel(); } } });
+
+/* ---------- Reifenscan (eigener Server, Cloudflare Workers AI, tabletAction tire_scan) ---------- */
+const TIRE_SLOTS = [
+  { key:'flanke', label:'Flanke', hint:'Reifenbeschriftung mit Größe & DOT' },
+  { key:'laufflaeche', label:'Lauffläche', hint:'Profil von vorne, gut ausgeleuchtet' },
+  { key:'felge', label:'Felge', hint:'Felge komplett, Schäden nah' },
+];
+const TIRE_FIELDS = [
+  ['brand','Marke'],['model','Modell'],['size','Größe'],['load_index','Lastindex'],['speed_index','Geschw.-Index'],
+  ['season','Saison'],['dot_code','DOT'],['production_week','Prod.-Woche'],['production_year','Prod.-Jahr'],
+  ['tire_age_years','Alter (Jahre)'],['tread_depth_mm','Profiltiefe (mm)'],['overall_condition','Zustand'],
+];
+const TIRE_INPUT = {
+  brand:{ph:'z. B. Continental'}, model:{ph:'z. B. PremiumContact 6'}, size:{ph:'205/55 R16'},
+  load_index:{ph:'91', mode:'numeric'}, speed_index:{ph:'V', upper:true},
+  season:{options:[['','–'],['sommer','Sommer'],['winter','Winter'],['ganzjahr','Ganzjahr']]},
+  dot_code:{ph:'z. B. 2319', mode:'numeric'}, production_week:{ph:'KW', mode:'numeric'}, production_year:{ph:'Jahr', mode:'numeric'},
+  tire_age_years:{ph:'–', mode:'decimal'}, tread_depth_mm:{ph:'z. B. 5,5', mode:'decimal'},
+  overall_condition:{options:[['','–'],['gut','gut'],['mittel','mittel'],['abgefahren','abgefahren'],['beschädigt','beschädigt']]},
+};
+const TIRE_NOTE_CHIPS = ['Beule/Blase an der Flanke','Riss in der Flanke','Schnitt in der Lauffläche','Nagel/Fremdkörper','Ungleichmäßiger Abrieb','Bordsteinschaden Felge','Felge verbogen','Ventil defekt','Reparatur empfohlen','Austausch empfohlen'];
+function renderTireNotes(r){
+  return `<div class="ts-notes"><b>Schäden &amp; Bemerkungen (Mechaniker)</b>
+    <div class="ts-chips">${TIRE_NOTE_CHIPS.map(c=>`<button type="button" class="ts-chip" data-tirechip="${escHtml(c)}">+ ${escHtml(c)}</button>`).join('')}</div>
+    <textarea data-tirenote placeholder="z. B. Beule an der Außenflanke hinten links, Felge Bordsteinschaden bei 3 Uhr …">${escHtml(r.mech_notes||'')}</textarea></div>`;
+}
+function emptyTireResult(){ const r = {}; TIRE_FIELDS.forEach(([k])=>{ r[k] = { value:null, confidence:1, manual:true }; }); r.tire_damages = []; r.rim_damages = []; r.manual = true; return r; }
+function tireNum(v){ const n = Number(String(v??'').replace(',','.').trim()); return Number.isFinite(n) ? n : null; }
+// Manuelle Eingabe übernehmen; DOT → Woche/Jahr/Alter automatisch nachrechnen.
+function setTireField(r, k, raw){
+  let v = String(raw??'').trim();
+  if(TIRE_INPUT[k] && TIRE_INPUT[k].upper) v = v.toUpperCase();
+  let val = v === '' ? null : v;
+  if(val!==null && ['load_index','production_week','production_year'].includes(k)) val = parseInt(v,10) || null;
+  if(val!==null && ['tread_depth_mm','tire_age_years'].includes(k)){ const n = tireNum(v); val = n!==null && n>=0 && n<100 ? Math.round(n*10)/10 : null; }
+  r[k] = { value: val, confidence: 1, manual: true };
+  r.edited = true;
+  const now = new Date(); const cy = now.getFullYear();
+  const ageOf = (wk, yr) => { const d = new Date(yr, 0, 1 + ((wk||1)-1)*7); return Math.max(0, Math.floor((now - d) / (365.25*864e5))); };
+  if(k==='dot_code' && val){
+    const m = String(val).replace(/\D/g,'').match(/(\d{2})(\d{2})$/);
+    if(m){ const wk = +m[1], yr = 2000 + (+m[2]);
+      if(wk>=1 && wk<=53 && yr<=cy){ r.production_week = { value:wk, confidence:1, manual:true }; r.production_year = { value:yr, confidence:1, manual:true }; r.tire_age_years = { value:ageOf(wk,yr), confidence:1, manual:true }; } }
+  }
+  if((k==='production_year' || k==='production_week') && tireVal(r.production_year)){
+    const yr = Number(tireVal(r.production_year)); if(yr>1990 && yr<=cy) r.tire_age_years = { value:ageOf(Number(tireVal(r.production_week))||1, yr), confidence:1, manual:true };
+  }
+}
+function renderTireField(k, l, r){
+  const f = r[k]; const v = tireVal(f); const c = tireConf(f);
+  const empty = v===null || v===undefined || v==='' || v===0;
+  const cfg = TIRE_INPUT[k] || {};
+  const shown = empty ? '' : (typeof v==='number' ? String(v).replace('.',',') : String(v));
+  const chk = !empty && c<0.7 && !(f && f.manual);
+  let ctl;
+  if(cfg.options){
+    const opts = cfg.options.slice(); if(shown && !opts.some(o=>o[0]===shown)) opts.push([shown, shown]);
+    ctl = `<select data-tirefield="${k}" aria-label="${l}">${opts.map(([ov,ol])=>`<option value="${escHtml(ov)}" ${ov===shown?'selected':''}>${escHtml(ol)}</option>`).join('')}</select>`;
+  } else {
+    ctl = `<input data-tirefield="${k}" aria-label="${l}" value="${escHtml(shown)}" placeholder="${escHtml(cfg.ph||'–')}" ${cfg.mode?`inputmode="${cfg.mode}"`:''} autocomplete="off" enterkeyhint="next">`;
+  }
+  return `<label class="ts-f ${chk?'ts-chk':''} ${f && f.manual && !empty?'ts-man':''}"><span>${l}</span>${ctl}${chk?'<em>bitte prüfen</em>':''}</label>`;
+}
+function tireState(o, fresh){
+  if(!state.tireScan || state.tireScan.orderId !== o.id){
+    state.tireScan = { orderId:o.id, photos:{}, busy:false, result:null, imageUrls:[], saved:false, error:null, loading:false, savedInfo:null };
+    if(!fresh) loadSavedTire(o, state.tireScan);
+  }
+  return state.tireScan;
+}
+// Bereits gespeicherten Reifenscan vom Server holen – sonst wäre er nach Neuladen/Auftragswechsel am Tablet „weg“.
+function applySavedTire(ts, saved){
+  if(!saved || ts.busy || ts.result || Object.keys(ts.photos).length) return false; // Mechaniker arbeitet schon an einem neuen Scan
+  ts.photos = Object.assign({}, saved.photos || {});
+  if(saved.result){ ts.result = JSON.parse(JSON.stringify(saved.result)); ts.saved = true; }
+  ts.savedInfo = { at: saved.saved_at, by: saved.saved_by };
+  return true;
+}
+async function loadSavedTire(o, ts){
+  state.tireSavedCache = state.tireSavedCache || {};
+  const cached = state.tireSavedCache[o.id];
+  if(cached) applySavedTire(ts, cached);
+  ts.loading = !cached;
+  const r = await tabletRequest('tire_scan_get', { order_id:o.id }, 20000);
+  ts.loading = false;
+  if(r.ok && r.data){
+    const saved = r.data.saved || null;
+    state.tireSavedCache[o.id] = saved;
+    if(saved && cached && ts.saved && JSON.stringify(cached)!==JSON.stringify(saved)){ ts.photos = {}; ts.result = null; ts.saved = false; }
+    applySavedTire(ts, saved);
+  }
+  if(state.tireScan === ts) rerenderTirePanel();
+}
+// Fotos vom Server (https://…) für eine neue Auswertung wieder in Daten-URLs umwandeln
+async function tirePhotoDataUrl(src){
+  if(!src || src.startsWith('data:')) return src;
+  try{ const b = await (await fetch(src)).blob(); return await compressImage(new File([b], 'reifen.jpg', { type: b.type || 'image/jpeg' }), 1600, 0.82); }
+  catch(_){ return null; }
+}
+function fmtSavedAt(iso){
+  const d = iso ? new Date(iso) : null; if(!d || isNaN(d)) return '';
+  return d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}) + ', ' + d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) + ' Uhr';
+}
+function tireVal(f){ return f && typeof f==='object' && 'value' in f ? f.value : f; }
+function tireConf(f){ return f && typeof f==='object' && 'confidence' in f ? Number(f.confidence)||0 : 1; }
+function tireWarnings(res){
+  const w = [];
+  const age = Number(tireVal(res.tire_age_years))||0;
+  const tread = Number(tireVal(res.tread_depth_mm))||0;
+  const season = String(tireVal(res.season)||'');
+  const mm = n => n.toLocaleString('de-DE');
+  if(age > 6) w.push(`Reifen ist ca. ${age} Jahre alt – Austausch empfehlen.`);
+  if(tread > 0 && tread < 1.6) w.push(`Profil ${mm(tread)} mm – unter dem gesetzlichen Minimum von 1,6 mm!`);
+  else if(tread > 0 && season==='winter' && tread < 4) w.push(`Winterreifen mit ${mm(tread)} mm – unter 4 mm empfohlen tauschen.`);
+  else if(tread > 0 && tread < 3) w.push(`Profil ${mm(tread)} mm – unter 3 mm empfohlen tauschen.`);
+  return w;
+}
+function renderDamageList(title, list){
+  if(!Array.isArray(list) || !list.length) return `<div class="ts-dmg-none">${iconCheck} ${title}: keine Schäden erkannt</div>`;
+  return `<div class="ts-dmg"><b>${title}</b>${list.map(d=>{
+    const txt = typeof d==='string' ? d : [d.type||d.damage||d.title, d.description||d.detail, d.location||d.position].filter(Boolean).join(' – ');
+    const sev = typeof d==='object' ? (d.severity||d.level||'') : '';
+    return `<div class="ts-dmg-item ${alexLevelClass({level:sev})}">${escHtml(txt||'Schaden')}${sev?` <span>(${escHtml(sev)})</span>`:''}</div>`;
+  }).join('')}</div>`;
+}
+function renderTireScanPanel(o){
+  if(!o) return '';
+  const ts = tireState(o);
+  const count = Object.keys(ts.photos).length;
+  const slots = TIRE_SLOTS.map(s=>{
+    const ph = ts.photos[s.key];
+    return `<div class="ts-slot ${ph?'has':''}">
+      ${ph ? `<img src="${ph}" alt="${s.label}">` : `<div class="ts-slot-empty">${iconCamera}</div>`}
+      <div class="ts-slot-l"><b>${s.label}</b><span>${s.hint}</span></div>
+      <label class="btn ${ph?'':'primary'}">${iconCamera} ${ph?'Neu':'Foto'}<input type="file" accept="image/*" capture="environment" data-tireslot="${s.key}" hidden></label>
+    </div>`;
+  }).join('');
+  let result = '';
+  if(ts.busy) result = `<div class="ts-busy"><span class="alex-typing"><i></i><i></i><i></i></span> Reifen wird ausgewertet… (bis zu 30 Sek.)</div>`;
+  else if(ts.result){
+    const r = ts.result;
+    const warns = tireWarnings(r);
+    result = `<div class="ts-result">
+      <div class="ts-edit-hint">${r.manual ? 'Reifendaten eintragen – bei DOT werden Produktionswoche, Jahr und Alter automatisch berechnet.' : 'Alle Felder lassen sich antippen und korrigieren.'}</div>
+      <div class="ts-grid">${TIRE_FIELDS.map(([k,l])=>renderTireField(k,l,r)).join('')}</div>
+      <div id="tireWarns">${warns.map(w=>`<div class="alex-warn">${iconWarn} ${escHtml(w)}</div>`).join('')}</div>
+      ${r.manual ? '' : renderDamageList('Reifen', r.tire_damages)}
+      ${r.manual ? '' : renderDamageList('Felge', r.rim_damages)}
+      ${renderTireNotes(r)}
+      ${r.manual ? '' : '<div class="alex-hint">KI-Einschätzung – ersetzt keine Sichtprüfung durch den Mechaniker.</div>'}
+      ${ts.saved ? `<div class="alex-done">${iconCheck} ${Object.keys(ts.photos).length ? 'Fotos und Befund' : 'Befund'} am Auftrag gespeichert${ts.savedInfo && ts.savedInfo.at ? ` (${escHtml(fmtSavedAt(ts.savedInfo.at))}${ts.savedInfo.by ? ' – ' + escHtml(ts.savedInfo.by) : ''})` : ''} – Änderungen danach erneut speichern</div>
+        <div class="alex-draft-actions"><button class="btn" id="tireResetBtn">Neuen Scan starten</button></div>`
+        : `<div class="alex-draft-actions"><button class="btn primary" id="tireSaveBtn">${iconCheck} ${r.manual?'Am Auftrag speichern':'Übernehmen &amp; am Auftrag speichern'}</button><button class="btn" id="tireResetBtn">${r.manual?'Verwerfen':'Neu scannen'}</button></div>`}
+    </div>`;
+  }
+  return `<div class="ts-wrap">
+    <div class="ts-intro">${iconTire}<div><b>Reifenscan</b><span>Fotos machen – ALEX liest Größe, DOT und Profil aus und prüft Reifen und Felge auf Schäden.</span></div></div>
+    ${ts.loading ? `<div class="ts-busy"><span class="alex-typing"><i></i><i></i><i></i></span> Gespeicherten Reifenscan laden…</div>` : ''}
+    <div class="ts-slots">${slots}</div>
+    ${ts.error ? `<div class="alex-warn">${iconWarn} ${escHtml(ts.error)}</div>` : ''}
+    ${!ts.result && !ts.busy && !ts.loading ?`<div class="ts-alt"><button class="btn primary ts-go" id="tireScanBtn" ${count?'':'disabled'}>${iconScan} ${count?`Auswerten (${count} Foto${count>1?'s':''})`:'Mindestens ein Foto aufnehmen'}</button><button class="btn" id="tireManualBtn">Ohne Scan manuell eintragen</button></div>` : ''}
+    ${result}
+  </div>`;
+}
+function rerenderTirePanel(){ if(state.detailTab==='reifen'){ const el = document.getElementById('tabPanel'); if(el) el.innerHTML = renderTireScanPanel(getSelectedOrder()); } }
+document.addEventListener('change', async (e)=>{
+  const inp = e.target.closest && e.target.closest('[data-tireslot]');
+  if(!inp || !inp.files || !inp.files[0]) return;
+  const o = getSelectedOrder(); if(!o) return;
+  const ts = tireState(o);
+  try{ ts.photos[inp.dataset.tireslot] = await compressImage(inp.files[0], 1600, 0.82); ts.result = null; ts.saved = false; ts.error = null; }
+  catch(_){ ts.error = 'Foto konnte nicht verarbeitet werden.'; }
+  rerenderTirePanel();
+});
+document.addEventListener('input', (e)=>{
+  const nt = e.target.closest && e.target.closest('[data-tirenote]');
+  if(nt){ const o = getSelectedOrder(); if(!o) return; const ts = tireState(o); if(!ts.result) return; ts.result.mech_notes = nt.value; ts.saved = false; const sb = document.getElementById('tireSaveBtn'); if(!sb) rerenderTirePanelKeepNote(); return; }
+  const el = e.target.closest && e.target.closest('[data-tirefield]'); if(!el) return;
+  const o = getSelectedOrder(); if(!o) return; const ts = tireState(o); if(!ts.result) return;
+  setTireField(ts.result, el.dataset.tirefield, el.value); ts.saved = false;
+});
+document.addEventListener('change', (e)=>{
+  const el = e.target.closest && e.target.closest('[data-tirefield]'); if(!el) return;
+  const o = getSelectedOrder(); if(!o) return; const ts = tireState(o); if(!ts.result) return;
+  setTireField(ts.result, el.dataset.tirefield, el.value); ts.saved = false;
+  // Abgeleitete Felder (Alter aus DOT) und Warnungen aktualisieren, ohne den Fokus zu verlieren
+  const panel = document.getElementById('tabPanel'); if(!panel) return;
+  ['production_week','production_year','tire_age_years'].forEach(k=>{
+    const inp = panel.querySelector(`[data-tirefield="${k}"]`); if(!inp || inp===document.activeElement) return;
+    const v = tireVal(ts.result[k]); inp.value = v===null||v===undefined ? '' : String(v).replace('.',',');
+  });
+  const w = document.getElementById('tireWarns'); if(w) w.innerHTML = tireWarnings(ts.result).map(x=>`<div class="alex-warn">${iconWarn} ${escHtml(x)}</div>`).join('');
+  const sb = document.getElementById('tireSaveBtn'); if(!sb){ rerenderTirePanel(); }
+});
+function rerenderTirePanelKeepNote(){
+  rerenderTirePanel();
+  const t = document.querySelector('[data-tirenote]'); if(t){ t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+}
+async function runTireScan(){
+  const o = getSelectedOrder(); if(!o) return;
+  const ts = tireState(o);
+  if(!TIRE_SLOTS.some(s=>ts.photos[s.key]) || ts.busy) return;
+  ts.busy = true; ts.error = null; rerenderTirePanel();
+  const images = (await Promise.all(TIRE_SLOTS.map(s=>tirePhotoDataUrl(ts.photos[s.key])))).filter(Boolean);
+  if(!images.length){ ts.busy = false; ts.error = 'Fotos konnten nicht geladen werden – bitte neu aufnehmen.'; if(state.tireScan === ts) rerenderTirePanel(); return; }
+  const r = await tabletRequest('tire_scan', { order_id:o.id, images }, 90000);
+  ts.busy = false;
+  if(r.ok && r.data && r.data.result){ ts.result = r.data.result; ts.imageUrls = r.data.image_urls || []; }
+  else ts.error = r.quota ? 'Das kostenlose KI-Kontingent für heute ist aufgebraucht – Reifen bitte über „Ohne Scan manuell eintragen“ erfassen (ab 2 Uhr nachts wieder verfügbar).' : r.status===429 ? 'Zu viele Scans in dieser Stunde – bitte später erneut versuchen.' : r.missing ? 'Reifenscan ist auf dem Server noch nicht freigeschaltet.' : r.credits ? 'Reifenscan gerade nicht möglich: ' + CREDITS_MSG + '.' : `Auswertung fehlgeschlagen (${r.reason}). Bitte erneut versuchen.`;
+  if(state.tireScan === ts) rerenderTirePanel();
+}
+async function saveTireScan(){
+  const o = getSelectedOrder(); if(!o) return;
+  const ts = tireState(o);
+  if(!ts.result || ts.saved) return;
+  const btn = document.getElementById('tireSaveBtn'); if(btn){ btn.textContent = 'Speichert…'; btn.style.pointerEvents='none'; }
+  const r = ts.result;
+  if(r.manual && !(r.mech_notes||'').trim() && !TIRE_FIELDS.some(([k])=>{ const v = tireVal(r[k]); return v!==null && v!=='' && v!==undefined; })){
+    showUpdateToast('Bitte mindestens ein Feld ausfüllen.'); if(btn){ btn.innerHTML = `${iconCheck} Am Auftrag speichern`; btn.style.pointerEvents=''; } return;
+  }
+  for(const s of TIRE_SLOTS){
+    const ph = ts.photos[s.key]; if(!ph || !ph.startsWith('data:')) continue; // schon gespeicherte Fotos nicht doppelt hochladen
+    const up = await tabletAction('media_upload', { order_id:o.id, filename:`reifenscan-${o.orderNumber}-${s.key}-${Date.now()}.jpg`, data_url:ph, caption:`Reifenscan – ${s.label}` });
+    if(up && up.file_url) ts.photos[s.key] = up.file_url;
+  }
+  const fmt = k => { const v = tireVal(r[k]); return (v===null||v===undefined||v===''||v===0) ? '–' : v; };
+  const dmg = (list)=> Array.isArray(list)&&list.length ? list.map(d=>typeof d==='string'?d:[d.type||d.damage||d.title, d.description, d.location, d.severity&&`(${d.severity})`].filter(Boolean).join(' ')).join('; ') : 'keine erkannt';
+  const lines = [
+    `${r.manual ? 'Reifendaten (manuell erfasst)' : r.edited ? 'Reifenscan (KI, vom Mechaniker korrigiert)' : 'Reifenscan (KI)'} – ${state.currentUser ? state.currentUser.name : 'Tablet'}`,
+    ...(()=>{ const has = k => fmt(k)!=='–'; const j = (...x) => x.filter(Boolean).join(', ');
+      const l1 = j([has('brand')&&fmt('brand'), has('model')&&fmt('model')].filter(Boolean).join(' '), [has('size')&&fmt('size'), (has('load_index')||has('speed_index')) && `${has('load_index')?fmt('load_index'):''}${has('speed_index')?fmt('speed_index'):''}`].filter(Boolean).join(' '), has('season')&&`Saison ${fmt('season')}`);
+      const l2 = j(has('dot_code')&&`DOT ${fmt('dot_code')}${has('tire_age_years')?` (ca. ${fmt('tire_age_years')} Jahre)`:''}`, !has('dot_code')&&has('tire_age_years')&&`ca. ${fmt('tire_age_years')} Jahre alt`, has('tread_depth_mm')&&`Profil ${String(fmt('tread_depth_mm')).replace('.',',')} mm`, has('overall_condition')&&`Zustand ${fmt('overall_condition')}`);
+      return [l1 && `Reifen: ${l1}`, l2].filter(Boolean); })(),
+    ...(r.manual ? [] : [`Schäden Reifen: ${dmg(r.tire_damages)}`, `Schäden Felge: ${dmg(r.rim_damages)}`]),
+    ...((r.mech_notes||'').trim() ? ['Schäden/Bemerkungen Mechaniker: ' + r.mech_notes.trim().split(/\n+/).join('; ')] : []),
+    ...tireWarnings(r).map(w=>'Hinweis: '+w),
+    ...(r.manual ? [] : ['KI-Einschätzung – Sichtprüfung durch Mechaniker erforderlich.']),
+  ];
+  const note = await tabletAction('note_add', { order_id:o.id, content: lines.join('\n') });
+  ts.saved = !!note;
+  if(note){
+    const photos = {}; TIRE_SLOTS.forEach(s=>{ const p = ts.photos[s.key]; if(p && !p.startsWith('data:')) photos[s.key] = p; });
+    const saved = { result: JSON.parse(JSON.stringify(r)), photos, saved_at: new Date().toISOString(), saved_by: state.currentUser ? state.currentUser.name : '' };
+    state.tireSavedCache = state.tireSavedCache || {}; state.tireSavedCache[o.id] = saved; ts.savedInfo = { at: saved.saved_at, by: saved.saved_by };
+    tabletRequest('tire_scan_store', { order_id:o.id, result: saved.result, photos }, 20000);
+  }
+  if(note) showUpdateToast(r.manual ? 'Reifendaten am Auftrag gespeichert' : 'Reifenscan am Auftrag gespeichert');
+  rerenderTirePanel();
+}
+function handleTireScanClick(e){
+  if(e.target.closest('#tireScanBtn')){ runTireScan(); return true; }
+  if(e.target.closest('#tireSaveBtn')){ saveTireScan(); return true; }
+  const chip = e.target.closest('[data-tirechip]');
+  if(chip){ const o = getSelectedOrder(); if(o){ const ts = tireState(o); if(ts.result){
+    const cur = (ts.result.mech_notes||'').trim(); ts.result.mech_notes = cur ? `${cur}\n${chip.dataset.tirechip}` : chip.dataset.tirechip; ts.saved = false;
+    const t = document.querySelector('[data-tirenote]');
+    if(t && document.getElementById('tireSaveBtn')){ t.value = ts.result.mech_notes; t.focus(); t.setSelectionRange(t.value.length, t.value.length); } else rerenderTirePanelKeepNote();
+  } } return true; }
+  if(e.target.closest('#tireManualBtn')){ const o = getSelectedOrder(); if(o){ const ts = tireState(o); ts.result = emptyTireResult(); ts.saved = false; ts.error = null; rerenderTirePanel(); const f = document.querySelector('[data-tirefield="brand"]'); if(f) f.focus(); } return true; }
+  if(e.target.closest('#tireResetBtn')){ const o = getSelectedOrder(); if(o){ state.tireScan = null; tireState(o, true); rerenderTirePanel(); } return true; }
+  return false;
+}
+
+
+/* ---------- 14. Offline-Modus ---------- */
+function renderOfflineBanner(online){
+  const b = document.getElementById('offlineBanner');
+  if(online===false){
+    b.innerHTML = `${iconWifiOff} Offline – Änderungen werden lokal gespeichert`;
+    b.classList.remove('online');
+    b.style.display='flex';
+  } else if(online===true){
+    b.innerHTML = `${iconCheck} Wieder online – synchronisiert…`;
+    b.classList.add('online');
+    b.style.display='flex';
+    setTimeout(()=>{ b.style.display='none'; }, 2500);
+  }
+}
+window.addEventListener('offline', ()=>renderOfflineBanner(false));
+window.addEventListener('online', ()=>renderOfflineBanner(true));
+
+/* ---------- 10. Smart Reifenlager – Route/Navigation ---------- */
+function tireRouteInfo(t){
+  const idx = parseInt(t.id.replace('r',''),10);
+  const ebene = (idx % 3) + 1;
+  const platz = (idx % 8) + 1;
+  const meter = 6 + ((idx * 7) % 24);
+  const regalLetter = t.location.split(' ')[1] ? t.location.split(' ')[1][0] : 'A';
+  return { regal:`Regal ${regalLetter}`, ebene, platz:`${t.location.split(' ')[1]}-${platz}`, meter };
+}
+function renderRouteInfo(t){
+  if(!t) return '';
+  const r = tireRouteInfo(t);
+  return `
+    <div class="rl-route-bar">
+      <div class="rl-route-ic">${iconRoute}</div>
+      <div class="rl-route-info">
+        <div class="rl-route-title">${t.name}</div>
+        <div class="rl-route-sub">${r.regal} · Ebene ${r.ebene} · Platz ${r.platz} · <b>${r.meter} Meter</b> entfernt</div>
+      </div>
+      <div class="rl-route-close" id="clearRouteFinder">${iconClose}</div>
+    </div>`;
+}
+
+/* ---------- 4. Ersatzteil-Scanner ---------- */
+const partsCatalog = [
+  {code:'34116794300', name:'Bremsbelagsatz vorne', oem:'34116794300', bestand:12, lagerplatz:'Regal C-04', kompatibel:true},
+  {code:'11427566327', name:'Ölfilter', oem:'11427566327', bestand:28, lagerplatz:'Regal A-02', kompatibel:true},
+  {code:'8K0698151', name:'Bremsbelagsatz hinten (Audi)', oem:'8K0698151', bestand:4, lagerplatz:'Regal C-05', kompatibel:false},
+];
+let _pdfModalBlobUrl = null;
+function _dataUriToBlobUrl(dataUri){
+  const commaIdx = dataUri.indexOf(',');
+  const meta = dataUri.slice(5, commaIdx); // strip "data:"
+  const mime = meta.split(';')[0] || 'application/pdf';
+  const base64 = dataUri.slice(commaIdx + 1);
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for(let i=0;i<len;i++) bytes[i] = binary.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], {type: mime}));
+}
+function openPdfModal(dataUri, title){
+  document.getElementById('pdfModalTitle').textContent = title || 'Dokument';
+  document.getElementById('pdfModalClose').innerHTML = iconClose;
+  if(_pdfModalBlobUrl){ URL.revokeObjectURL(_pdfModalBlobUrl); _pdfModalBlobUrl = null; }
+  if(String(dataUri).startsWith('data:')){
+    _pdfModalBlobUrl = _dataUriToBlobUrl(dataUri);
+    document.getElementById('pdfModalFrame').src = _pdfModalBlobUrl;
+  } else {
+    document.getElementById('pdfModalFrame').src = dataUri; // normale Datei-URL
+  }
+  document.getElementById('pdfModal').style.display='flex';
+}
+function closePdfModal(){
+  document.getElementById('pdfModal').style.display='none';
+  document.getElementById('pdfModalFrame').src = 'about:blank';
+  if(_pdfModalBlobUrl){ URL.revokeObjectURL(_pdfModalBlobUrl); _pdfModalBlobUrl = null; }
+}
+function openScannerModal(){
+  const body = document.getElementById('closeOrderModalBody');
+  body.innerHTML = `
+    <h3>${iconScan} Ersatzteil scannen</h3>
+    <p>QR- oder Barcode simulieren: OEM-Nummer eingeben und scannen.</p>
+    <input class="scan-input" id="scanInput" placeholder="z.B. 34116794300" value="34116794300">
+    <div class="modal-actions">
+      <div class="btn" id="closeOrderCancel">Abbrechen</div>
+      <div class="btn primary" id="scanConfirmBtn">${iconScan} Scan simulieren</div>
+    </div>
+    <div id="scanResult"></div>
+  `;
+  document.getElementById('closeOrderModal').style.display='flex';
+}
+function runScan(){
+  const input = document.getElementById('scanInput');
+  const code = (input.value||'').trim();
+  const part = partsCatalog.find(p=>p.code===code) || {name:'Unbekanntes Teil', oem:code||'—', bestand:0, lagerplatz:'—', kompatibel:false};
+  const res = document.getElementById('scanResult');
+  res.innerHTML = `
+    <div class="scan-result ${part.kompatibel?'ok':'bad'}">
+      <div class="scan-result-head">${part.kompatibel?iconCheck:iconWarn} ${part.kompatibel?'Kompatibel':'Nicht kompatibel'}</div>
+      <div class="scan-field"><span class="k">Teilename</span><span class="v">${part.name}</span></div>
+      <div class="scan-field"><span class="k">OEM-Nummer</span><span class="v">${part.oem}</span></div>
+      <div class="scan-field"><span class="k">Bestand</span><span class="v">${part.bestand}x</span></div>
+      <div class="scan-field"><span class="k">Lagerplatz</span><span class="v">${part.lagerplatz}</span></div>
+    </div>
+  `;
+}
+
+/* ---------- Login & Profilauswahl (Netflix-Style) ---------- */
+const roleDefaults = { mechaniker:'auftraege', meister:'auftraege', serviceberater:'alle', admin:'dashboard' };
+
+function initLoginIcon(){
+  document.getElementById('loginSubmitIcon').innerHTML = iconLogout;
+}
+const SAVED_CODE_KEY = 'autoleitwerk.workshopCode';
+const ROLE_AVATAR = { admin:'linear-gradient(135deg,#8b5cf6,#c026d3)', serviceberater:'linear-gradient(135deg,#0ea5e9,#6366f1)', meister:'linear-gradient(135deg,#f59e0b,#ef4444)', mechaniker:'linear-gradient(135deg,#10b981,#0ea5e9)' };
+async function fetchProfiles(code){
+  const controller = new AbortController();
+  const timeoutId = setTimeout(()=>controller.abort(), 10000);
+  try{
+    const res = await fetch(SERVER_BASE + '/workshopProfiles', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ workshop_code: code }), signal: controller.signal });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok){ const e = new Error(data.error || 'HTTP '+res.status); e.code = data.error || (res.status===404 ? 'unsupported' : 'error'); e.status = res.status; throw e; }
+    return data;
+  } finally { clearTimeout(timeoutId); }
+}
+async function performLogin(){
+  const errorEl = document.getElementById('loginError');
+  const code = (document.getElementById('loginWorkshopCode').value || '').trim().toUpperCase();
+  const nameField = document.getElementById('loginNameField');
+  const nameMode = nameField && nameField.style.display !== 'none';
+  if(errorEl) errorEl.textContent = '';
+  if(!code){ if(errorEl) errorEl.textContent = 'Bitte Werkstatt-Code eingeben.'; return; }
+  if(nameMode){ // Rückfall ohne Profilauswahl (alter Server)
+    const name = (document.getElementById('loginEmployeeName').value || '').trim();
+    if(!name){ if(errorEl) errorEl.textContent = 'Bitte deinen Namen eingeben.'; return; }
+    state.pendingLogin = { code, name }; openPinScreen(); return;
+  }
+  const btnLabel = document.getElementById('loginSubmitLabel'); if(btnLabel) btnLabel.textContent = 'Lädt…';
+  try{
+    const data = await fetchProfiles(code);
+    try{ localStorage.setItem(SAVED_CODE_KEY, code); }catch(_){}
+    showProfileScreen(data);
+  }catch(e){
+    if(e.code==='unknown_code') errorEl.textContent = 'Diesen Werkstatt-Code gibt es nicht.';
+    else if(e.code==='too_many_requests') errorEl.textContent = 'Zu viele Versuche – bitte kurz warten.';
+    else if(e.code==='unsupported' || e.status===404){ if(nameField) nameField.style.display=''; errorEl.textContent = 'Bitte zusätzlich deinen Namen eingeben.'; }
+    else errorEl.textContent = 'Keine Verbindung. Bitte erneut versuchen.';
+  } finally { if(btnLabel) btnLabel.textContent = 'Weiter'; }
+}
+function showProfileScreen(data){
+  state.loginProfiles = data;
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('pinScreen').style.display = 'none';
+  const sub = document.getElementById('profileSub');
+  if(sub) sub.textContent = (data.workshop_name ? data.workshop_name + ' · ' : '') + 'Wähle dein Profil, um fortzufahren.';
+  const grid = document.getElementById('profileGrid');
+  grid.innerHTML = (data.profiles||[]).length ? data.profiles.map(p=>`
+    <div class="profile-card ${p.locked?'locked':''}" data-loginprofile="${escHtml(p.id)}">
+      <div class="profile-avatar" style="background:${ROLE_AVATAR[p.role]||ROLE_AVATAR.mechaniker}">${escHtml(initials(p.name))}</div>
+      <div class="profile-name">${escHtml(p.name)}</div>
+      <div class="profile-role">${p.locked ? '🔒 gesperrt' : escHtml(roleLabel[p.role]||p.role)}</div>
+    </div>`).join('') : `<p style="color:var(--text-faint)">Für diese Werkstatt sind noch keine Mitarbeiter angelegt.</p>`;
+  document.getElementById('profileScreen').style.display = 'flex';
+}
+function chooseLoginProfile(id){
+  const d = state.loginProfiles; if(!d) return;
+  const p = (d.profiles||[]).find(x=>x.id===id); if(!p) return;
+  state.pendingLogin = { code: d.workshop_code, name: p.name, employeeId: p.id, role: p.role };
+  document.getElementById('profileScreen').style.display = 'none';
+  openPinScreen();
+}
+async function autoProfileScreen(){
+  let code = null; try{ code = localStorage.getItem(SAVED_CODE_KEY); }catch(_){}
+  if(!code || state.sessionToken) return;
+  const c = document.getElementById('loginWorkshopCode'); if(c) c.value = code;
+  try{ showProfileScreen(await fetchProfiles(code)); }catch(_){ /* Login-Maske bleibt */ }
+}
+
+/* ---------- PIN-Bildschirm ---------- */
+function openPinScreen(){
+  const m = state.pendingLogin;
+  state.pinEntry = '';
+  state.pinBusy = false;
+  document.getElementById('pinAvatar').textContent = initials(m.name);
+  document.getElementById('pinName').textContent = m.name;
+  document.getElementById('pinError').textContent = '';
+  document.getElementById('pinBackIcon').innerHTML = iconArrowLeft;
+  renderPinDots();
+  const keys = ['1','2','3','4','5','6','7','8','9','','0','del'];
+  document.getElementById('pinKeypad').innerHTML = keys.map(k=>{
+    if(k==='') return `<div class="pin-key empty"></div>`;
+    if(k==='del') return `<div class="pin-key pin-del" data-pinkey="del">${iconBackspace}</div>`;
+    return `<div class="pin-key" data-pinkey="${k}">${k}</div>`;
+  }).join('');
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('pinScreen').style.display = 'flex';
+}
+function renderPinDots(){
+  document.getElementById('pinDots').innerHTML = Array.from({length:4}).map((_,i)=>
+    `<div class="pin-dot ${i<state.pinEntry.length?'filled':''}"></div>`
+  ).join('');
+}
+function pinPressDigit(d){
+  if(state.pinBusy || state.pinEntry.length>=4) return;
+  state.pinEntry += d;
+  renderPinDots();
+  if(state.pinEntry.length===4) checkPin();
+}
+function pinBackspace(){
+  if(state.pinBusy) return;
+  state.pinEntry = state.pinEntry.slice(0,-1);
+  document.getElementById('pinError').textContent = '';
+  renderPinDots();
+}
+function pinShakeAndReset(message){
+  document.getElementById('pinError').textContent = message;
+  document.getElementById('pinDots').classList.add('shake');
+  setTimeout(()=>{
+    document.getElementById('pinDots').classList.remove('shake');
+    state.pinEntry = '';
+    state.pinBusy = false;
+    renderPinDots();
+  }, 400);
+}
+async function checkPin(){
+  const p = state.pendingLogin;
+  if(!p || state.pinBusy) return;
+  state.pinBusy = true;
+  let result;
+  try{
+    result = await workshopLogin(p.code, p.employeeId ? null : p.name, state.pinEntry, p.employeeId);
+  }catch(e){
+    if(e.code==='locked'){
+      let until = '';
+      if(e.retryAt){ const d = new Date(e.retryAt); if(!isNaN(d)) until = ' bis ' + String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+      pinShakeAndReset('Zu viele Versuche. Profil gesperrt' + until + '.');
+    } else if(e.code==='invalid'){
+      pinShakeAndReset(p.employeeId ? 'PIN falsch.' : 'Name, Werkstatt-Code oder PIN falsch.');
+    } else if(e.code==='workshop_disabled' || e.code==='maintenance'){
+      pinShakeAndReset(e.serverMessage || (e.code==='maintenance' ? 'Wartungsarbeiten – bitte später erneut versuchen.' : 'Diese Werkstatt ist derzeit gesperrt.'));
+    } else {
+      pinShakeAndReset('Anmeldung nicht möglich. Verbindung prüfen.');
+    }
+    return;
+  }
+  state.sessionToken = result.token;
+  state.sessionExpires = result.expires_at;
+  state.workshopToken = p.code;
+  try{
+    await loadFromBase44();
+    state.backendAvailable = true;
+  }catch(e){
+    state.sessionToken = null;
+    pinShakeAndReset('Live-Daten nicht erreichbar. Bitte erneut versuchen.');
+    return;
+  }
+  state.pinBusy = false;
+  state.pendingLogin = null;
+  document.getElementById('pinScreen').style.display = 'none';
+  const emp = result.employee || {};
+  const role = roleLabel[emp.role] ? emp.role : 'mechaniker'; // unbekannte Rolle = geringste Rechte
+  await selectProfile({ name: emp.name || p.name, role });
+  startBase44Polling();
+}
+function backToProfiles(){
+  document.getElementById('pinScreen').style.display = 'none';
+  if(state.pendingLogin && state.pendingLogin.employeeId && state.loginProfiles){ state.pinEntry=''; state.pinBusy=false; state.pendingLogin=null; showProfileScreen(state.loginProfiles); return; }
+  document.getElementById('loginScreen').style.display = 'flex';
+  state.pinEntry = '';
+  state.pinBusy = false;
+  state.pendingLogin = null;
+}
+
+async function selectProfile(member){
+  state.currentUser = { name: member.name, role: member.role };
+  loadQuickNotesFor(state.workshopToken, member.name);
+  state.selectedRole = member.role;
+  state.shiftStart = Date.now();
+  document.getElementById('profileScreen').style.display = 'none';
+  document.getElementById('pinScreen').style.display = 'none';
+  state.mainView = 'auftraege';
+  renderChrome();
+  setMainView(roleDefaults[member.role] || 'auftraege');
+}
+// Alles, was zu einer Werkstatt/einem Mitarbeiter gehört, beim Abmelden/Werkstattwechsel verwerfen
+function resetUserScopedState(){
+  aiChat.splice(1); // nur die Begrüßung behalten
+  alexCtxOrderId = null; alexCtxCleared = false; alexBusy = false;
+  state.tireScan = null; state.tireSets = null;
+  orders = []; state.selectedOrderId = null; state.selectedTaskId = null; state.base44Data = null;
+  quickNotes.splice(0); // Schnellnotizen gehören zum Mitarbeiter, siehe loadQuickNotesFor
+  ['aiPanel','notePanel'].forEach(id=>{ const el = document.getElementById(id); if(el) el.style.display='none'; });
+  updateNoteBadge();
+}
+function showLoginScreen(){
+  document.getElementById('loggedOutScreen').style.display = 'none';
+  document.getElementById('profileScreen').style.display = 'none';
+  document.getElementById('pinScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  state.currentUser = null;
+  state.shiftStart = null;
+  state.token = null;
+  state.backendAvailable = false;
+  state.workshopToken = null;
+  state.workshopName = null;
+  state.sessionToken = null;
+  state.sessionExpires = null;
+  state.pendingLogin = null;
+  state.pinEntry = '';
+  state.pinBusy = false;
+  state.b44Appointments = null;
+  resetUserScopedState();
+  const codeInput = document.getElementById('loginWorkshopCode');
+  if(codeInput) codeInput.value = '';
+  const nameInput = document.getElementById('loginEmployeeName');
+  if(nameInput) nameInput.value = '';
+  const errEl = document.getElementById('loginError');
+  if(errEl) errEl.textContent = '';
+  stopBase44Polling();
+}
+
+/* ---------- Live-Uhr (lokale Systemzeit) ---------- */
+const WOCHENTAGE = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+const MONATE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+function updateNetState(){ const el=document.getElementById('netState'); if(el){ el.textContent = navigator.onLine ? 'Online' : 'Offline'; el.style.color = navigator.onLine ? '' : 'var(--danger)'; } }
+window.addEventListener('online', updateNetState); window.addEventListener('offline', updateNetState);
+function updateClock(){
+  updateNetState();
+  const el = document.getElementById('clock');
+  if(!el) return;
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  el.textContent = `${hh}:${mm} · ${WOCHENTAGE[now.getDay()]}, ${now.getDate()}. ${MONATE[now.getMonth()]}`;
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+/* ---------- Hell-/Dunkelmodus (nur Darstellung) ---------- */
+const THEME_ICONS = {
+  auto:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+  light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  dark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+};
+function themePref(){ try{ return window.alTheme ? window.alTheme.pref() : 'auto'; }catch(e){ return 'auto'; } }
+function themeCurrent(){ return document.documentElement.getAttribute('data-theme')==='light' ? 'light' : 'dark'; }
+function themeSegHtml(){
+  const p = themePref();
+  return `<div class="theme-seg" role="radiogroup" aria-label="Erscheinungsbild">${['auto','light','dark'].map(k=>
+    `<button type="button" role="radio" aria-checked="${p===k}" class="${p===k?'active':''}" data-theme-choice="${k}">${THEME_ICONS[k]}${({auto:'Automatisch',light:'Hell',dark:'Dunkel'})[k]}</button>`).join('')}</div>`;
+}
+// Logo: Wortmarke/Symbol sind für dunkle Flächen gemacht -> im hellen Theme weiße/graue Teile abdunkeln (Farbverlauf bleibt)
+let _logoIconLight = null, _logoWordLight = null, _logoWordLightPending = null;
+function logoIconLight(){
+  if(!_logoIconLight){ try{ _logoIconLight = 'data:image/svg+xml;base64,' + btoa(atob(LOGO_ICON_SRC.split(',')[1]).replace(/#ffffff/gi,'#1c1830')); }catch(e){ _logoIconLight = LOGO_ICON_SRC; } }
+  return _logoIconLight;
+}
+function logoWordLight(){
+  if(_logoWordLight) return Promise.resolve(_logoWordLight);
+  if(_logoWordLightPending) return _logoWordLightPending;
+  _logoWordLightPending = new Promise(res=>{
+    const img = new Image();
+    img.onload = ()=>{ try{
+      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const x = c.getContext('2d'); x.drawImage(img,0,0);
+      const d = x.getImageData(0,0,c.width,c.height), a = d.data;
+      for(let i=0;i<a.length;i+=4){
+        const r=a[i], g=a[i+1], b=a[i+2];
+        if(Math.max(r,g,b)-Math.min(r,g,b) < 40){ const k = 1-(r+g+b)/765; a[i]=Math.round(28+k*173); a[i+1]=Math.round(24+k*173); a[i+2]=Math.round(48+k*173); }
+      }
+      x.putImageData(d,0,0); _logoWordLight = c.toDataURL('image/png');
+    }catch(e){ _logoWordLight = LOGO_WORDMARK_SRC; } res(_logoWordLight); };
+    img.onerror = ()=>{ _logoWordLight = LOGO_WORDMARK_SRC; res(_logoWordLight); };
+    img.src = LOGO_WORDMARK_SRC;
+  });
+  return _logoWordLightPending;
+}
+function applyThemeLogos(){
+  const light = themeCurrent()==='light';
+  const ic = document.getElementById('logoImgSidebar'); if(ic) ic.src = light ? logoIconLight() : LOGO_ICON_SRC;
+  const setWord = src=>['logoImgBig','logoImgLogin','logoImgProfile'].forEach(id=>{ const el = document.getElementById(id); if(el && el.getAttribute('src')!==src) el.src = src; });
+  if(!light){ setWord(LOGO_WORDMARK_SRC); return; }
+  logoWordLight().then(src=>{ if(themeCurrent()==='light') setWord(src); });
+}
+function renderThemeControls(){
+  const q = document.getElementById('themeQuickBtn');
+  if(q){ const light = themeCurrent()==='light'; q.innerHTML = light ? THEME_ICONS.dark : THEME_ICONS.light;
+    const t = light ? 'Dunkles Design einschalten' : 'Helles Design einschalten'; q.title = t; q.setAttribute('aria-label', t); }
+  const p = themePref();
+  document.querySelectorAll('[data-theme-choice]').forEach(b=>{ const on = b.getAttribute('data-theme-choice')===p; b.classList.toggle('active', on); b.setAttribute('aria-checked', on?'true':'false'); });
+}
+window.addEventListener('al-themechange', ()=>{ applyThemeLogos(); renderThemeControls(); });
+document.addEventListener('click', e=>{
+  const ch = e.target.closest && e.target.closest('[data-theme-choice]');
+  if(ch){ if(window.alTheme) window.alTheme.set(ch.getAttribute('data-theme-choice')); return; }
+  if(e.target.closest && e.target.closest('#themeQuickBtn')){ if(window.alTheme) window.alTheme.set(themeCurrent()==='light' ? 'dark' : 'light'); }
+});
+
+/* ---------- init ---------- */
+document.getElementById('logoImgSidebar').src = LOGO_ICON_SRC;
+document.getElementById('logoImgBig').src = LOGO_WORDMARK_SRC;
+document.getElementById('logoImgLogin').src = LOGO_WORDMARK_SRC;
+document.getElementById('logoImgProfile').src = LOGO_WORDMARK_SRC;
+applyThemeLogos(); renderThemeControls();
+document.getElementById('aiFabIcon').innerHTML = alexAvatar(56);
+document.getElementById('noteFabIcon').innerHTML = iconNote;
+updateNoteBadge();
+if(navigator.onLine===false) renderOfflineBanner(false);
+initLoginIcon();
+autoProfileScreen();
+renderChrome();
+setMainView('auftraege');

@@ -1,6 +1,6 @@
-# ALEX – Wissensdatenbank (Stand: 29.09.2026)
+# ALEX – Wissensdatenbank (Stand: 29.10.2026)
 
-Automatisch generiert aus `AI_KB` in `index.html` – bitte nicht von Hand editieren, sondern `tools/generate_kb_doc.py` erneut ausführen.
+Automatisch generiert aus `AI_KB` in `tablet.js` – bitte nicht von Hand editieren, sondern `tools/generate_kb_doc.py` erneut ausführen.
 
 **Gesamtzahl Einträge:** 73
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Generiert die ALEX-Wissensdatenbank-Übersicht (Markdown + HTML) direkt aus dem
-AI_KB-Array in index.html.
+AI_KB-Array in tablet.js (Programmcode der Tablet-App).
 
-Immer ausführen, nachdem AI_KB in index.html geändert wurde (neue Einträge,
+Immer ausführen, nachdem AI_KB in tablet.js geändert wurde (neue Einträge,
 Umbenennung, gelöschte Einträge), damit die Übersichtsdateien aktuell bleiben:
 
     python3 tools/generate_kb_doc.py
@@ -14,7 +14,7 @@ Erzeugt:
 
 Beide Dateien werden aus dem Skript neu aufgebaut (kein manuelles Editieren
 der Output-Dateien nötig/sinnvoll) und sollten zusammen mit index.html
-committet werden.
+committet werden (danach auch tools/bump_tablet_version.py ausführen).
 """
 import re
 import json
@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-INDEX_HTML = REPO_ROOT / "index.html"
+INDEX_HTML = REPO_ROOT / "tablet.js"  # früher in index.html eingebettet
 LOGO_PATH = Path(__file__).resolve().parent / "assets" / "autoleitwerk-logo.png"
 OUT_DIR = REPO_ROOT / "docs"
 OUT_MD = OUT_DIR / "ALEX_Wissensdatenbank.md"
@@ -33,7 +33,7 @@ OUT_HTML = OUT_DIR / "ALEX_Wissensdatenbank.html"
 esc = htmlmod.escape
 
 # ---------------------------------------------------------------------------
-# 1. AI_KB aus index.html extrahieren
+# 1. AI_KB aus tablet.js extrahieren
 # ---------------------------------------------------------------------------
 
 def load_entries():
@@ -152,7 +152,7 @@ def write_markdown(entries, groups):
     out = []
     out.append("# ALEX – Wissensdatenbank (Stand: " + datetime.now().strftime("%d.%m.%Y") + ")")
     out.append("")
-    out.append("Automatisch generiert aus `AI_KB` in `index.html` – bitte nicht von Hand editieren, "
+    out.append("Automatisch generiert aus `AI_KB` in `tablet.js` – bitte nicht von Hand editieren, "
                 "sondern `tools/generate_kb_doc.py` erneut ausführen.")
     out.append("")
     out.append(f"**Gesamtzahl Einträge:** {len(entries)}")
