@@ -73,7 +73,7 @@ async function call(path, body, token, method = 'POST', headers = {}) {
   return { status: res.status, data: await res.json(), cors: res.headers.get('Access-Control-Allow-Origin') };
 }
 const results = [];
-async function t(name, fn) { try { await fn(); results.push('✓ ' + name); } catch (e) { results.push('✗ ' + name + ': ' + e.message); } }
+async function t(name, fn) { try { await fn(); results.push('✓ ' + name); } catch (e) { results.push('✗ ' + name + ': ' + e.message + (e.stack.match(/run\.mjs:\d+/)||[''])[0]); } }
 
 let token;
 await t('Login richtiger PIN (Vorname reicht)', async () => {
@@ -940,6 +940,39 @@ await t('Dashboard-ALEX über eigenen Server: Antwort, Rückfall ohne KI, Entwü
   assert.equal(r.d.kind, 'teilebestellung'); const po = db.PartOrder.find(x => x.id === r.d.part_order_id); assert.equal(po.workshop_code, 'AL-T1'); assert.equal(po.status, 'offen');
   assert.equal((await fnU('alexExecute', { draft: { type: 'x' } })).s, 400);
   assert.equal((await fnU('alexExecute', { draft: dr }, null)).s, 401);
+});
+await t('Offline-Warteschlange: Zeitpunkt vom Tablet + keine Doppelungen beim Nachsenden', async () => {
+  const ago = m => new Date(Date.now() - m * 60000).toISOString();
+  const nWt = db.WorkTime.length;
+  const s1 = await call('/tabletAction', { action: 'worktime_start', order_id: 'o1', task_id: 't1', description: 'Öl', op_id: 'op-start-0001', client_at: ago(30) }, token);
+  const wt = db.WorkTime.find(w => w.id === s1.data.worktime_id);
+  assert.equal(wt.start_timestamp, ago(30).slice(0, 16) + wt.start_timestamp.slice(16), 'Startzeit = Zeitpunkt am Tablet');
+  assert.ok(Math.abs(Date.parse(wt.start_timestamp) - (Date.now() - 30 * 60000)) < 5000);
+  const s2 = await call('/tabletAction', { action: 'worktime_start', order_id: 'o1', task_id: 't1', description: 'Öl', op_id: 'op-start-0001', client_at: wt.start_timestamp, replay: true }, token);
+  assert.equal(s2.data.worktime_id, wt.id); assert.equal(s2.data.replayed, true); assert.equal(db.WorkTime.length, nWt + 1, 'nicht doppelt');
+  const e = await call('/tabletAction', { action: 'worktime_stop', worktime_id: wt.id, op_id: 'op-stop-00001', client_at: ago(10) }, token);
+  assert.equal(e.data.duration_minutes, 20);
+  // unglaubwürdiger Zeitpunkt (5 Tage alt) → jetzt
+  const s3 = await call('/tabletAction', { action: 'worktime_start', order_id: 'o1', task_id: 't1', op_id: 'op-start-0002', client_at: ago(5 * 1440) }, token);
+  assert.ok(Date.now() - Date.parse(db.WorkTime.find(w => w.id === s3.data.worktime_id).start_timestamp) < 5000);
+  // Notiz
+  const nN = db.InternalNote.length;
+  await call('/tabletAction', { action: 'note_add', order_id: 'o1', task_id: 't1', content: 'Offline-Bericht', op_id: 'op-note-00001', client_at: ago(3) }, token);
+  const n2 = await call('/tabletAction', { action: 'note_add', order_id: 'o1', task_id: 't1', content: 'Offline-Bericht', op_id: 'op-note-00001', client_at: ago(3), replay: true }, token);
+  assert.equal(n2.data.replayed, true); assert.equal(db.InternalNote.length, nN + 1);
+  // Foto
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const nM = db.MediaItem.length;
+  const m1 = await call('/tabletAction', { action: 'media_upload', order_id: 'o1', task_id: 't1', data_url: png, caption: 'Bremse', op_id: 'op-foto-00001' }, token);
+  assert.match(m1.data.file_url, /\/AL-T1\/o1\/op-op-foto-00001\.png$/);
+  const m2 = await call('/tabletAction', { action: 'media_upload', order_id: 'o1', task_id: 't1', data_url: png, caption: 'Bremse', op_id: 'op-foto-00001', replay: true }, token);
+  assert.equal(m2.data.media_id, m1.data.media_id); assert.equal(db.MediaItem.length, nM + 1);
+  // Aufgabe erledigt um … ; Auftrag schon abgeschlossen → keine zweite Meldung
+  await call('/tabletAction', { action: 'task_update', task_id: 't1', status: 'erledigt', op_id: 'op-task-00001', client_at: ago(7) }, token);
+  assert.ok(Math.abs(Date.parse(db.OrderTask.find(x => x.id === 't1').completed_date) - (Date.now() - 7 * 60000)) < 5000);
+  db.Order.find(o => o.id === 'o1').status = 'abholbereit'; const nL = db.WorkshopLog.length;
+  const c = await call('/tabletAction', { action: 'order_complete', order_id: 'o1', qc: [], op_id: 'op-done-00001', replay: true }, token);
+  assert.equal(c.data.replayed, true); assert.equal(db.WorkshopLog.length, nL);
 });
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

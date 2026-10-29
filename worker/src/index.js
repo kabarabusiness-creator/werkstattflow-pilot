@@ -47,6 +47,15 @@ function safeEqual(a, b) {
 }
 const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const nowIso = () => new Date().toISOString();
+// Offline-Warteschlange im Tablet: Zeitpunkt, zu dem der Mechaniker getippt hat (statt Ankunft beim Server).
+// Nur glaubwürdige Werte (bis 72 h zurück, max. 2 min in der Zukunft), sonst „jetzt“.
+function clientTime(body) {
+  const t = Date.parse(String((body && body.client_at) || ''));
+  const now = Date.now();
+  if (!Number.isFinite(t) || t < now - 72 * 3600_000 || t > now + 120_000) return nowIso();
+  return new Date(Math.min(t, now)).toISOString();
+}
+const opIdOf = body => (body && /^[A-Za-z0-9-]{8,64}$/.test(String(body.op_id || ''))) ? String(body.op_id) : null;
 function berlinToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
 }
@@ -685,7 +694,13 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     if (!env.PHOTOS) throw new HttpError(503, 'not_available', { message: 'Foto-Speicher ist noch nicht eingerichtet.' });
     const order = await ownRecord(db, 'Order', body.order_id, code);
     const { bytes, contentType, ext } = decodeDataUrl(body.data_url);
-    const key = `${code}/${order.id}/${randomHex(16)}.${ext}`;
+    const opId = opIdOf(body);
+    const key = `${code}/${order.id}/${opId ? 'op-' + opId : randomHex(16)}.${ext}`;
+    if (opId && body.replay) {
+      // schon einmal angekommen (Antwort ging unterwegs verloren) → nicht doppelt anlegen
+      const done = (await cachedList(db, 'MediaItem').catch(() => [])).find(m => m.file_url === `${origin}/photo/${key}`);
+      if (done) return { ok: true, file_url: done.file_url, media_id: done.id, replayed: true };
+    }
     await env.PHOTOS.put(key, bytes, { metadata: { contentType, uploaded_by: emp.name, uploaded_at: nowIso() } });
     countUsage('photos', 1, code); countUsage('kv_writes');
     const fileUrl = `${origin}/photo/${key}`;
@@ -706,7 +721,7 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     const status = ['offen', 'in_arbeit', 'erledigt'].includes(body.status) ? body.status : null;
     if (!status) throw new HttpError(400, 'params');
     const upd = { status };
-    if (status === 'erledigt') { upd.completed_by = emp.name; upd.completed_date = nowIso(); }
+    if (status === 'erledigt') { upd.completed_by = emp.name; upd.completed_date = clientTime(body); }
     await db.update('OrderTask', task.id, upd);
     invalidate('OrderTask');
     // Erste Aufgabe begonnen/erledigt → Auftrag von „Fahrzeug angenommen“ auf „Reparatur läuft“ (sichtbar in Base44 + Kundenportal)
@@ -741,9 +756,15 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
   }
   if (action === 'worktime_start') {
     if (body.order_id) await ownRecord(db, 'Order', body.order_id, code);
+    const start = clientTime(body);
+    if (opIdOf(body) && body.replay) {
+      const done = (await cachedList(db, 'WorkTime').catch(() => [])).find(w => w.workshop_code === code && w.employee_name === emp.name
+        && w.start_timestamp === start && String(w.task_id || '') === String(body.task_id || ''));
+      if (done) return { ok: true, worktime_id: done.id, replayed: true };
+    }
     const wt = await db.create('WorkTime', {
       employee_name: emp.name, order_id: body.order_id || null, description: String(body.description || '').slice(0, 300),
-      start_timestamp: nowIso(), workshop_code: code,
+      start_timestamp: start, workshop_code: code,
       ...(body.task_id ? { task_id: String(body.task_id).slice(0, 64) } : {}),
     });
     invalidate('WorkTime');
@@ -752,7 +773,7 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
   if (action === 'worktime_stop') {
     const wt = await ownRecord(db, 'WorkTime', body.worktime_id, code);
     if (wt.end_timestamp) return { ok: true };
-    const end = new Date();
+    const end = new Date(Math.max(Date.parse(clientTime(body)), Date.parse(wt.start_timestamp) || 0));
     const minutes = Math.min(WORKTIME_CAP_MIN, Math.max(0, Math.round((end - new Date(wt.start_timestamp)) / 60000)));
     await db.update('WorkTime', wt.id, { end_timestamp: end.toISOString(), duration_minutes: minutes });
     invalidate('WorkTime');
@@ -762,6 +783,12 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     const content = String(body.content || '').trim().slice(0, 5000);
     if (!content) throw new HttpError(400, 'params');
     await ownRecord(db, 'Order', body.order_id, code);
+    if (opIdOf(body) && body.replay) {
+      const since = Date.now() - 72 * 3600_000;
+      const done = (await cachedList(db, 'InternalNote').catch(() => [])).find(n => n.order_id === body.order_id && n.content === content
+        && String(n.task_id || '') === String(body.task_id || '') && Date.parse(n.created_date || 0) > since);
+      if (done) return { ok: true, replayed: true };
+    }
     await db.create('InternalNote', { order_id: body.order_id, content, author_name: emp.name, author_role: ['admin', 'serviceberater', 'mechaniker'].includes(emp.role) ? emp.role : 'mechaniker', workshop_code: code, ...(body.task_id ? { task_id: String(body.task_id).slice(0, 64) } : {}) });
     invalidate('InternalNote');
     return { ok: true };
@@ -777,7 +804,7 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
       const old = prev.find(p => p.label === label);
       // Wer/wann nur ändern, wenn sich der Haken wirklich ändert
       if (old && !!old.checked === checked) return { label, checked, by: old.by || '', at: old.at || '' };
-      return { label, checked, by: checked ? emp.name : '', at: checked ? nowIso() : '' };
+      return { label, checked, by: checked ? emp.name : '', at: checked ? clientTime(body) : '' };
     });
     await db.update('Order', order.id, { qc_checklist: qc });
     invalidate('Order');
@@ -785,16 +812,19 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
   }
   if (action === 'order_complete') {
     const order = await ownRecord(db, 'Order', body.order_id, code);
+    // Wiederholung aus der Offline-Warteschlange: schon abgeschlossen → keine zweite Meldung/Kunden-Mail
+    if (body.replay && ['abholbereit', 'abgeschlossen'].includes(order.status)) return { ok: true, replayed: true };
+    const doneAt = clientTime(body);
     const qc = Array.isArray(body.qc) ? body.qc.slice(0, 50) : [];
     const lines = qc.map(q => `${q.checked ? '✓' : '✗'} ${String(q.label || '').slice(0, 200)}`);
     await db.create('WorkshopLog', {
       title: 'Qualitätsprüfung & Fertigmeldung', log_type: 'qualitaet',
       description: lines.length ? lines.join('\n') : 'Auftrag am Tablet abgeschlossen.',
-      related_order_id: order.id, employee_name: emp.name, log_date: nowIso(),
+      related_order_id: order.id, employee_name: emp.name, log_date: doneAt,
       vehicle_info: [order.vehicle_brand, order.vehicle_model, order.license_plate].filter(Boolean).join(' '), workshop_code: code,
     });
     const tasks = (await cachedList(db, 'OrderTask')).filter(t => t.order_id === order.id && t.status !== 'erledigt');
-    for (const t of tasks) await db.update('OrderTask', t.id, { status: 'erledigt', completed_by: emp.name, completed_date: nowIso() });
+    for (const t of tasks) await db.update('OrderTask', t.id, { status: 'erledigt', completed_by: emp.name, completed_date: doneAt });
     await db.update('Order', order.id, { status: 'abholbereit' });
     invalidate('Order', 'OrderTask');
     if (body.notify_customer !== false && ctx) ctx.waitUntil(mailReady(env, db, order).catch(e => console.log('mail', String(e))));

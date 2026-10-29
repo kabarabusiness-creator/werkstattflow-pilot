@@ -44,10 +44,239 @@ const SUPPORT_EMAIL = 'info@kabaradigital.de';
    carryOverLocalState) und es erscheint einmalig ein Hinweis. */
 const CREDITS_MSG = 'Monatskontingent für Uploads/KI bei Base44 aufgebraucht – bitte Admin informieren';
 function isCreditsLimit(data){ return !!data && ((data.extra_data && data.extra_data.reason==='integration_credits_limit_reached') || /limit of integrations/i.test(String(data.message||data.detail||''))); }
+/* ---------- Offline-Modus: Warteschlange + letzter Datenstand ----------
+   Werkstatt-Aktionen (Aufgabe, Zeit, Notiz, Foto, Checkliste, Abschluss) kommen zuerst in eine Warteschlange
+   auf dem Tablet (IndexedDB) und gehen der Reihe nach an den Server. Ohne Verbindung bleiben sie dort und werden
+   automatisch nachgetragen, sobald das Netz wieder da ist – mit dem Zeitpunkt, zu dem getippt wurde (client_at).
+   op_id + replay verhindern doppelte Einträge, falls eine Antwort unterwegs verloren ging.
+   Zusätzlich wird der letzte Datenstand gespeichert, damit das Tablet nach einem Neuladen ohne Netz weiterläuft.
+   Beim Abmelden wird der Datenstand gelöscht; offene Änderungen bleiben und gehen trotzdem noch raus. */
+const OUTBOX_ACTIONS = new Set(['task_update','worktime_start','worktime_stop','note_add','qc_save','order_complete','media_upload']);
+const alStore = (()=>{
+  let dbp = null;
+  const open = ()=> dbp || (dbp = new Promise((res, rej)=>{
+    try{
+      const r = indexedDB.open('autoleitwerk', 1);
+      r.onupgradeneeded = ()=>{ const d = r.result;
+        if(!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox', { keyPath:'op_id' });
+        if(!d.objectStoreNames.contains('kv')) d.createObjectStore('kv'); };
+      r.onsuccess = ()=>res(r.result); r.onerror = ()=>rej(r.error); r.onblocked = ()=>rej(new Error('blocked'));
+    }catch(e){ rej(e); }
+  }).catch(e=>{ console.warn('Offline-Speicher nicht verfügbar', e); return null; }));
+  const tx = async (store, mode, fn)=>{
+    const d = await open(); if(!d) return undefined;
+    return new Promise((res, rej)=>{
+      const t = d.transaction(store, mode); let out; const r = fn(t.objectStore(store));
+      if(r) r.onsuccess = ()=>{ out = r.result; };
+      t.oncomplete = ()=>res(out); t.onerror = ()=>rej(t.error); t.onabort = ()=>rej(t.error);
+    });
+  };
+  return {
+    all: ()=>tx('outbox','readonly', st=>st.getAll()).catch(()=>undefined),
+    put: item=>tx('outbox','readwrite', st=>st.put(item)).catch(e=>console.warn('Warteschlange: Speichern fehlgeschlagen', e)),
+    del: id=>tx('outbox','readwrite', st=>st.delete(id)).catch(()=>{}),
+    get: k=>tx('kv','readonly', st=>st.get(k)).catch(()=>undefined),
+    set: (k,v)=>tx('kv','readwrite', st=>st.put(v,k)).catch(e=>console.warn('Datenstand nicht gespeichert', e)),
+    remove: k=>tx('kv','readwrite', st=>st.delete(k)).catch(()=>{}),
+  };
+})();
+const outbox = { items:[], flushing:null, again:false, waiters:new Map(), seq:0, ready:null };
+function newOpId(){
+  try{ if(window.crypto && crypto.randomUUID) return crypto.randomUUID(); }catch(_){}
+  return 'op-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,12);
+}
+function outboxPending(){ return outbox.items.length; }
+function outboxStub(i){ return Object.assign({ ok:true, queued:true }, i.local_id ? { worktime_id:i.local_id } : {}); }
+function resolveWaiter(id, val){ const w = outbox.waiters.get(id); if(w){ outbox.waiters.delete(id); w(val); } }
+function enqueueAction(action, payload){
+  const body = {};
+  Object.entries(payload||{}).forEach(([k,v])=>{ if(v!==null && v!==undefined) body[k]=v; });
+  // alles Nötige jetzt festhalten – beim Abmelden ist state gleich danach leer
+  const item = { op_id:newOpId(), seq: Date.now()*1000 + (outbox.seq++ % 1000), action, payload:body, at:new Date().toISOString(),
+    token:state.sessionToken, code:state.workshopToken, emp: state.currentUser ? state.currentUser.name : '', tries:0 };
+  if(action==='worktime_start') item.local_id = 'local-' + item.op_id;
+  outbox.items.push(item);
+  updateOutboxUI();
+  const done = new Promise(res=>outbox.waiters.set(item.op_id, res));
+  alStore.put(item).then(()=>flushOutbox());
+  return done;
+}
+async function sendOutboxItem(item){
+  const sameUser = ()=> !!(state.sessionToken && state.workshopToken===item.code && state.currentUser && state.currentUser.name===item.emp);
+  for(let attempt=0; attempt<2; attempt++){
+    const body = Object.assign({ action:item.action }, item.payload, { op_id:item.op_id, client_at:item.at }, item.tries ? { replay:true } : {});
+    item.tries++; await alStore.put(item); // ab hier gilt der Eintrag als „evtl. angekommen“ → beim nächsten Versuch replay
+    const controller = new AbortController();
+    const timeoutId = setTimeout(()=>controller.abort(), item.action==='media_upload' ? 60000 : 15000);
+    let res, data;
+    try{
+      res = await fetch(BASE44_ACTION_URL, { method:'POST', signal:controller.signal,
+        headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + item.token }, body: JSON.stringify(body) });
+      data = await res.json().catch(()=>({}));
+    }catch(e){ return { kind:'retry', reason: e.name==='AbortError' ? 'Zeitüberschreitung' : 'keine Verbindung' }; }
+    finally{ clearTimeout(timeoutId); }
+    if(res.status===401){
+      // Sitzung des Eintrags abgelaufen: ist derselbe Mitarbeiter (neu) angemeldet, mit dessen Sitzung senden
+      if(sameUser() && state.sessionToken !== item.token){ item.token = state.sessionToken; continue; }
+      if(sameUser()) handleSessionExpired();
+      return { kind:'blocked' };
+    }
+    if(res.ok && data && data.ok !== false){ state.writeSupported = true; return { kind:'ok', data }; }
+    const transient = res.status===429 || res.status===408 || (res.status>=500 && !(data && data.error==='not_available'));
+    if(transient && item.tries < 10) return { kind:'retry', reason:'Server ' + res.status };
+    return { kind:'rejected', status:res.status, data: data||{}, reason: (data && (data.message || data.error)) || ('HTTP ' + res.status) };
+  }
+  return { kind:'blocked' };
+}
+function outboxAfterSuccess(item, data){
+  const p = item.payload;
+  if(item.action==='worktime_start' && item.local_id && data && data.worktime_id){
+    // vorläufige Zeit-ID durch die echte ersetzen (auch in noch wartenden Stopps)
+    outbox.items.forEach(i=>{ if(i.payload.worktime_id===item.local_id){ i.payload.worktime_id = data.worktime_id; alStore.put(i); } });
+    (orders||[]).forEach(o=>(o.tasks||[]).forEach(t=>{ if(t._worktimeId===item.local_id) t._worktimeId = data.worktime_id; }));
+  }
+  if(item.action==='media_upload' && data && data.file_url){
+    if(p.set_as_vehicle_photo && state.localVehiclePhoto && state.localVehiclePhoto[p.order_id]===p.data_url) state.localVehiclePhoto[p.order_id] = data.file_url;
+    (orders||[]).forEach(o=>{ if(o.id!==p.order_id) return; if(o.image===p.data_url) o.image = data.file_url;
+      (o.tasks||[]).forEach(t=>{ if(Array.isArray(t.photos)) t.photos = t.photos.map(x=>x===p.data_url ? data.file_url : x); }); });
+  }
+}
+function outboxRejected(item, r){
+  const what = ACTION_LABELS[item.action] || item.action;
+  const d = r.data || {};
+  state.lastWriteError = { action:item.action, reason:r.reason, body:d, at:new Date().toISOString() };
+  console.warn('Speichern abgelehnt', state.lastWriteError);
+  if(d.error==='unknown_action'){ state.writeSupported = false; showUpdateToast('Hinweis: Speichern auf dem Server ist noch nicht aktiv – Änderungen bleiben nur auf diesem Tablet.'); return; }
+  if(d.error==='not_available'){ showUpdateToast(item.action==='media_upload' ? 'Fotos werden gerade nicht hochgeladen – sie bleiben auf diesem Tablet.' : `${what} ist gerade nicht verfügbar.`); return; }
+  showUpdateToast(isCreditsLimit(d) ? `${what} nicht gespeichert (${CREDITS_MSG}).` : `${what} nicht gespeichert (${r.reason}).`);
+}
+function removeOutboxItem(item){
+  const i = outbox.items.indexOf(item); if(i>=0) outbox.items.splice(i,1);
+  alStore.del(item.op_id);
+}
+function flushOutbox(){
+  if(outbox.flushing){ outbox.again = true; return outbox.flushing; }
+  let stopped = false, late = 0;
+  outbox.flushing = (async()=>{
+    await outbox.ready;
+    while(true){
+      const item = outbox.items.find(i=>!i.blocked);
+      if(!item) break;
+      if(navigator.onLine === false){ stopped = true; break; }
+      const r = await sendOutboxItem(item);
+      if(r.kind==='retry'){ stopped = true; break; }
+      if(r.kind==='blocked'){ item.blocked = true; continue; }
+      removeOutboxItem(item);
+      if(r.kind==='ok'){
+        if(Date.now() - Date.parse(item.at) > 10000) late++;
+        outboxAfterSuccess(item, r.data); resolveWaiter(item.op_id, r.data);
+      } else { resolveWaiter(item.op_id, null); outboxRejected(item, r); }
+    }
+  })().catch(e=>{ stopped = true; console.warn('Warteschlange', e); }).finally(()=>{
+    outbox.flushing = null;
+    outbox.items.forEach(i=>resolveWaiter(i.op_id, outboxStub(i))); // Aufrufer nicht warten lassen – Eintrag bleibt vorgemerkt
+    if(late) showUpdateToast(late===1 ? 'Offline-Änderung nachgetragen.' : `${late} Offline-Änderungen nachgetragen.`);
+    updateOutboxUI();
+    const again = outbox.again; outbox.again = false;
+    if(again && !stopped && outbox.items.some(i=>!i.blocked)) setTimeout(flushOutbox, 0);
+  });
+  return outbox.flushing;
+}
+// Neu angemeldet: gesperrte Einträge (abgelaufene Sitzung) erneut versuchen
+function outboxSessionChanged(){ outbox.items.forEach(i=>{ i.blocked = false; }); if(outbox.items.length) flushOutbox(); }
+outbox.ready = alStore.all().then(list=>{
+  if(Array.isArray(list) && list.length){
+    const known = new Set(outbox.items.map(i=>i.op_id));
+    list.forEach(i=>{ if(!known.has(i.op_id)) outbox.items.push(i); });
+    outbox.items.sort((a,b)=>a.seq-b.seq);
+  }
+}).catch(()=>{}).then(()=>{ updateOutboxUI(); if(outbox.items.length) setTimeout(flushOutbox, 1500); });
+setInterval(()=>{ if(!outbox.flushing && navigator.onLine!==false && outbox.items.some(i=>!i.blocked)) flushOutbox(); }, 20000);
+window.addEventListener('online', ()=>{ if(outbox.items.length) flushOutbox(); });
+function updateOutboxUI(){
+  try{ updateNetState(); }catch(_){}
+  const b = document.getElementById('offlineBanner');
+  if(b && navigator.onLine===false && b.style.display!=='none') renderOfflineBanner(false);
+}
+// Offene Änderungen auf frische Serverdaten legen (sonst würde der Abgleich sie kurz „zurückdrehen“)
+function overlayPending(raw){
+  const list = outbox.items.filter(i=>i.code===state.workshopToken);
+  if(!raw || !list.length) return raw;
+  const d = Object.assign({}, raw, {
+    orders:(raw.orders||[]).map(o=>Object.assign({},o)), tasks:(raw.tasks||[]).map(t=>Object.assign({},t)),
+    worktimes:(raw.worktimes||[]).map(w=>Object.assign({},w)), task_notes:(raw.task_notes||[]).slice(), task_media:(raw.task_media||[]).slice() });
+  const ord = id => d.orders.find(o=>o.id===id);
+  list.forEach(i=>{
+    const p = i.payload;
+    if(i.action==='task_update'){
+      const t = d.tasks.find(x=>x.id===p.task_id); if(!t) return;
+      t.status = p.status; if(p.status==='erledigt') t.completed_date = i.at;
+      const o = ord(t.order_id); if(o && p.status!=='offen' && o.status==='fahrzeug_angenommen') o.status = 'reparatur_laeuft';
+    } else if(i.action==='worktime_start'){
+      d.worktimes.push({ id:i.local_id, order_id:p.order_id||null, task_id:p.task_id||null, description:p.description||'', employee_name:i.emp, start_timestamp:i.at, end_timestamp:null, workshop_code:i.code });
+    } else if(i.action==='worktime_stop'){
+      const w = d.worktimes.find(x=>x.id===p.worktime_id); if(w && !w.end_timestamp) w.end_timestamp = i.at;
+    } else if(i.action==='note_add'){
+      if(p.task_id) d.task_notes.push({ order_id:p.order_id, task_id:p.task_id, content:p.content, created_date:i.at });
+    } else if(i.action==='qc_save'){
+      const o = ord(p.order_id); if(o) o.qc_checklist = (p.qc||[]).map(q=>({ label:q.label, checked:!!q.checked, by:q.checked ? i.emp : '', at:q.checked ? i.at : '' }));
+    } else if(i.action==='order_complete'){
+      const o = ord(p.order_id); if(!o) return;
+      o.status = 'abholbereit';
+      d.tasks.forEach(t=>{ if(t.order_id===o.id && t.status!=='erledigt'){ t.status = 'erledigt'; t.completed_date = i.at; } });
+    } else if(i.action==='media_upload'){
+      if(p.task_id) d.task_media.push({ order_id:p.order_id, task_id:p.task_id, caption:p.caption||'', file_url:p.data_url, created_date:i.at });
+      if(p.set_as_vehicle_photo){ const o = ord(p.order_id); if(o) o.vehicle_photo = p.data_url; }
+    }
+  });
+  return d;
+}
+// Sitzung im Tab merken: lädt das iPad die Seite neu (passiert bei Safari im Hintergrund), geht es ohne neue Anmeldung weiter
+const SESSION_KEY = 'autoleitwerk.session';
+const snapKey = code => 'snap:' + code;
+function saveSession(emp){
+  try{ sessionStorage.setItem(SESSION_KEY, JSON.stringify({ token:state.sessionToken, expires:state.sessionExpires, code:state.workshopToken, name:emp.name, role:emp.role, shift:state.shiftStart || Date.now() })); }catch(_){}
+}
+function clearSession(){ try{ sessionStorage.removeItem(SESSION_KEY); }catch(_){} }
+function saveSnapshot(raw){
+  if(!state.workshopToken || !raw) return;
+  alStore.set(snapKey(state.workshopToken), { at:Date.now(), data:raw });
+}
+async function resumeSession(){
+  let s = null; try{ s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null'); }catch(_){}
+  if(!s || !s.token || !s.code || !s.name || (s.expires && Date.parse(s.expires) < Date.now())){ clearSession(); return false; }
+  state.sessionToken = s.token; state.sessionExpires = s.expires; state.workshopToken = s.code;
+  ['loginScreen','profileScreen','pinScreen'].forEach(id=>{ const el = document.getElementById(id); if(el) el.style.display = 'none'; });
+  try{
+    await loadFromBase44();
+    state.backendAvailable = true;
+  }catch(e){
+    if(e.code){ // abgelaufen, gesperrt, Wartung
+      if(e.code==='unauthorized') handleSessionExpired(); else if(state.sessionToken) showLoginScreen();
+      return true;
+    }
+    const snap = await alStore.get(snapKey(s.code));
+    if(!snap || !snap.data){
+      showLoginScreen();
+      const el = document.getElementById('loginError'); if(el) el.textContent = 'Keine Verbindung. Bitte anmelden, sobald das WLAN wieder da ist.';
+      return true;
+    }
+    state.snapshotOnce = snap.data;
+    await loadFromBase44();
+    showUpdateToast('Offline – letzter Stand von ' + formatClock(snap.at) + '. Änderungen werden nachgetragen.');
+  }
+  const role = roleLabel[s.role] ? s.role : 'mechaniker';
+  await selectProfile({ name:s.name, role });
+  if(s.shift && Date.now() - s.shift < 16*3600e3){ state.shiftStart = s.shift; try{ renderChrome(); }catch(_){} } // Schichtbeginn bleibt beim Neuladen
+  startBase44Polling();
+  outboxSessionChanged();
+  return true;
+}
 const ACTION_LABELS = { tire_scan:'Reifenscan', task_update:'Aufgabe', worktime_start:'Zeiterfassung', worktime_stop:'Zeiterfassung', media_upload:'Foto', note_add:'Notiz', order_complete:'Auftragsabschluss' };
 async function tabletAction(action, payload){
   if(state.writeSupported === false) return null;
   if(!state.sessionToken) return null;
+  if(OUTBOX_ACTIONS.has(action)) return enqueueAction(action, payload);
   const controller = new AbortController();
   // Foto-Upload braucht deutlich länger als die anderen Aktionen
   const timeoutId = setTimeout(()=>controller.abort(), action==='media_upload' ? 60000 : 15000);
@@ -237,6 +466,13 @@ async function workshopLogin(code, name, pin, employeeId){
 }
 async function fetchBase44Data(){
   if(!state.sessionToken){ const e = new Error('unauthorized'); e.code = 'unauthorized'; throw e; }
+  if(state.snapshotOnce){ const snap = state.snapshotOnce; state.snapshotOnce = null; return overlayPending(snap); }
+  if(outbox.items.length && navigator.onLine!==false){ try{ await flushOutbox(); }catch(_){} }
+  const raw = await fetchServerData();
+  saveSnapshot(raw);
+  return overlayPending(raw);
+}
+async function fetchServerData(){
   const controller = new AbortController();
   const timeoutId = setTimeout(()=>controller.abort(), 15000);
   try{
@@ -1646,7 +1882,7 @@ const faqData = [
   {q:'Wie starte ich die Zeiterfassung für eine Aufgabe?', a:'Öffne die Aufgabe in "Meine Aufträge" → Tab "Aufgaben" und tippe auf "Start" im Zeiterfassungs-Feld. Die Uhr läuft, bis du auf "Fertig" oder "Pause" tippst.'},
   {q:'Wie füge ich ein Foto zu einer Aufgabe hinzu?', a:'In der Aufgabendetail-Ansicht auf "Hinzufügen" bei "Bilder & Notizen" tippen. Das Foto wird dem Auftrag zugeordnet.'},
   {q:'Warum kann ich einen Auftrag nicht abschließen?', a:'Vor dem Abschluss muss die digitale Qualitätskontrolle (Tab "Checkliste") vollständig abgehakt sein. Der Abschließen-Button zeigt dir, wie viele Punkte noch offen sind.'},
-  {q:'Was passiert, wenn ich offline bin?', a:'Ein Banner zeigt dir an, wenn die Verbindung weg ist. Ohne Verbindung kann nichts gespeichert werden – arbeite weiter und prüfe nach der Rückkehr des WLANs, ob deine Änderungen angekommen sind.'},
+  {q:'Was passiert, wenn ich offline bin?', a:'Einfach weiterarbeiten. Aufgaben starten und abschließen, Zeiten, Notizen, Fotos und die Checkliste werden auf dem Tablet gespeichert und automatisch nachgetragen, sobald das WLAN wieder da ist – mit der richtigen Uhrzeit. Oben rechts siehst du, wie viele Änderungen noch offen sind. Ohne Netz gehen nicht: ALEX-KI, Reifenscan, Chat und neue Daten aus dem Büro.'},
   {q:'Wie ändere ich meine Rolle oder die eines Kollegen?', a:'Nur Admins können das unter "Benutzerverwaltung" in der Sidebar Rollen für Teammitglieder ändern.'},
 ];
 let supportTicketState = { openFaq:null };
@@ -2939,6 +3175,8 @@ document.addEventListener('click', (e)=>{
       const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
       p.innerHTML = `Deine heutige Schicht: <b>${h}:${String(m).padStart(2,'0')} Std.</b> (seit ${formatClock(state.shiftStart)}).<br>Du wirst von AutoLeitwerk abgemeldet und musst dich erneut anmelden.`;
     }
+    if(p){ const n = outbox.items.length; const hint = p.querySelector('.ob-hint'); if(hint) hint.remove();
+      if(n) p.insertAdjacentHTML('beforeend', `<br><span class="ob-hint" style="color:var(--warning,#f59e0b)">${n} Änderung${n===1?'':'en'} noch nicht übertragen – ${n===1?'wird':'werden'} automatisch nachgetragen, sobald das Tablet wieder Verbindung hat und AutoLeitwerk geöffnet ist.</span>`); }
     document.getElementById('logoutModal').style.display='flex';
     return;
   }
@@ -5626,11 +5864,12 @@ function handleTireScanClick(e){
 function renderOfflineBanner(online){
   const b = document.getElementById('offlineBanner');
   if(online===false){
-    b.innerHTML = `${iconWifiOff} Offline – Änderungen werden lokal gespeichert`;
+    const n = outbox.items.length;
+    b.innerHTML = `${iconWifiOff} Offline – du kannst weiterarbeiten. Änderungen werden auf dem Tablet gespeichert und automatisch nachgetragen${n ? ` (${n} offen)` : ''}.`;
     b.classList.remove('online');
     b.style.display='flex';
   } else if(online===true){
-    b.innerHTML = `${iconCheck} Wieder online – synchronisiert…`;
+    b.innerHTML = `${iconCheck} Wieder online${outbox.items.length ? ' – Änderungen werden nachgetragen…' : ''}`;
     b.classList.add('online');
     b.style.display='flex';
     setTimeout(()=>{ b.style.display='none'; }, 2500);
@@ -5882,7 +6121,9 @@ async function checkPin(){
   const emp = result.employee || {};
   const role = roleLabel[emp.role] ? emp.role : 'mechaniker'; // unbekannte Rolle = geringste Rechte
   await selectProfile({ name: emp.name || p.name, role });
+  saveSession({ name: emp.name || p.name, role });
   startBase44Polling();
+  outboxSessionChanged();
 }
 function backToProfiles(){
   document.getElementById('pinScreen').style.display = 'none';
@@ -5919,6 +6160,8 @@ function showLoginScreen(){
   document.getElementById('profileScreen').style.display = 'none';
   document.getElementById('pinScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
+  clearSession();
+  if(state.workshopToken) alStore.remove(snapKey(state.workshopToken));
   state.currentUser = null;
   state.shiftStart = null;
   state.token = null;
@@ -5944,7 +6187,13 @@ function showLoginScreen(){
 /* ---------- Live-Uhr (lokale Systemzeit) ---------- */
 const WOCHENTAGE = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
 const MONATE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
-function updateNetState(){ const el=document.getElementById('netState'); if(el){ el.textContent = navigator.onLine ? 'Online' : 'Offline'; el.style.color = navigator.onLine ? '' : 'var(--danger)'; } }
+function updateNetState(){
+  const el=document.getElementById('netState'); if(!el) return;
+  const n = (typeof outbox!=='undefined') ? outbox.items.length : 0;
+  el.textContent = (navigator.onLine ? 'Online' : 'Offline') + (n ? ` · ${n} offen` : '');
+  el.title = n ? `${n} Änderung${n===1?'':'en'} warte${n===1?'t':'n'} auf Übertragung – geht automatisch raus, sobald Verbindung besteht.` : '';
+  el.style.color = navigator.onLine ? (n ? 'var(--warning, #f59e0b)' : '') : 'var(--danger)';
+}
 window.addEventListener('online', updateNetState); window.addEventListener('offline', updateNetState);
 function updateClock(){
   updateNetState();
@@ -6029,6 +6278,10 @@ document.getElementById('noteFabIcon').innerHTML = iconNote;
 updateNoteBadge();
 if(navigator.onLine===false) renderOfflineBanner(false);
 initLoginIcon();
-autoProfileScreen();
+resumeSession().then(ok=>{ if(!ok) autoProfileScreen(); }).catch(e=>{ console.warn('Sitzung fortsetzen', e); autoProfileScreen(); });
+// App auf dem Gerät speichern (startet dann auch ohne WLAN) – nur über https bzw. lokal beim Testen
+if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost')){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Offline-Speicher der App nicht verfügbar', e)); });
+}
 renderChrome();
 setMainView('auftraege');
