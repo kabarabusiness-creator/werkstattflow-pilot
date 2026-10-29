@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17172b"/>
+      <stop offset="1" stop-color="#090910"/>
+    </linearGradient>
+    <linearGradient id="car" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="600" rx="32" fill="url(#bg)"/>
+  <ellipse cx="480" cy="455" rx="330" ry="36" fill="#000" opacity=".35"/>
+  <path d="M205 380 L270 292 Q300 250 365 240 L585 240 Q650 245 685 286 L760 380
+           Q775 400 755 418 L700 430 L260 430 L205 417 Q188 405 205 380Z"
+        fill="url(#car)"/>
+  <path d="M325 286 Q345 265 385 260 L565 260 Q600 263 628 289 L654 327 L298 327Z"
+        fill="#111827" opacity=".92"/>
+  <path d="M402 264 L391 326 M556 264 L568 326" stroke="#8b5cf6" stroke-width="5" opacity=".45"/>
+  <rect x="217" y="360" width="98" height="26" rx="9" fill="#ede9fe" opacity=".95"/>
+  <rect x="647" y="360" width="98" height="26" rx="9" fill="#ede9fe" opacity=".95"/>
+  <circle cx="310" cy="425" r="49" fill="#101018" stroke="#3f3f55" stroke-width="10"/>
+  <circle cx="650" cy="425" r="49" fill="#101018" stroke="#3f3f55" stroke-width="10"/>
+  <circle cx="310" cy="425" r="18" fill="#8b5cf6"/>
+  <circle cx="650" cy="425" r="18" fill="#8b5cf6"/>
+  <text x="480" y="515" text-anchor="middle" fill="#f3f3fb" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="700">Volkswagen Golf</text>
+  <text x="480" y="552" text-anchor="middle" fill="#9797b8" font-family="Arial, Helvetica, sans-serif" font-size="20">Offline-Fahrzeugbild</text>
+</svg>
