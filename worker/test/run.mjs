@@ -974,5 +974,31 @@ await t('Offline-Warteschlange: Zeitpunkt vom Tablet + keine Doppelungen beim Na
   const c = await call('/tabletAction', { action: 'order_complete', order_id: 'o1', qc: [], op_id: 'op-done-00001', replay: true }, token);
   assert.equal(c.data.replayed, true); assert.equal(db.WorkshopLog.length, nL);
 });
+await t('Reifenlager: Auslagern, Platz belegt, Wieder einlagern, Umlagern', async () => {
+  db.TireSet.push({ id: 'r2', workshop_code: 'AL-T1', customer_name: 'Kunde B', license_plate: 'AB-B 2', season: 'sommer', storage_hall: 'A', storage_rack: '01', storage_level: '01', storage_compartment: '02', storage_location: 'A-01-01-02' });
+  db.TireSet.push({ id: 'r3', workshop_code: 'AL-T1', customer_name: 'Kunde C', season: 'winter', storage_hall: 'A', storage_rack: '01', storage_level: '01', storage_compartment: '03', storage_location: 'A-01-01-03' });
+  db.TireSet.push({ id: 'r9', workshop_code: 'AL-T2', customer_name: 'Fremd', season: 'winter', storage_location: 'A-01-01-04' });
+  // Umlagern auf belegten Platz → 409 mit Namen
+  let r = await call('/tabletAction', { action: 'tire_update', id: 'r3', storage_compartment: '02' }, token);
+  assert.equal(r.status, 409); assert.equal(r.data.error, 'location_occupied'); assert.match(r.data.message, /A-01-01-02.*Kunde B/);
+  // Platz einer fremden Werkstatt zählt nicht
+  r = await call('/tabletAction', { action: 'tire_update', id: 'r3', storage_compartment: '04' }, token);
+  assert.equal(r.status, 200); const r3 = db.TireSet.find(x => x.id === 'r3');
+  assert.equal(r3.storage_location, 'A-01-01-04'); assert.equal(r3.history.at(-1).type, 'umlagerung'); assert.equal(r3.history.at(-1).by, 'Erika Muster');
+  // Auslagern gibt den Platz frei
+  r = await call('/tabletAction', { action: 'tire_checkout', id: 'r2' }, token);
+  const r2 = db.TireSet.find(x => x.id === 'r2');
+  assert.equal(r2.status, 'ausgelagert'); assert.match(r2.removal_date, /^\d{4}-\d{2}-\d{2}$/); assert.equal(r2.history.at(-1).type, 'auslagerung'); assert.equal(r2.history.at(-1).location, 'A-01-01-02');
+  r = await call('/tabletAction', { action: 'tire_update', id: 'r3', storage_compartment: '02' }, token);
+  assert.equal(r.status, 200, 'frei gewordener Platz nutzbar');
+  // Wieder einlagern: Platz jetzt belegt → 409, anderer Platz → ok
+  r = await call('/tabletAction', { action: 'tire_checkin', id: 'r2' }, token);
+  assert.equal(r.status, 409);
+  r = await call('/tabletAction', { action: 'tire_checkin', id: 'r2', storage_hall: 'B', storage_rack: '02', storage_level: '01', storage_compartment: '01' }, token);
+  assert.equal(r.status, 200); assert.equal(r2.status, 'eingelagert'); assert.equal(r2.storage_location, 'B-02-01-01'); assert.equal(r2.removal_date, null);
+  assert.deepEqual(r2.history.map(h => h.type), ['auslagerung', 'einlagerung']);
+  // fremder Reifensatz
+  assert.equal((await call('/tabletAction', { action: 'tire_checkout', id: 'r9' }, token)).status, 404);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

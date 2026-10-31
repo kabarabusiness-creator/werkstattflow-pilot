@@ -154,7 +154,7 @@ function findCustomers(question, data) {
     const k = norm(p.name);
     const os = data.orders.filter(o => norm(o.customer_name) === k);
     const open = os.filter(OPEN);
-    const tires = data.tire_sets.filter(t => norm(t.customer_name) === k);
+    const tires = data.tire_sets.filter(t => norm(t.customer_name) === k && (t.status || 'eingelagert') !== 'ausgelagert');
     const vehicles = [...new Set(os.map(o => [o.vehicle_brand, o.vehicle_model, o.license_plate].filter(Boolean).join(' ')).filter(Boolean))];
     const last = os.map(o => o.created_date).filter(Boolean).sort().pop();
     return { type: 'kunde', customer: { name: p.name, license_plate: [...p.plates][0] || '', vehicles, last_visit: last ? last.slice(0, 10) : null, open_orders: open.length, open_order_ids: open.map(o => o.id), tires: tires.map(t => ({ season: t.season, brand: t.brand, size: t.size, tread_depth: t.tread_depth, storage_location: t.storage_location })) } };

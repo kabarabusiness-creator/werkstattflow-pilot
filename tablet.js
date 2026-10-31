@@ -1501,10 +1501,15 @@ function tsCheckReason(t){
   return null;
 }
 function tsAll(){ return Array.isArray(state.tireSets) ? state.tireSets : []; }
+// Ausgelagerte Sätze (Räder sind am Auto) belegen keinen Platz mehr und zählen nicht zum Bestand
+const tsIsStored = t => ((t && t.status) || 'eingelagert') !== 'ausgelagert';
+function tsStored(){ return tsAll().filter(tsIsStored); }
+const TS_HISTORY = { einlagerung:'Eingelagert', auslagerung:'Ausgelagert', umlagerung:'Umgelagert', bearbeitung:'Bearbeitet' };
 function tsFiltered(){
   const q = (state.tireSearch||'').toLowerCase().replace(/[\s-]/g,'');
   return tsAll().filter(t=>{
     const f = state.tireFilter || 'alle';
+    if((f==='ausgelagert') === tsIsStored(t)) return false;
     if(f==='pruefen' && !tsCheckReason(t)) return false;
     if(['sommer','winter','ganzjahr'].includes(f) && t.season!==f) return false;
     if(state.selectedLocation && (t.storage_hall||'–')!==state.selectedLocation) return false;
@@ -1525,9 +1530,9 @@ function tsListHtml(list){
       <div class="rl-tire-info">
         <div class="rl-tire-name">${escHtml(t.customer_name||'Ohne Kunde')}</div>
         <div class="rl-tire-size">${escHtml([t.license_plate, t.size].filter(Boolean).join(' · ')||'–')}</div>
-        <span class="cat-chip ${s.c}">${s.l}</span>${warn?` <span class="cat-chip red">prüfen</span>`:''}
+        <span class="cat-chip ${s.c}">${s.l}</span>${!tsIsStored(t)?` <span class="cat-chip gray">ausgelagert</span>`:(warn?` <span class="cat-chip red">prüfen</span>`:'')}
       </div>
-      <div class="rl-tire-right"><div class="rl-tire-qty">${t.quantity||4}x</div><div class="rl-tire-loc">${escHtml(t.storage_hall?`H${t.storage_hall}·R${t.storage_rack||'–'}`:(t.storage_location||'–'))}</div></div>
+      <div class="rl-tire-right"><div class="rl-tire-qty">${t.quantity||4}x</div><div class="rl-tire-loc">${!tsIsStored(t) ? (t.removal_date ? 'seit '+escHtml(formatDateDE(t.removal_date)) : 'am Auto') : escHtml(t.storage_hall?`H${t.storage_hall}·R${t.storage_rack||'–'}`:(t.storage_location||'–'))}</div></div>
     </div>`;
   }).join('');
 }
@@ -1542,47 +1547,60 @@ function tsDetailHtml(t){
     : (month>=3 && month<=5 && t.season==='sommer') ? 'Saison: Sommerreifen jetzt montieren – Kunde für den Wechsel anrufen.' : '';
   const age = t.storage_date ? Math.floor((Date.now()-new Date(t.storage_date))/86400000) : null;
   const ed = state.tireEdit && state.tireEdit.id===t.id ? state.tireEdit : null;
+  const stored = tsIsStored(t);
+  const checkin = ed && ed.mode==='checkin';
+  const hist = (Array.isArray(t.history) ? t.history : []).slice(-5).reverse();
+  const histHtml = hist.length ? `<div class="tsd-hist"><div class="tsd-edit-t">Verlauf</div>${hist.map(h=>`<div class="tsd-hist-row"><b>${escHtml(TS_HISTORY[h.type]||h.type||'')}</b><span>${escHtml([h.location, h.note].filter(Boolean).join(' · '))}</span><small>${h.at?escHtml(formatDateTimeDE(h.at)):''}${h.by?' · '+escHtml(h.by):''}</small></div>`).join('')}</div>` : '';
+  const co = state.tireCheckoutId===t.id;
   const inp = (k,l,v,type)=>`<label class="ts-in"><span>${l}</span><input data-tsfield="${k}" type="text" ${type==='number'?'inputmode="decimal" placeholder="z. B. 4,5"':''} value="${escHtml(v==null?'':v)}"></label>`;
   return `<div class="tsd">
     <div class="tsd-head">
       <div><h3>${escHtml(t.customer_name||'Ohne Kunde')}</h3><div class="tsd-sub">${escHtml([t.vehicle_brand,t.vehicle_model].filter(Boolean).join(' ')||'Fahrzeug unbekannt')}${t.license_plate?` · <span class="plate-chip">${escHtml(t.license_plate)}</span>`:''}</div></div>
       <span class="cat-chip ${s.c}">${s.l}</span>
     </div>
-    <div class="tsd-place">${iconRoute}<div><span>Lagerplatz</span><b>${escHtml(tsPlace(t))}</b></div></div>
+    ${stored ? `<div class="tsd-place">${iconRoute}<div><span>Lagerplatz</span><b>${escHtml(tsPlace(t))}</b></div></div>`
+      : `<div class="tsd-hint">${iconCar} Ausgelagert${t.removal_date?' am '+escHtml(formatDateDE(t.removal_date)):''} – die Räder sind am Auto bzw. beim Kunden.${t.storage_location?' Letzter Platz: '+escHtml(t.storage_location)+'.':''}</div>`}
     ${warn?`<div class="alex-warn">${iconWarn} Profil prüfen: ${escHtml(warn)}</div>`:''}
-    ${seasonHint?`<div class="tsd-hint">${iconCalendar} ${seasonHint}</div>`:''}
+    ${seasonHint && stored?`<div class="tsd-hint">${iconCalendar} ${seasonHint}</div>`:''}
     <div class="tsd-grid">
       <div><span>Reifen</span><b>${escHtml([t.brand,t.model].filter(Boolean).join(' ')||'–')}</b></div>
       <div><span>Größe</span><b>${escHtml(t.size||'–')}</b></div>
       <div><span>Profiltiefe</span><b>${t.tread_depth!=null&&t.tread_depth!==''?`${Number(t.tread_depth).toLocaleString('de-DE')} mm`:'–'}</b></div>
       <div><span>Zustand</span><b>${escHtml(TS_CONDITION[t.condition]||t.condition||'–')}</b></div>
       <div><span>Anzahl</span><b>${t.quantity||4} Stück</b></div>
-      <div><span>Eingelagert</span><b>${t.storage_date?formatDateDE(t.storage_date):'–'}${age!=null?` <small>(${age} Tage)</small>`:''}</b></div>
+      ${stored ? `<div><span>Eingelagert</span><b>${t.storage_date?formatDateDE(t.storage_date):'–'}${age!=null?` <small>(${age} Tage)</small>`:''}</b></div>` : `<div><span>Ausgelagert</span><b>${t.removal_date?formatDateDE(t.removal_date):'–'}</b></div>`}
     </div>
     ${order?`<button class="btn" data-tsorder="${escHtml(order.id)}">${iconCar} Auftrag #${escHtml(order.orderNumber)} öffnen</button>`:''}
     ${ed ? `<div class="tsd-edit">
-      <div class="tsd-edit-t">Werte aktualisieren</div>
+      <div class="tsd-edit-t">${checkin ? 'Wieder einlagern – Lagerplatz' : 'Werte aktualisieren'}</div>
       <div class="tsd-edit-grid">
-        ${inp('tread_depth','Profiltiefe (mm)',ed.tread_depth===''||ed.tread_depth==null?'':String(ed.tread_depth).replace('.',','),'number')}
+        ${checkin ? '' : `${inp('tread_depth','Profiltiefe (mm)',ed.tread_depth===''||ed.tread_depth==null?'':String(ed.tread_depth).replace('.',','),'number')}
         <label class="ts-in"><span>Zustand</span><select data-tsfield="condition">${Object.entries(TS_CONDITION).map(([k,l])=>`<option value="${k}" ${ed.condition===k?'selected':''}>${l}</option>`).join('')}</select></label>
-        <label class="ts-in"><span>Saison</span><select data-tsfield="season">${Object.entries(TS_SEASON).map(([k,v])=>`<option value="${k}" ${ed.season===k?'selected':''}>${v.l}</option>`).join('')}</select></label>
+        <label class="ts-in"><span>Saison</span><select data-tsfield="season">${Object.entries(TS_SEASON).map(([k,v])=>`<option value="${k}" ${ed.season===k?'selected':''}>${v.l}</option>`).join('')}</select></label>`}
         ${inp('storage_hall','Halle',ed.storage_hall)}${inp('storage_rack','Regal',ed.storage_rack)}${inp('storage_level','Ebene',ed.storage_level)}${inp('storage_compartment','Fach',ed.storage_compartment)}
       </div>
       ${ed.error?`<div class="alex-warn">${iconWarn} ${escHtml(ed.error)}</div>`:''}
-      <div class="alex-draft-actions"><button class="btn primary" id="tsSaveBtn" ${ed.busy?'disabled':''}>${iconCheck} ${ed.busy?'Speichert…':'Speichern'}</button><button class="btn" id="tsCancelBtn">Abbrechen</button></div>
-    </div>` : `<button class="btn primary" id="tsEditBtn">${iconWrench} Profil / Lagerplatz aktualisieren</button>`}
+      <div class="alex-draft-actions"><button class="btn primary" id="tsSaveBtn" ${ed.busy?'disabled':''}>${iconCheck} ${ed.busy?'Speichert…':(checkin?'Einlagern':'Speichern')}</button><button class="btn" id="tsCancelBtn">Abbrechen</button></div>
+    </div>` : !stored ? `<button class="btn primary" id="tsCheckinBtn">${iconDrum} Wieder einlagern</button>`
+      : co ? `<div class="tsd-edit"><div class="tsd-edit-t">Reifensatz auslagern?</div><p class="tsd-co-p">Die Räder kommen ans Auto bzw. zum Kunden. Der Platz ${escHtml(t.storage_location||'')} wird frei.</p>
+        ${state.tireCheckoutError?`<div class="alex-warn">${iconWarn} ${escHtml(state.tireCheckoutError)}</div>`:''}
+        <div class="alex-draft-actions"><button class="btn primary" id="tsCheckoutConfirm" ${state.tireCheckoutBusy?'disabled':''}>${iconCheck} ${state.tireCheckoutBusy?'Speichert…':'Ja, auslagern'}</button><button class="btn" id="tsCheckoutCancel">Abbrechen</button></div></div>`
+      : `<div class="tsd-btns"><button class="btn primary" id="tsEditBtn">${iconWrench} Profil / Lagerplatz aktualisieren</button><button class="btn" id="tsCheckoutBtn">${iconCar} Auslagern</button></div>`}
+    ${histHtml}
   </div>`;
 }
 function renderReifenlagerView(ov){
-  const all = tsAll();
+  const everything = tsAll();
+  const all = everything.filter(tsIsStored);
+  const out = everything.length - all.length;
   const loaded = Array.isArray(state.tireSets);
   const cnt = s => all.filter(t=>t.season===s).length;
   const check = all.filter(t=>tsCheckReason(t)).length;
   const halls = {};
   all.forEach(t=>{ const h = t.storage_hall || '–'; halls[h] = (halls[h]||0) + 1; });
   const list = tsFiltered();
-  if(state.selectedTireId && !all.some(t=>t.id===state.selectedTireId)) state.selectedTireId = null;
-  const sel = all.find(t=>t.id===state.selectedTireId) || null;
+  if(state.selectedTireId && !everything.some(t=>t.id===state.selectedTireId)) state.selectedTireId = null;
+  const sel = everything.find(t=>t.id===state.selectedTireId) || null;
   const f = state.tireFilter || 'alle';
   ov.innerHTML = `
     <div class="ov-head"><div><h1>Reifenlager</h1><div class="sub">Eingelagerte Reifensätze deiner Kunden – Lagerplatz finden, Profil prüfen.</div></div></div>
@@ -1599,7 +1617,7 @@ function renderReifenlagerView(ov){
       <div class="rl-left">
         <div class="rl-search-box">${iconSearch}<input id="tireSearchInput" placeholder="Kunde, Kennzeichen, Größe…" value="${escHtml(state.tireSearch||'')}"></div>
         <div class="rl-filter-row">
-          ${[['alle','Alle'],['sommer','Sommer'],['winter','Winter'],['ganzjahr','Ganzjahr'],['pruefen','Prüfen']].map(([k,l])=>`<div class="rl-filter-chip ${f===k?'active':''}" data-tirefilter="${k}">${l}</div>`).join('')}
+          ${[['alle','Alle'],['sommer','Sommer'],['winter','Winter'],['ganzjahr','Ganzjahr'],['pruefen','Prüfen'],['ausgelagert',`Ausgelagert${out?' · '+out:''}`]].map(([k,l])=>`<div class="rl-filter-chip ${f===k?'active':''}" data-tirefilter="${k}">${l}</div>`).join('')}
         </div>
         <div class="rl-list-head">Reifensätze <span>${list.length}</span></div>
         <div class="rl-list">${tsListHtml(list)}</div>
@@ -1611,6 +1629,16 @@ function rerenderReifenlager(){ const ov = document.getElementById('otherView');
 async function saveTireSetEdit(){
   const ed = state.tireEdit; if(!ed || ed.busy) return;
   const t = tsAll().find(x=>x.id===ed.id); if(!t) return;
+  if(ed.mode==='checkin'){
+    const loc = {}; ['storage_hall','storage_rack','storage_level','storage_compartment'].forEach(k=>{ loc[k] = String(ed[k]??'').trim(); });
+    if(!Object.values(loc).some(Boolean)){ ed.error = 'Bitte den Lagerplatz eintragen.'; rerenderReifenlager(); ed.error = null; return; }
+    ed.busy = true; ed.error = null; rerenderReifenlager();
+    const r = await tabletRequest('tire_checkin', Object.assign({ id: t.id }, loc), 15000);
+    ed.busy = false;
+    if(r.ok){ const d = Object.assign({}, r.data); delete d.ok; Object.assign(t, loc, d); state.tireEdit = null; showUpdateToast('Reifensatz eingelagert – ' + (t.storage_location||'')); }
+    else ed.error = r.reason || 'Nicht gespeichert.';
+    rerenderReifenlager(); return;
+  }
   const fields = {};
   ['tread_depth','condition','season','storage_hall','storage_rack','storage_level','storage_compartment'].forEach(k=>{
     let v = ed[k]; if(k==='tread_depth'){ if(v===''||v==null) return; v = Number(String(v).replace(',','.')); if(!(v>=0 && v<=12)){ ed.error='Profiltiefe zwischen 0 und 12 mm eingeben.'; return; } }
@@ -1624,8 +1652,17 @@ async function saveTireSetEdit(){
   ed.busy = true; ed.error = null; rerenderReifenlager();
   const r = await tabletRequest('tire_update', Object.assign({ id: t.id }, fields), 15000);
   ed.busy = false;
-  if(r.ok){ Object.assign(t, fields); state.tireEdit = null; showUpdateToast('Reifensatz aktualisiert'); }
+  if(r.ok){ const d = Object.assign({}, r.data); delete d.ok; Object.assign(t, fields, d); state.tireEdit = null; showUpdateToast('Reifensatz aktualisiert'); }
   else ed.error = r.missing ? 'Speichern ist auf dem Server noch nicht freigeschaltet.' : `Nicht gespeichert (${r.reason}).`;
+  rerenderReifenlager();
+}
+async function checkoutTireSet(){
+  const t = tsAll().find(x=>x.id===state.tireCheckoutId); if(!t || state.tireCheckoutBusy) return;
+  state.tireCheckoutBusy = true; state.tireCheckoutError = null; rerenderReifenlager();
+  const r = await tabletRequest('tire_checkout', { id: t.id }, 15000);
+  state.tireCheckoutBusy = false;
+  if(r.ok){ const d = Object.assign({}, r.data); delete d.ok; Object.assign(t, d); state.tireCheckoutId = null; showUpdateToast('Reifensatz ausgelagert – Platz ' + (t.storage_location||'') + ' ist frei'); }
+  else state.tireCheckoutError = r.reason || 'Nicht gespeichert.';
   rerenderReifenlager();
 }
 function handleReifenlagerClick(e){
@@ -1635,7 +1672,15 @@ function handleReifenlagerClick(e){
   const hall = e.target.closest('[data-tshall]');
   if(hall){ state.selectedLocation = state.selectedLocation===hall.dataset.tshall ? null : hall.dataset.tshall; rerenderReifenlager(); return true; }
   const row = e.target.closest('[data-tireset]');
-  if(row){ state.selectedTireId = row.dataset.tireset; state.tireEdit = null; rerenderReifenlager(); return true; }
+  if(row){ state.selectedTireId = row.dataset.tireset; state.tireEdit = null; state.tireCheckoutId = null; state.tireCheckoutError = null; rerenderReifenlager(); return true; }
+  if(e.target.closest('#tsCheckoutBtn')){ state.tireCheckoutId = state.selectedTireId; state.tireCheckoutError = null; rerenderReifenlager(); return true; }
+  if(e.target.closest('#tsCheckoutCancel')){ state.tireCheckoutId = null; rerenderReifenlager(); return true; }
+  if(e.target.closest('#tsCheckoutConfirm')){ checkoutTireSet(); return true; }
+  if(e.target.closest('#tsCheckinBtn')){
+    const t = tsAll().find(x=>x.id===state.selectedTireId);
+    if(t) state.tireEdit = { id:t.id, mode:'checkin', storage_hall:t.storage_hall||'', storage_rack:t.storage_rack||'', storage_level:t.storage_level||'', storage_compartment:t.storage_compartment||'' };
+    rerenderReifenlager(); return true;
+  }
   const ord = e.target.closest('[data-tsorder]');
   if(ord){ state.selectedOrderId = ord.dataset.tsorder; state.detailTab = 'aufgaben'; setMainView('auftraege'); return true; }
   if(e.target.closest('#tsEditBtn')){

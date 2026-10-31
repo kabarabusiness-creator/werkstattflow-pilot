@@ -55,6 +55,14 @@ function clientTime(body) {
   if (!Number.isFinite(t) || t < now - 72 * 3600_000 || t > now + 120_000) return nowIso();
   return new Date(Math.min(t, now)).toISOString();
 }
+// Reifenlager: ausgelagerte Sätze belegen keinen Platz mehr
+const isStoredTire = t => ((t && t.status) || 'eingelagert') !== 'ausgelagert';
+const locKey = v => String(v || '').trim().toUpperCase();
+const berlinDate = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+async function tireOccupant(db, code, loc, selfId) {
+  const all = await db.list('TireSet', { workshop_code: code }, { limit: 2000 }).catch(() => []);
+  return all.find(t => t.id !== selfId && t.workshop_code === code && isStoredTire(t) && locKey(t.storage_location) === locKey(loc)) || null;
+}
 const opIdOf = body => (body && /^[A-Za-z0-9-]{8,64}$/.test(String(body.op_id || ''))) ? String(body.op_id) : null;
 function berlinToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
@@ -840,18 +848,44 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     if (!r.sent) throw new HttpError(502, 'mail_failed');
     return { ok: true, sent_to: order.email.replace(/^(.).*(@.*)$/, '$1…$2') };
   }
-  if (action === 'tire_update') {
+  if (action === 'tire_update' || action === 'tire_checkout' || action === 'tire_checkin') {
     const tire = await ownRecord(db, 'TireSet', body.id, code);
+    const stored = isStoredTire(tire);
+    const hist = entry => [...(Array.isArray(tire.history) ? tire.history : []), { at: nowIso(), by: emp.name, ...entry }].slice(-50);
+    if (action === 'tire_checkout') {
+      // Räder ausgelagert (z. B. beim Saisonwechsel montiert) → Platz wird frei
+      if (!stored) return { ok: true, status: 'ausgelagert' };
+      const upd = { status: 'ausgelagert', removal_date: berlinDate(), history: hist({ type: 'auslagerung', location: tire.storage_location || '' }) };
+      await db.update('TireSet', tire.id, upd);
+      invalidate('TireSet');
+      return { ok: true, ...upd };
+    }
     const allowed = ['tread_depth', 'condition', 'season', 'storage_location', 'storage_hall', 'storage_rack', 'storage_level', 'storage_compartment'];
     const upd = {};
-    allowed.forEach(k => { if (body[k] !== undefined) upd[k] = body[k]; });
+    allowed.forEach(k => { if (body[k] !== undefined) upd[k] = typeof body[k] === 'string' ? body[k].trim().slice(0, 40) : body[k]; });
     if (upd.season && !['sommer', 'winter', 'ganzjahr'].includes(upd.season)) throw new HttpError(400, 'invalid_season');
     if (upd.condition && !['neu', 'gut', 'mittel', 'abgefahren'].includes(upd.condition)) throw new HttpError(400, 'invalid_condition');
     if (upd.tread_depth !== undefined) { upd.tread_depth = Number(upd.tread_depth); if (!(upd.tread_depth >= 0 && upd.tread_depth <= 12)) throw new HttpError(400, 'params'); }
-    if (!Object.keys(upd).length) throw new HttpError(400, 'params');
+    // Lagerplatz immer aus Halle-Regal-Ebene-Fach bilden, sobald eins davon geändert wird
+    const parts = ['storage_hall', 'storage_rack', 'storage_level', 'storage_compartment'];
+    if (parts.some(k => upd[k] !== undefined)) upd.storage_location = parts.map(k => String(upd[k] ?? tire[k] ?? '').trim()).filter(Boolean).join('-');
+    const newLoc = upd.storage_location !== undefined ? upd.storage_location : tire.storage_location;
+    const moved = locKey(newLoc) !== locKey(tire.storage_location);
+    if (action === 'tire_checkin' && !newLoc) throw new HttpError(400, 'params', { message: 'Bitte einen Lagerplatz angeben.' });
+    if ((action === 'tire_checkin' || (stored && moved)) && newLoc) {
+      const other = await tireOccupant(db, code, newLoc, tire.id);
+      if (other) throw new HttpError(409, 'location_occupied', { message: `Platz ${newLoc} ist schon belegt (${[other.customer_name, other.license_plate].filter(Boolean).join(', ') || 'anderer Reifensatz'}).` });
+    }
+    if (action === 'tire_checkin') {
+      if (stored && !moved) return { ok: true, status: 'eingelagert' };
+      Object.assign(upd, { status: 'eingelagert', storage_date: berlinDate(), removal_date: null, history: hist({ type: 'einlagerung', location: newLoc }) });
+    } else {
+      if (!Object.keys(upd).length) throw new HttpError(400, 'params');
+      if (stored && moved) upd.history = hist({ type: 'umlagerung', location: newLoc, note: tire.storage_location ? `vorher ${tire.storage_location}` : '' });
+    }
     await db.update('TireSet', tire.id, upd);
     invalidate('TireSet');
-    return { ok: true };
+    return { ok: true, ...upd };
   }
   throw new HttpError(400, 'unknown_action');
 }
