@@ -1000,5 +1000,21 @@ await t('Reifenlager: Auslagern, Platz belegt, Wieder einlagern, Umlagern', asyn
   // fremder Reifensatz
   assert.equal((await call('/tabletAction', { action: 'tire_checkout', id: 'r9' }, token)).status, 404);
 });
+await t('Reifenlager: Profil und DOT je Reifen, Fotos am Reifensatz', async () => {
+  const r1 = db.TireSet.find(x => x.id === 'r1');
+  let r = await call('/tabletAction', { action: 'tire_update', id: 'r1', tires: [{ pos: 'VL', tread_depth: '5,4', dot: '2319' }, { pos: 'VR', tread_depth: 3.1 }, { pos: 'hl', tread_depth: 6 }, { pos: 'HR', dot: '' }] }, token);
+  assert.equal(r.status, 200); assert.equal(r1.tread_depth, 3.1, 'Satz = schlechtester Reifen');
+  assert.deepEqual(r1.tires, [{ pos: 'VL', tread_depth: 5.4, dot: '2319' }, { pos: 'VR', tread_depth: 3.1 }, { pos: 'HL', tread_depth: 6 }, { pos: 'HR' }]);
+  assert.equal((await call('/tabletAction', { action: 'tire_update', id: 'r1', tires: [{ pos: 'VL', dot: '23A9' }] }, token)).status, 400);
+  assert.equal((await call('/tabletAction', { action: 'tire_update', id: 'r1', tires: [{ pos: 'XX', tread_depth: 3 }] }, token)).status, 400);
+  assert.equal((await call('/tabletAction', { action: 'tire_update', id: 'r1', tires: [{ pos: 'VL', tread_depth: 15 }] }, token)).status, 400);
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  r = await call('/tabletAction', { action: 'tire_photo', id: 'r1', data_url: png, caption: 'Flanke VL', op_id: 'op-tirephoto-1' }, token);
+  assert.equal(r.status, 200); assert.equal(r1.photos.length, 1); assert.match(r1.photos[0].url, /\/photo\/AL-T1\/tires\/r1\/op-op-tirephoto-1\.png$/);
+  assert.equal(r1.photos[0].by, 'Erika Muster'); assert.equal(r1.photos[0].caption, 'Flanke VL');
+  r = await call('/tabletAction', { action: 'tire_photo', id: 'r1', data_url: png, op_id: 'op-tirephoto-1', replay: true }, token);
+  assert.equal(r1.photos.length, 1, 'keine Doppelung');
+  assert.equal((await call('/tabletAction', { action: 'tire_photo', id: 'r9', data_url: png }, token)).status, 404);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

@@ -59,6 +59,23 @@ function clientTime(body) {
 const isStoredTire = t => ((t && t.status) || 'eingelagert') !== 'ausgelagert';
 const locKey = v => String(v || '').trim().toUpperCase();
 const berlinDate = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+const TIRE_POS = ['VL', 'VR', 'HL', 'HR', 'RES'];
+function cleanTires(list) {
+  if (!Array.isArray(list) || list.length > 6) throw new HttpError(400, 'params');
+  return list.map(x => {
+    const pos = String((x && x.pos) || '').toUpperCase();
+    if (!TIRE_POS.includes(pos)) throw new HttpError(400, 'params');
+    const out = { pos };
+    if (x.tread_depth !== undefined && x.tread_depth !== null && x.tread_depth !== '') {
+      const d = Number(String(x.tread_depth).replace(',', '.'));
+      if (!(d >= 0 && d <= 12)) throw new HttpError(400, 'params', { message: `Profiltiefe ${pos} zwischen 0 und 12 mm eingeben.` });
+      out.tread_depth = Math.round(d * 10) / 10;
+    }
+    const dot = String((x && x.dot) || '').replace(/\s+/g, '');
+    if (dot) { if (!/^\d{4}$/.test(dot)) throw new HttpError(400, 'params', { message: `DOT ${pos}: 4 Ziffern (Woche + Jahr), z. B. 2319.` }); out.dot = dot; }
+    return out;
+  }).filter((x, i, a) => a.findIndex(y => y.pos === x.pos) === i);
+}
 async function tireOccupant(db, code, loc, selfId) {
   const all = await db.list('TireSet', { workshop_code: code }, { limit: 2000 }).catch(() => []);
   return all.find(t => t.id !== selfId && t.workshop_code === code && isStoredTire(t) && locKey(t.storage_location) === locKey(loc)) || null;
@@ -848,10 +865,28 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     if (!r.sent) throw new HttpError(502, 'mail_failed');
     return { ok: true, sent_to: order.email.replace(/^(.).*(@.*)$/, '$1…$2') };
   }
-  if (action === 'tire_update' || action === 'tire_checkout' || action === 'tire_checkin') {
+  if (action === 'tire_update' || action === 'tire_checkout' || action === 'tire_checkin' || action === 'tire_photo') {
     const tire = await ownRecord(db, 'TireSet', body.id, code);
     const stored = isStoredTire(tire);
     const hist = entry => [...(Array.isArray(tire.history) ? tire.history : []), { at: nowIso(), by: emp.name, ...entry }].slice(-50);
+    if (action === 'tire_photo') {
+      // Foto direkt am Reifensatz (Zustand, Schäden, DOT) – liegt im eigenen Foto-Speicher
+      if (!env.PHOTOS) throw new HttpError(503, 'not_available', { message: 'Foto-Speicher ist noch nicht eingerichtet.' });
+      const photos = Array.isArray(tire.photos) ? tire.photos : [];
+      if (photos.length >= 30) throw new HttpError(400, 'too_many', { message: 'Maximal 30 Fotos pro Reifensatz.' });
+      const opId = opIdOf(body);
+      const { bytes, contentType, ext } = decodeDataUrl(body.data_url);
+      const key = `${code}/tires/${tire.id}/${opId ? 'op-' + opId : randomHex(16)}.${ext}`;
+      const url = `${origin}/photo/${key}`;
+      if (photos.some(p => p.url === url)) return { ok: true, photos, replayed: true };
+      await env.PHOTOS.put(key, bytes, { metadata: { contentType, uploaded_by: emp.name, uploaded_at: nowIso() } });
+      countUsage('photos', 1, code); countUsage('kv_writes');
+      const caption = String(body.caption || '').trim().slice(0, 120);
+      const next = [...photos, { url, at: nowIso(), by: emp.name, ...(caption ? { caption } : {}) }];
+      await db.update('TireSet', tire.id, { photos: next });
+      invalidate('TireSet');
+      return { ok: true, photos: next };
+    }
     if (action === 'tire_checkout') {
       // Räder ausgelagert (z. B. beim Saisonwechsel montiert) → Platz wird frei
       if (!stored) return { ok: true, status: 'ausgelagert' };
@@ -866,6 +901,11 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     if (upd.season && !['sommer', 'winter', 'ganzjahr'].includes(upd.season)) throw new HttpError(400, 'invalid_season');
     if (upd.condition && !['neu', 'gut', 'mittel', 'abgefahren'].includes(upd.condition)) throw new HttpError(400, 'invalid_condition');
     if (upd.tread_depth !== undefined) { upd.tread_depth = Number(upd.tread_depth); if (!(upd.tread_depth >= 0 && upd.tread_depth <= 12)) throw new HttpError(400, 'params'); }
+    if (body.tires !== undefined) {
+      upd.tires = cleanTires(body.tires);
+      const depths = upd.tires.map(x => x.tread_depth).filter(v => typeof v === 'number');
+      if (depths.length && body.tread_depth === undefined) upd.tread_depth = Math.min(...depths); // Satz = schlechtester Reifen
+    }
     // Lagerplatz immer aus Halle-Regal-Ebene-Fach bilden, sobald eins davon geändert wird
     const parts = ['storage_hall', 'storage_rack', 'storage_level', 'storage_compartment'];
     if (parts.some(k => upd[k] !== undefined)) upd.storage_location = parts.map(k => String(upd[k] ?? tire[k] ?? '').trim()).filter(Boolean).join('-');

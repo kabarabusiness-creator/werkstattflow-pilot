@@ -51,7 +51,7 @@ function isCreditsLimit(data){ return !!data && ((data.extra_data && data.extra_
    op_id + replay verhindern doppelte Einträge, falls eine Antwort unterwegs verloren ging.
    Zusätzlich wird der letzte Datenstand gespeichert, damit das Tablet nach einem Neuladen ohne Netz weiterläuft.
    Beim Abmelden wird der Datenstand gelöscht; offene Änderungen bleiben und gehen trotzdem noch raus. */
-const OUTBOX_ACTIONS = new Set(['task_update','worktime_start','worktime_stop','note_add','qc_save','order_complete','media_upload']);
+const OUTBOX_ACTIONS = new Set(['task_update','worktime_start','worktime_stop','note_add','qc_save','order_complete','media_upload','tire_photo']);
 const alStore = (()=>{
   let dbp = null;
   const open = ()=> dbp || (dbp = new Promise((res, rej)=>{
@@ -134,6 +134,9 @@ function outboxAfterSuccess(item, data){
     // vorläufige Zeit-ID durch die echte ersetzen (auch in noch wartenden Stopps)
     outbox.items.forEach(i=>{ if(i.payload.worktime_id===item.local_id){ i.payload.worktime_id = data.worktime_id; alStore.put(i); } });
     (orders||[]).forEach(o=>(o.tasks||[]).forEach(t=>{ if(t._worktimeId===item.local_id) t._worktimeId = data.worktime_id; }));
+  }
+  if(item.action==='tire_photo' && data && Array.isArray(data.photos)){
+    const ts = tsAll().find(x=>x.id===p.id); if(ts){ const pend = (ts.photos||[]).filter(ph=>ph.pending && ph.url!==p.data_url); ts.photos = data.photos.concat(pend); if(state.mainView==='reifenlager') rerenderReifenlager(); }
   }
   if(item.action==='media_upload' && data && data.file_url){
     if(p.set_as_vehicle_photo && state.localVehiclePhoto && state.localVehiclePhoto[p.order_id]===p.data_url) state.localVehiclePhoto[p.order_id] = data.file_url;
@@ -224,6 +227,8 @@ function overlayPending(raw){
       const o = ord(p.order_id); if(!o) return;
       o.status = 'abholbereit';
       d.tasks.forEach(t=>{ if(t.order_id===o.id && t.status!=='erledigt'){ t.status = 'erledigt'; t.completed_date = i.at; } });
+    } else if(i.action==='tire_photo'){
+      d.tire_sets = (d.tire_sets || raw.tire_sets || []).map(ts=> ts.id===p.id ? Object.assign({}, ts, { photos:[...(ts.photos||[]), { url:p.data_url, at:i.at, by:i.emp, pending:true }] }) : ts);
     } else if(i.action==='media_upload'){
       if(p.task_id) d.task_media.push({ order_id:p.order_id, task_id:p.task_id, caption:p.caption||'', file_url:p.data_url, created_date:i.at });
       if(p.set_as_vehicle_photo){ const o = ord(p.order_id); if(o) o.vehicle_photo = p.data_url; }
@@ -272,7 +277,7 @@ async function resumeSession(){
   outboxSessionChanged();
   return true;
 }
-const ACTION_LABELS = { tire_scan:'Reifenscan', task_update:'Aufgabe', worktime_start:'Zeiterfassung', worktime_stop:'Zeiterfassung', media_upload:'Foto', note_add:'Notiz', order_complete:'Auftragsabschluss' };
+const ACTION_LABELS = { tire_photo:'Reifenfoto', tire_scan:'Reifenscan', task_update:'Aufgabe', worktime_start:'Zeiterfassung', worktime_stop:'Zeiterfassung', media_upload:'Foto', note_add:'Notiz', order_complete:'Auftragsabschluss' };
 async function tabletAction(action, payload){
   if(state.writeSupported === false) return null;
   if(!state.sessionToken) return null;
@@ -1492,14 +1497,42 @@ function tsPlace(t){
   const parts = [t.storage_hall && `Halle ${t.storage_hall}`, t.storage_rack && `Regal ${t.storage_rack}`, t.storage_level && `Ebene ${t.storage_level}`, t.storage_compartment && `Fach ${t.storage_compartment}`].filter(Boolean);
   return parts.length ? parts.join(' · ') : (t.storage_location || 'Kein Lagerplatz');
 }
-function tsCheckReason(t){
-  const d = Number(t.tread_depth);
-  if(t.condition==='abgefahren') return 'abgefahren';
-  if(d && d < 1.6) return `nur ${d.toLocaleString('de-DE')} mm – unter Minimum`;
-  if(d && t.season==='winter' && d < 4) return `${d.toLocaleString('de-DE')} mm – Winter unter 4 mm`;
-  if(d && d < 3) return `${d.toLocaleString('de-DE')} mm – unter 3 mm`;
-  return null;
+// Reifen einzeln: Position, Profiltiefe, DOT (Woche+Jahr). Ältere Sätze haben nur einen Wert für den ganzen Satz.
+const TS_POS = [['VL','vorne links'],['VR','vorne rechts'],['HL','hinten links'],['HR','hinten rechts']];
+function tsTires(t){ return Array.isArray(t && t.tires) ? t.tires : []; }
+const tsNum = v => (v===null || v===undefined || v==='' || isNaN(Number(v))) ? null : Number(v);
+function tsDotAge(dot){
+  const m = /^(\d{2})(\d{2})$/.exec(String(dot||'').trim()); if(!m) return null;
+  const wk = Number(m[1]), yr = 2000 + Number(m[2]); if(wk<1 || wk>53) return null;
+  const made = new Date(yr, 0, 1 + (wk-1)*7);
+  const yrs = (Date.now() - made) / (365.25*86400000);
+  return yrs < 0 ? null : Math.floor(yrs*10)/10;
 }
+function tsMinTread(t){
+  const d = tsTires(t).map(x=>tsNum(x.tread_depth)).filter(v=>v!==null);
+  return d.length ? Math.min(...d) : tsNum(t.tread_depth);
+}
+const tsFmtMm = d => `${Number(d).toLocaleString('de-DE')} mm`;
+// Hinweise: unter 1,6 mm nicht verkehrssicher; empfohlen Winter/Ganzjahr 4 mm, Sommer 3 mm; Alter ab 6 Jahren prüfen
+function tsIssues(t){
+  const out = []; const rec = t.season==='sommer' ? 3 : 4;
+  const tread = (label, d)=>{
+    if(d===null) return;
+    if(d < 1.6) out.push({ level:'red', text:`${label}${tsFmtMm(d)} – unter 1,6 mm, nicht verkehrssicher` });
+    else if(d < rec) out.push({ level:'amber', text:`${label}${tsFmtMm(d)} – unter ${rec} mm (${t.season==='sommer'?'Sommer':'Winter/Ganzjahr'}), Ersatz empfehlen` });
+  };
+  const list = tsTires(t);
+  if(list.length){
+    list.forEach(x=>{
+      tread(x.pos+' ', tsNum(x.tread_depth));
+      const a = tsDotAge(x.dot);
+      if(a!==null && a >= 6) out.push({ level: a>=10?'red':'amber', text:`${x.pos} DOT ${x.dot} – ${Math.floor(a)} Jahre alt, prüfen` });
+    });
+  } else tread('', tsNum(t.tread_depth));
+  if(t.condition==='abgefahren' && !out.length) out.push({ level:'red', text:'Zustand: abgefahren' });
+  return out.sort((a,b)=>(a.level==='red'?0:1)-(b.level==='red'?0:1));
+}
+function tsCheckReason(t){ const i = tsIssues(t); return i.length ? i[0].text : null; }
 function tsAll(){ return Array.isArray(state.tireSets) ? state.tireSets : []; }
 // Ausgelagerte Sätze (Räder sind am Auto) belegen keinen Platz mehr und zählen nicht zum Bestand
 const tsIsStored = t => ((t && t.status) || 'eingelagert') !== 'ausgelagert';
@@ -1560,21 +1593,28 @@ function tsDetailHtml(t){
     </div>
     ${stored ? `<div class="tsd-place">${iconRoute}<div><span>Lagerplatz</span><b>${escHtml(tsPlace(t))}</b></div></div>`
       : `<div class="tsd-hint">${iconCar} Ausgelagert${t.removal_date?' am '+escHtml(formatDateDE(t.removal_date)):''} – die Räder sind am Auto bzw. beim Kunden.${t.storage_location?' Letzter Platz: '+escHtml(t.storage_location)+'.':''}</div>`}
-    ${warn?`<div class="alex-warn">${iconWarn} Profil prüfen: ${escHtml(warn)}</div>`:''}
+    ${tsIssues(t).length ? `<div class="tsd-warns">${tsIssues(t).map(i=>`<div class="alex-warn ${i.level==='red'?'':'ts-amber'}">${iconWarn} ${escHtml(i.text)}</div>`).join('')}</div>` : ''}
     ${seasonHint && stored?`<div class="tsd-hint">${iconCalendar} ${seasonHint}</div>`:''}
     <div class="tsd-grid">
       <div><span>Reifen</span><b>${escHtml([t.brand,t.model].filter(Boolean).join(' ')||'–')}</b></div>
       <div><span>Größe</span><b>${escHtml(t.size||'–')}</b></div>
-      <div><span>Profiltiefe</span><b>${t.tread_depth!=null&&t.tread_depth!==''?`${Number(t.tread_depth).toLocaleString('de-DE')} mm`:'–'}</b></div>
+      <div><span>Profiltiefe</span><b>${tsMinTread(t)!==null ? (tsTires(t).length>1 ? 'ab ' : '') + tsFmtMm(tsMinTread(t)) : '–'}</b></div>
       <div><span>Zustand</span><b>${escHtml(TS_CONDITION[t.condition]||t.condition||'–')}</b></div>
       <div><span>Anzahl</span><b>${t.quantity||4} Stück</b></div>
       ${stored ? `<div><span>Eingelagert</span><b>${t.storage_date?formatDateDE(t.storage_date):'–'}${age!=null?` <small>(${age} Tage)</small>`:''}</b></div>` : `<div><span>Ausgelagert</span><b>${t.removal_date?formatDateDE(t.removal_date):'–'}</b></div>`}
+    </div>
+    ${tsTires(t).length ? `<div class="tsd-tires">${TS_POS.map(([k,l])=>{ const x = tsTires(t).find(y=>y.pos===k) || {}; const d = tsNum(x.tread_depth), a = tsDotAge(x.dot), rec = t.season==='sommer'?3:4;
+        const cls = d===null ? '' : d<1.6 ? 'red' : d<rec ? 'amber' : 'ok';
+        return `<div class="tsd-tire"><span>${k}</span><b class="${cls}">${d===null?'–':tsFmtMm(d)}</b><small>${x.dot?`DOT ${escHtml(x.dot)}${a!==null?` · ${Math.floor(a)} J.`:''}`:'DOT –'}</small></div>`; }).join('')}</div>` : ''}
+    <div class="tsd-photos">
+      ${(Array.isArray(t.photos)?t.photos:[]).slice(-8).map(ph=>`<a class="tsd-photo${ph.pending?' pending':''}" ${ph.pending?'':`href="${escHtml(ph.url)}" target="_blank" rel="noopener"`}><img src="${escHtml(ph.url)}" alt="${escHtml(ph.caption||'Reifenfoto')}" loading="lazy"></a>`).join('')}
+      <label class="tsd-photo-add">${iconCamera}<span>Foto</span><input type="file" accept="image/*" capture="environment" data-tsphoto="${escHtml(t.id)}" hidden></label>
     </div>
     ${order?`<button class="btn" data-tsorder="${escHtml(order.id)}">${iconCar} Auftrag #${escHtml(order.orderNumber)} öffnen</button>`:''}
     ${ed ? `<div class="tsd-edit">
       <div class="tsd-edit-t">${checkin ? 'Wieder einlagern – Lagerplatz' : 'Werte aktualisieren'}</div>
       <div class="tsd-edit-grid">
-        ${checkin ? '' : `${inp('tread_depth','Profiltiefe (mm)',ed.tread_depth===''||ed.tread_depth==null?'':String(ed.tread_depth).replace('.',','),'number')}
+        ${checkin ? '' : `<div class="tsd-edit-tires">${TS_POS.map(([k,l])=>`<div class="tsd-et"><b title="${l}">${k}</b>${inp('tt_'+k,'Profil (mm)',ed['tt_'+k],'number')}<label class="ts-in"><span>DOT</span><input data-tsfield="td_${k}" type="text" inputmode="numeric" maxlength="4" placeholder="z. B. 2319" value="${escHtml(ed['td_'+k]||'')}"></label></div>`).join('')}</div>
         <label class="ts-in"><span>Zustand</span><select data-tsfield="condition">${Object.entries(TS_CONDITION).map(([k,l])=>`<option value="${k}" ${ed.condition===k?'selected':''}>${l}</option>`).join('')}</select></label>
         <label class="ts-in"><span>Saison</span><select data-tsfield="season">${Object.entries(TS_SEASON).map(([k,v])=>`<option value="${k}" ${ed.season===k?'selected':''}>${v.l}</option>`).join('')}</select></label>`}
         ${inp('storage_hall','Halle',ed.storage_hall)}${inp('storage_rack','Regal',ed.storage_rack)}${inp('storage_level','Ebene',ed.storage_level)}${inp('storage_compartment','Fach',ed.storage_compartment)}
@@ -1640,10 +1680,21 @@ async function saveTireSetEdit(){
     rerenderReifenlager(); return;
   }
   const fields = {};
-  ['tread_depth','condition','season','storage_hall','storage_rack','storage_level','storage_compartment'].forEach(k=>{
-    let v = ed[k]; if(k==='tread_depth'){ if(v===''||v==null) return; v = Number(String(v).replace(',','.')); if(!(v>=0 && v<=12)){ ed.error='Profiltiefe zwischen 0 und 12 mm eingeben.'; return; } }
+  ['condition','season','storage_hall','storage_rack','storage_level','storage_compartment'].forEach(k=>{
+    const v = ed[k];
     if(String(v??'') !== String(t[k]??'')) fields[k] = v;
   });
+  // Reifen einzeln
+  const tires = [];
+  TS_POS.forEach(([k])=>{
+    const raw = String(ed['tt_'+k]??'').trim(), dot = String(ed['td_'+k]??'').replace(/\s+/g,'');
+    const x = { pos:k };
+    if(raw!==''){ const v = Number(raw.replace(',','.')); if(!(v>=0 && v<=12)){ ed.error = `Profiltiefe ${k} zwischen 0 und 12 mm eingeben.`; return; } x.tread_depth = Math.round(v*10)/10; }
+    if(dot){ if(!/^\d{4}$/.test(dot)){ ed.error = `DOT ${k}: 4 Ziffern (Woche + Jahr), z. B. 2319.`; return; } x.dot = dot; }
+    if(x.tread_depth!==undefined || x.dot) tires.push(x);
+  });
+  const norm = l => JSON.stringify((l||[]).map(x=>({ pos:x.pos, d:tsNum(x.tread_depth), dot:x.dot||'' })).sort((a,b)=>a.pos.localeCompare(b.pos)));
+  if(!ed.error && tires.length && norm(tires)!==norm(tsTires(t))) fields.tires = tires;
   if(ed.error){ rerenderReifenlager(); ed.error=null; return; }
   if(!Object.keys(fields).length){ state.tireEdit = null; rerenderReifenlager(); return; }
   if(fields.storage_hall!==undefined || fields.storage_rack!==undefined || fields.storage_level!==undefined || fields.storage_compartment!==undefined){
@@ -1652,7 +1703,7 @@ async function saveTireSetEdit(){
   ed.busy = true; ed.error = null; rerenderReifenlager();
   const r = await tabletRequest('tire_update', Object.assign({ id: t.id }, fields), 15000);
   ed.busy = false;
-  if(r.ok){ const d = Object.assign({}, r.data); delete d.ok; Object.assign(t, fields, d); state.tireEdit = null; showUpdateToast('Reifensatz aktualisiert'); }
+  if(r.ok){ const d = Object.assign({}, r.data); delete d.ok; Object.assign(t, fields, d); state.tireEdit = null; showUpdateToast(tsIssues(t).length ? 'Gespeichert – bitte Hinweise beachten' : 'Reifensatz aktualisiert'); }
   else ed.error = r.missing ? 'Speichern ist auf dem Server noch nicht freigeschaltet.' : `Nicht gespeichert (${r.reason}).`;
   rerenderReifenlager();
 }
@@ -1796,7 +1847,12 @@ function handleReifenlagerClick(e){
   if(ord){ state.selectedOrderId = ord.dataset.tsorder; state.detailTab = 'aufgaben'; setMainView('auftraege'); return true; }
   if(e.target.closest('#tsEditBtn')){
     const t = tsAll().find(x=>x.id===state.selectedTireId);
-    if(t) state.tireEdit = { id:t.id, tread_depth:t.tread_depth??'', condition:t.condition||'gut', season:t.season||'sommer', storage_hall:t.storage_hall||'', storage_rack:t.storage_rack||'', storage_level:t.storage_level||'', storage_compartment:t.storage_compartment||'' };
+    if(t){
+      state.tireEdit = { id:t.id, condition:t.condition||'gut', season:t.season||'sommer', storage_hall:t.storage_hall||'', storage_rack:t.storage_rack||'', storage_level:t.storage_level||'', storage_compartment:t.storage_compartment||'' };
+      // Altbestand ohne Einzelwerte: Satzwert in alle vier Felder vorschlagen
+      const legacy = !tsTires(t).length && tsNum(t.tread_depth)!==null ? String(t.tread_depth).replace('.',',') : '';
+      TS_POS.forEach(([k])=>{ const x = tsTires(t).find(y=>y.pos===k) || {}; state.tireEdit['tt_'+k] = tsNum(x.tread_depth)!==null ? String(x.tread_depth).replace('.',',') : legacy; state.tireEdit['td_'+k] = x.dot || ''; });
+    }
     rerenderReifenlager(); return true;
   }
   if(e.target.closest('#tsCancelBtn')){ state.tireEdit = null; rerenderReifenlager(); return true; }
@@ -1808,7 +1864,19 @@ document.addEventListener('input', (e)=>{
   const f = e.target.closest && e.target.closest('[data-tsfield]');
   if(f && state.tireEdit) state.tireEdit[f.dataset.tsfield] = f.value;
 });
+async function addTirePhoto(id, file){
+  const t = tsAll().find(x=>x.id===id); if(!t || !file) return;
+  let dataUrl;
+  try{ dataUrl = await compressImage(file, 1600, 0.82); }catch(_){ showUpdateToast('Foto konnte nicht verarbeitet werden.'); return; }
+  t.photos = [...(Array.isArray(t.photos)?t.photos:[]), { url:dataUrl, at:new Date().toISOString(), by: state.currentUser ? state.currentUser.name : '', pending:true }];
+  rerenderReifenlager();
+  const r = await tabletAction('tire_photo', { id:t.id, data_url:dataUrl, caption:'Reifenfoto' });
+  if(r && r.queued) showUpdateToast('Foto gespeichert – wird übertragen, sobald Verbindung besteht.');
+  else if(r && r.photos) showUpdateToast('Foto am Reifensatz gespeichert.');
+}
 document.addEventListener('change', (e)=>{
+  const ph = e.target.closest && e.target.closest('[data-tsphoto]');
+  if(ph){ const f = ph.files && ph.files[0]; const id = ph.dataset.tsphoto; ph.value = ''; if(f) addTirePhoto(id, f); return; }
   const f = e.target.closest && e.target.closest('[data-tsfield]');
   if(f && state.tireEdit) state.tireEdit[f.dataset.tsfield] = f.value;
 });

@@ -463,6 +463,21 @@
   .ts-in span{display:block;font-size:10.5px;color:var(--text-faint);margin-bottom:3px;}
   .ts-in input,.ts-in select{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);font:inherit;font-size:13px;}
   @media (max-width:980px){ .device .tsd-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  .tsd-warns{display:flex;flex-direction:column;gap:5px;} .tsd-warns .alex-warn{margin:0;}
+  .alex-warn.ts-amber{background:var(--warning-soft);color:var(--warning-text, var(--warning));}
+  .tsd-tires{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;}
+  .tsd-tire{padding:9px 10px;border-radius:10px;background:var(--panel-2);display:flex;flex-direction:column;gap:2px;}
+  .tsd-tire span{font-size:10.5px;color:var(--text-faint);font-weight:700;} .tsd-tire b{font-size:14px;} .tsd-tire small{font-size:11px;color:var(--text-dim);}
+  .tsd-tire b.red{color:var(--danger-text);} .tsd-tire b.amber{color:var(--warning-text, var(--warning));} .tsd-tire b.ok{color:var(--success-text);}
+  .tsd-photos{display:flex;flex-wrap:wrap;gap:8px;}
+  .tsd-photo,.tsd-photo-add{width:64px;height:64px;border-radius:10px;overflow:hidden;flex:none;}
+  .tsd-photo img{width:100%;height:100%;object-fit:cover;display:block;} .tsd-photo.pending{opacity:.55;}
+  .tsd-photo-add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:1px dashed var(--border);color:var(--text-dim);font-size:11px;cursor:pointer;}
+  .tsd-photo-add svg{width:18px;height:18px;}
+  .tsd-edit-tires{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:4px;}
+  .tsd-et{display:grid;grid-template-columns:30px 1fr 1fr;gap:6px;align-items:end;padding:8px;border-radius:10px;background:var(--panel-2);}
+  .tsd-et>b{font-size:12px;align-self:center;}
+  @media (max-width:980px){ .device .tsd-tires{grid-template-columns:repeat(2,minmax(0,1fr));} .device .tsd-edit-tires{grid-template-columns:1fr;} }
   .t-mech{font-size:11px;color:var(--text-faint);white-space:nowrap;}
   .t-dur{font-size:11px;color:var(--text-faint);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;margin-left:auto;}
   .t-dur svg{width:11px;height:11px;flex-shrink:0;}
