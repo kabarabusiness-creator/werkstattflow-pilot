@@ -13,7 +13,7 @@
 const CACHE = 'al-tablet-v1';
 const SCOPE = new URL(self.registration.scope).pathname; // z. B. /werkstattflow-pilot/
 const VERSIONED = /^tablet\.(css|js)$/;
-const STATIC = /^(assets\/img\/[^/]+|icons\/[^/]+|manifest\.webmanifest)$/;
+const STATIC = /^(assets\/img\/[^/]+|assets\/vendor\/[^/]+|icons\/[^/]+|manifest\.webmanifest)$/;
 
 self.addEventListener('install', e => { e.waitUntil(precache().catch(() => {}).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
@@ -32,7 +32,7 @@ async function precache() {
 }
 // Alles, was die aktuelle index.html braucht, ablegen; alte tablet.css/js-Versionen wegräumen
 async function cacheRefs(c, html) {
-  const refs = new Set(['assets/img/logo-wortmarke.png', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/apple-touch-icon.png']);
+  const refs = new Set(['assets/img/logo-wortmarke.png', 'assets/vendor/jsQR.js?v=1.4.0', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/apple-touch-icon.png']);
   for (const m of html.matchAll(/(?:href|src)="((?:tablet\.(?:css|js)|assets\/img\/|icons\/)[^"]*)"/g)) refs.add(m[1]);
   await Promise.all([...refs].map(async r => {
     try { if (await c.match(r)) return; const x = await fetch(r); if (x.ok) await c.put(r, x); } catch (_) {}

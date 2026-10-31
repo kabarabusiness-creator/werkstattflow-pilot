@@ -1615,7 +1615,7 @@ function renderReifenlagerView(ov){
     ${Object.keys(halls).length>1 ? `<div class="rl-filter-row" style="margin:-8px 0 14px;">${Object.entries(halls).sort().map(([h,n])=>`<div class="rl-filter-chip ${state.selectedLocation===h?'active':''}" data-tshall="${escHtml(h)}">${h==='–'?'Ohne Halle':'Halle '+escHtml(h)} · ${n}</div>`).join('')}</div>` : ''}
     <div class="rl-body">
       <div class="rl-left">
-        <div class="rl-search-box">${iconSearch}<input id="tireSearchInput" placeholder="Kunde, Kennzeichen, Größe…" value="${escHtml(state.tireSearch||'')}"></div>
+        <div class="rl-search-row"><div class="rl-search-box">${iconSearch}<input id="tireSearchInput" placeholder="Kunde, Kennzeichen, Größe…" value="${escHtml(state.tireSearch||'')}"></div><button class="btn rl-scan-btn" id="tsScanBtn" aria-label="Etikett scannen">${iconQr}<span>Scannen</span></button></div>
         <div class="rl-filter-row">
           ${[['alle','Alle'],['sommer','Sommer'],['winter','Winter'],['ganzjahr','Ganzjahr'],['pruefen','Prüfen'],['ausgelagert',`Ausgelagert${out?' · '+out:''}`]].map(([k,l])=>`<div class="rl-filter-chip ${f===k?'active':''}" data-tirefilter="${k}">${l}</div>`).join('')}
         </div>
@@ -1665,6 +1665,117 @@ async function checkoutTireSet(){
   else state.tireCheckoutError = r.reason || 'Nicht gespeichert.';
   rerenderReifenlager();
 }
+/* ---------- Reifen-Etikett per Kamera scannen ----------
+   QR-Code auf dem Etikett enthält die Reifen-ID (WF-TIRE-…); ältere Etiketten „WF-TIRE|ID|Platz|…“.
+   Decoder (jsQR, Apache 2.0) wird erst beim ersten Scan geladen. Ohne Live-Kamera: Foto aufnehmen. */
+const iconQr = svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h3M21 17v4h-4"/>');
+const qrScan = { stream:null, timer:null, lastMiss:'', open:false };
+function loadJsQR(){
+  if(window.jsQR) return Promise.resolve(window.jsQR);
+  if(loadJsQR.p) return loadJsQR.p;
+  loadJsQR.p = new Promise((res, rej)=>{
+    const sc = document.createElement('script'); sc.src = 'assets/vendor/jsQR.js?v=1.4.0';
+    sc.onload = ()=> window.jsQR ? res(window.jsQR) : rej(new Error('jsQR'));
+    sc.onerror = ()=>{ loadJsQR.p = null; rej(new Error('load')); };
+    document.head.appendChild(sc);
+  });
+  return loadJsQR.p;
+}
+function findTireByQr(text){
+  const raw = String(text||'').trim(); const all = tsAll();
+  if(!raw) return null;
+  const parts = raw.startsWith('WF-TIRE|') ? raw.split('|') : null;
+  const code = parts ? (parts[1]||'') : raw;
+  return all.find(t=>t.qr_code && t.qr_code===code)
+    || all.find(t=>raw==='WF-TIRE-'+t.id)
+    || (parts && parts[2] ? all.find(t=>tsIsStored(t) && t.storage_location===parts[2]) : null)
+    || null;
+}
+function qrScanMsg(text, warn){ const m = document.getElementById('qrScanMsg'); if(m){ m.textContent = text; m.classList.toggle('warn', !!warn); } }
+function closeQrScanner(){
+  qrScan.open = false;
+  clearTimeout(qrScan.timer); qrScan.timer = null;
+  if(qrScan.stream){ qrScan.stream.getTracks().forEach(tr=>{ try{ tr.stop(); }catch(_){} }); qrScan.stream = null; }
+  const o = document.getElementById('qrScan'); if(o) o.remove();
+}
+function handleQrResult(text){
+  const t = findTireByQr(text);
+  if(!t){
+    if(qrScan.lastMiss!==text){ qrScan.lastMiss = text; qrScanMsg('Dieser Code gehört zu keinem Reifensatz dieser Werkstatt.', true); }
+    return false;
+  }
+  closeQrScanner();
+  try{ navigator.vibrate && navigator.vibrate(60); }catch(_){}
+  state.tireFilter = tsIsStored(t) ? 'alle' : 'ausgelagert';
+  state.tireSearch = ''; state.selectedLocation = null; state.tireEdit = null; state.tireCheckoutId = null;
+  state.selectedTireId = t.id;
+  if(state.mainView!=='reifenlager') setMainView('reifenlager'); else rerenderReifenlager();
+  showUpdateToast(`Reifensatz gefunden: ${t.customer_name||'Ohne Kunde'} – ${tsIsStored(t) ? (t.storage_location||'') : 'ausgelagert'}`);
+  return true;
+}
+function decodeQr(source, w, h, both){
+  const c = decodeQr.c || (decodeQr.c = document.createElement('canvas'));
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently:true });
+  ctx.drawImage(source, 0, 0, w, h);
+  const r = window.jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: both ? 'attemptBoth' : 'dontInvert' });
+  return r && r.data ? r.data : null;
+}
+async function openQrScanner(){
+  closeQrScanner();
+  qrScan.open = true; qrScan.lastMiss = '';
+  const o = document.createElement('div');
+  o.className = 'qr-scan'; o.id = 'qrScan';
+  o.innerHTML = `<div class="qr-scan-box" role="dialog" aria-label="Etikett scannen">
+    <div class="qr-scan-head"><b>${iconQr} Reifen-Etikett scannen</b><button class="qr-scan-x" id="qrScanClose" aria-label="Schließen">${iconClose}</button></div>
+    <div class="qr-scan-view"><video id="qrScanVideo" playsinline muted autoplay></video><div class="qr-scan-frame"></div></div>
+    <p class="qr-scan-msg" id="qrScanMsg">Kamera wird gestartet…</p>
+    <div class="qr-scan-actions"><label class="btn">${iconCamera} Foto vom Etikett<input type="file" id="qrScanFile" accept="image/*" capture="environment" hidden></label></div>
+  </div>`;
+  document.body.appendChild(o);
+  o.addEventListener('click', e=>{ if(e.target===o || e.target.closest('#qrScanClose')) closeQrScanner(); });
+  o.querySelector('#qrScanFile').addEventListener('change', e=>{ const f = e.target.files && e.target.files[0]; e.target.value = ''; if(f) scanQrFromFile(f); });
+  try{ await loadJsQR(); }catch(_){ qrScanMsg('Der Scanner konnte nicht geladen werden. Bitte Verbindung prüfen.', true); return; }
+  if(!qrScan.open) return;
+  if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){ qrScanMsg('Live-Kamera wird hier nicht unterstützt – mach ein Foto vom Etikett.', true); o.querySelector('.qr-scan-view').style.display = 'none'; return; }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } }, audio:false });
+    if(!qrScan.open){ stream.getTracks().forEach(tr=>tr.stop()); return; }
+    qrScan.stream = stream;
+    const v = document.getElementById('qrScanVideo'); v.srcObject = stream;
+    try{ await v.play(); }catch(_){}
+    qrScanMsg('Etikett in den Rahmen halten.');
+    const tick = ()=>{
+      if(!qrScan.open) return;
+      if(v.readyState >= 2 && v.videoWidth){
+        const w = Math.min(720, v.videoWidth), h = Math.round(v.videoHeight * w / v.videoWidth);
+        try{ const text = decodeQr(v, w, h, false); if(text && handleQrResult(text)) return; }catch(_){}
+      }
+      qrScan.timer = setTimeout(tick, 160);
+    };
+    tick();
+  }catch(e){
+    o.querySelector('.qr-scan-view').style.display = 'none';
+    qrScanMsg(e && e.name==='NotAllowedError' ? 'Kamera-Zugriff wurde nicht erlaubt – du kannst ein Foto vom Etikett machen.' : 'Kamera nicht verfügbar – mach ein Foto vom Etikett.', true);
+  }
+}
+async function scanQrFromFile(file){
+  qrScanMsg('Foto wird gelesen…');
+  try{
+    await loadJsQR();
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((res, rej)=>{ const i = new Image(); i.onload = ()=>res(i); i.onerror = rej; i.src = url; });
+    let text = null;
+    for(const max of [1000, 1600, 700]){
+      const sc = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      text = decodeQr(img, Math.round(img.naturalWidth*sc), Math.round(img.naturalHeight*sc), true);
+      if(text) break;
+    }
+    URL.revokeObjectURL(url);
+    if(!text){ qrScanMsg('Auf dem Foto wurde kein QR-Code erkannt. Bitte näher ran und scharf stellen.', true); return; }
+    handleQrResult(text);
+  }catch(_){ qrScanMsg('Das Foto konnte nicht gelesen werden.', true); }
+}
 function handleReifenlagerClick(e){
   if(state.mainView!=='reifenlager') return false;
   const chip = e.target.closest('[data-tirefilter]');
@@ -1689,6 +1800,7 @@ function handleReifenlagerClick(e){
     rerenderReifenlager(); return true;
   }
   if(e.target.closest('#tsCancelBtn')){ state.tireEdit = null; rerenderReifenlager(); return true; }
+  if(e.target.closest('#tsScanBtn')){ openQrScanner(); return true; }
   if(e.target.closest('#tsSaveBtn')){ saveTireSetEdit(); return true; }
   return false;
 }
