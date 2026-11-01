@@ -271,6 +271,15 @@ export async function handleFunction(name, body, c) {
     countUsage('alex', 1, code);
     return res;
   }
+  // Reifenlager: Saison-Erinnerung (Vorschau / Versand – wird von der Werkstatt im Dashboard ausgelöst)
+  if (name === 'tireReminder') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    await h.gate(code);
+    rateLimit('tirerem:' + user.id + ':' + (body.action === 'send' ? 's' : 'p'), body.action === 'send' ? 6 : 60, 3600_000);
+    return h.tireReminder(code, body);
+  }
   if (name === 'alexExecute') {
     const user = await authUser();
     const code = await workshopOf(user);

@@ -1192,6 +1192,95 @@ async function mailReviewRequest(env, db, order) {
   });
 }
 
+/* ---- Saison-Erinnerung Reifenlager: Kunden mit eingelagertem Satz vor dem Wechsel anschreiben ----
+ * Vorschau + Versand werden im Dashboard von der Werkstatt ausgelöst (nichts geht automatisch raus).
+ * Je Satz und Saison höchstens eine Mail; jeder Kunde kann sich per Link abmelden. */
+const REMINDER_MAX_PER_RUN = 80; // Resend-Gratistarif: 100 Mails/Tag – Rest am nächsten Tag
+const SEASON_WORD = { winter: 'Winterreifen', sommer: 'Sommerreifen' };
+const plateNorm = v => String(v || '').replace(/[\s-]/g, '').toUpperCase();
+function reminderKey(season, now = new Date()) {
+  const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1;
+  return `${season}-${season === 'winter' && m < 7 ? y - 1 : y}`;
+}
+async function optoutToken(env, id) { return (await sha256Hex(`${env.ADMIN_KEY || 'al'}|tire-optout|${id}`)).slice(0, 32); }
+function tireReminderFlags(t) {
+  const list = Array.isArray(t.tires) ? t.tires : [];
+  const depths = list.map(x => Number(x.tread_depth)).filter(Number.isFinite);
+  const min = depths.length ? Math.min(...depths) : (t.tread_depth != null && t.tread_depth !== '' ? Number(t.tread_depth) : null);
+  const rec = t.season === 'sommer' ? 3 : 4;
+  const now = new Date();
+  const old = list.some(x => { const m = /^(\d{2})(\d{2})$/.exec(String(x.dot || '')); if (!m) return false; const made = new Date(Date.UTC(2000 + Number(m[2]), 0, 1 + (Number(m[1]) - 1) * 7)); return (now - made) / (365.25 * 864e5) >= 6; });
+  return { illegal: min !== null && min < 1.6, low: min !== null && min < rec, old };
+}
+async function tireReminderList(db, code, season) {
+  const [sets, orders] = await Promise.all([db.list('TireSet', { workshop_code: code }, { limit: 2000 }), db.list('Order', { workshop_code: code }, { limit: 2000 })]);
+  const key = reminderKey(season);
+  const byPlate = new Map(), byName = new Map();
+  orders.filter(o => o.email || o.customer_token).sort((a, b) => String(b.created_date || '').localeCompare(String(a.created_date || ''))).forEach(o => {
+    const p = plateNorm(o.license_plate), n = String(o.customer_name || '').trim().toLowerCase();
+    if (p && !byPlate.has(p)) byPlate.set(p, o);
+    if (n && !byName.has(n)) byName.set(n, o);
+  });
+  return sets.filter(t => isStoredTire(t) && t.season === season).map(t => {
+    const order = byPlate.get(plateNorm(t.license_plate)) || byName.get(String(t.customer_name || '').trim().toLowerCase()) || null;
+    const email = String(t.customer_email || (order && order.email) || '').trim();
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const status = t.reminder_optout ? 'abgemeldet' : t.last_reminder_key === key ? 'bereits_erinnert' : !valid ? 'keine_email' : 'bereit';
+    return { t, order, email: valid ? email : '', status };
+  }).sort((a, b) => String(a.t.customer_name || '').localeCompare(String(b.t.customer_name || ''), 'de'));
+}
+async function mailTireReminder(env, db, ws, x, origin) {
+  const t = x.t, word = SEASON_WORD[t.season] || 'Reifen';
+  const f = tireReminderFlags(t);
+  const intro = t.season === 'winter'
+    ? `bald wird es kalt: Ihre <b>Winterreifen</b> liegen bei <b>${esc(ws.name)}</b> eingelagert und sind bereit für den Wechsel. Vereinbaren Sie jetzt Ihren Termin – dann sind Sie rechtzeitig vor Frost, Schnee und Glätte richtig bereift.`
+    : `der Frühling kommt: Ihre <b>Sommerreifen</b> liegen bei <b>${esc(ws.name)}</b> eingelagert und sind bereit für den Wechsel. Vereinbaren Sie jetzt Ihren Termin.`;
+  const hint = f.illegal ? 'Wichtig: Mindestens ein Reifen hat weniger als 1,6 mm Profil und darf so nicht mehr gefahren werden. Wir empfehlen neue Reifen – sprechen Sie uns beim Termin an.'
+    : (f.low || f.old) ? `Gut zu wissen: ${f.low ? 'Einige Reifen haben nur noch wenig Profil' : 'Einige Reifen sind älter als 6 Jahre'}. Gern beraten wir Sie beim Termin zu neuen Reifen.` : '';
+  const optUrl = `${origin}/reifen-abmelden?id=${encodeURIComponent(t.id)}&t=${await optoutToken(env, t.id)}`;
+  const booking = x.order && x.order.customer_token ? { label: 'Termin online buchen', href: portalLink(x.order) } : null;
+  return sendMail(env, db, {
+    to: x.email, replyTo: ws.email, orderId: x.order ? x.order.id : null, code: t.workshop_code, statusText: `Erinnerung ${word}`,
+    subject: `Zeit für Ihre ${word} – ${ws.name}`,
+    html: mailHtml({ title: `Hallo ${t.customer_name || ''},`, intro: intro + (hint ? `<br><br>${esc(hint)}` : ''),
+      rows: [['Kennzeichen', t.license_plate || '–'], ['Reifen', [t.brand, t.size].filter(Boolean).join(' · ') || word], ['Anzahl', `${t.quantity || 4} Stück`]],
+      button: booking,
+      footer: `${booking ? '' : 'Für einen Termin antworten Sie einfach auf diese Mail oder rufen Sie uns an.<br>'}${contactFooter(ws)}<br><br>Sie erhalten diese Nachricht, weil Ihre Reifen bei uns eingelagert sind. Keine Saison-Erinnerungen mehr? <a href="${esc(optUrl)}" style="color:#6b6b88">Hier abmelden</a>.` }),
+  });
+}
+async function tireReminder(db, env, code, body, origin) {
+  const season = body.season === 'sommer' ? 'sommer' : body.season === 'winter' ? 'winter' : null;
+  if (!season) throw new HttpError(400, 'params');
+  const list = await tireReminderList(db, code, season);
+  const counts = list.reduce((a, x) => { a[x.status] = (a[x.status] || 0) + 1; return a; }, {});
+  const view = x => ({ id: x.t.id, customer_name: x.t.customer_name || '', license_plate: x.t.license_plate || '', email: x.email, status: x.status,
+    booking: !!(x.order && x.order.customer_token), last_reminder_at: x.t.last_reminder_at || null, hint: (f => f.illegal ? 'unter 1,6 mm' : f.low ? 'wenig Profil' : f.old ? 'älter als 6 Jahre' : '')(tireReminderFlags(x.t)) });
+  if (body.action !== 'send') return { ok: true, season, key: reminderKey(season), counts, max_per_run: REMINDER_MAX_PER_RUN, mail_ready: !!env.RESEND_API_KEY, items: list.map(view) };
+  if (!env.RESEND_API_KEY) throw new HttpError(503, 'not_available', { message: 'E-Mail-Versand ist noch nicht eingerichtet.' });
+  const only = Array.isArray(body.ids) && body.ids.length ? new Set(body.ids.map(String)) : null;
+  const todo = list.filter(x => x.status === 'bereit' && (!only || only.has(x.t.id)));
+  const batch = todo.slice(0, REMINDER_MAX_PER_RUN);
+  const ws = await workshopInfo(db, code);
+  const key = reminderKey(season);
+  let sent = 0, failed = 0;
+  for (const x of batch) {
+    const r = await mailTireReminder(env, db, ws, x, origin);
+    if (r.sent) { sent++; await db.update('TireSet', x.t.id, { last_reminder_key: key, last_reminder_at: nowIso() }).catch(e => console.log('reminder_mark', String(e))); }
+    else failed++;
+  }
+  invalidate('TireSet');
+  return { ok: true, season, sent, failed, remaining: todo.length - batch.length };
+}
+async function tireOptout(db, env, url) {
+  const id = url.searchParams.get('id') || '', tok = url.searchParams.get('t') || '';
+  const page = (title, text) => new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:48px 16px;color:#1a1a2e}main{max-width:440px;margin:auto;background:#fff;padding:28px;border-radius:14px;box-shadow:0 2px 12px #0001}p{color:#556;line-height:1.5}</style></head><body><main><h2>${esc(title)}</h2><p>${text}</p></main></body></html>`, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id) || tok !== await optoutToken(env, id)) return page('Link ungültig', 'Dieser Abmelde-Link ist nicht gültig. Bitte wenden Sie sich direkt an Ihre Werkstatt.');
+  const t = await db.get('TireSet', id).catch(() => null);
+  if (!t) return page('Link ungültig', 'Dieser Reifensatz ist nicht mehr gespeichert.');
+  if (!t.reminder_optout) { await db.update('TireSet', id, { reminder_optout: true, reminder_optout_at: nowIso() }); invalidate('TireSet'); }
+  return page('Abgemeldet', 'Sie erhalten keine Saison-Erinnerungen mehr zu Ihren eingelagerten Reifen. Ihre Reifen bleiben selbstverständlich weiter bei Ihrer Werkstatt eingelagert.');
+}
+
 /* ---------------- Nachrichten & Live-Chat ---------------- */
 const DASHBOARD_URL = 'https://autoleitwerk.base44.app';
 const SUPPORT_TO = env => env.SUPPORT_EMAIL || 'info@autoleitwerk.de';
@@ -1456,11 +1545,12 @@ async function handleFetch(request, env, ctx) {
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia }, ctx });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia, tireReminder: (code, b) => tireReminder(db, env, code, b, url.origin) }, ctx });
         invalidate('Order');
         if (r instanceof Response) { const hd = new Headers(r.headers); for (const [k, v] of Object.entries(cors)) hd.set(k, v); hd.set('Access-Control-Expose-Headers', 'Content-Disposition'); return new Response(r.body, { status: r.status, headers: hd }); }
         return json(r, 200, cors);
       }
+      if (path === '/reifen-abmelden' && request.method === 'GET') return await tireOptout(db, env, url);
       if (path === '/admin' && request.method === 'GET') {
         return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoLeitwerk – Daten-Backup</title>
 <style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:40px 16px;color:#1a1a2e}main{max-width:420px;margin:auto;background:#fff;padding:24px;border-radius:14px;box-shadow:0 2px 12px #0001}input,button{width:100%;box-sizing:border-box;font:inherit;padding:12px;border-radius:10px;margin-top:10px}input{border:1px solid #ccd}button{background:#7c3aed;color:#fff;border:0;font-weight:600;cursor:pointer}p{color:#556;font-size:14px}</style></head>

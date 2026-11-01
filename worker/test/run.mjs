@@ -1016,5 +1016,47 @@ await t('Reifenlager: Profil und DOT je Reifen, Fotos am Reifensatz', async () =
   assert.equal(r1.photos.length, 1, 'keine Doppelung');
   assert.equal((await call('/tabletAction', { action: 'tire_photo', id: 'r9', data_url: png }, token)).status, 404);
 });
+await t('Reifenlager: Saison-Erinnerung (Vorschau, Versand, keine Doppelung, Abmelden)', async () => {
+  const fnU = (n, body, auth = 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  db.Order.push({ id: 'or1', workshop_code: 'AL-T1', customer_name: 'Wilma Winter', license_plate: 'AB-WW 1', email: 'wilma@test.de', customer_token: 'wf-tokwilma', created_date: '2026-03-01T10:00:00Z' });
+  db.Order.push({ id: 'or2', workshop_code: 'AL-T2', customer_name: 'Fremd', license_plate: 'AB-FF 9', email: 'fremd@test.de' });
+  db.TireSet.push(
+    { id: 'w1', workshop_code: 'AL-T1', customer_name: 'Wilma Winter', license_plate: 'AB-WW1', season: 'winter', storage_location: 'W-1', tires: [{ pos: 'VL', tread_depth: 3.2 }] },
+    { id: 'w2', workshop_code: 'AL-T1', customer_name: 'Ohne Mail', license_plate: 'AB-OM 2', season: 'winter', storage_location: 'W-2' },
+    { id: 'w3', workshop_code: 'AL-T1', customer_name: 'Direkt', customer_email: 'direkt@test.de', season: 'winter', storage_location: 'W-3' },
+    { id: 'w4', workshop_code: 'AL-T1', customer_name: 'Abgemeldet', customer_email: 'ab@test.de', season: 'winter', storage_location: 'W-4', reminder_optout: true },
+    { id: 'w5', workshop_code: 'AL-T1', customer_name: 'Am Auto', customer_email: 'aa@test.de', season: 'winter', storage_location: 'W-5', status: 'ausgelagert' },
+    { id: 's1', workshop_code: 'AL-T1', customer_name: 'Sommer', customer_email: 'so@test.de', season: 'sommer', storage_location: 'S-1' },
+    { id: 'x1', workshop_code: 'AL-T2', customer_name: 'Fremd', license_plate: 'AB-FF 9', season: 'winter', storage_location: 'F-1' });
+  let r = await fnU('tireReminder', { action: 'preview', season: 'winter' });
+  assert.equal(r.s, 200);
+  const st = Object.fromEntries(r.d.items.map(i => [i.id, i.status]));
+  assert.equal(st.w1, 'bereit'); assert.equal(st.w2, 'keine_email'); assert.equal(st.w3, 'bereit'); assert.equal(st.w4, 'abgemeldet');
+  assert.ok(!('w5' in st) && !('s1' in st) && !('x1' in st), 'nur eingelagerte Winterreifen der eigenen Werkstatt');
+  assert.equal(r.d.items.find(i => i.id === 'w1').booking, true); assert.equal(r.d.items.find(i => i.id === 'w1').hint, 'wenig Profil');
+  const m0 = mails.length;
+  r = await fnU('tireReminder', { action: 'send', season: 'winter', ids: ['w1', 'w2', 'w3', 'w4', 'w5'] });
+  assert.equal(r.d.sent, 2); assert.equal(r.d.failed, 0);
+  const sentMails = mails.slice(m0);
+  assert.deepEqual(sentMails.map(m => m.to[0]).sort(), ['direkt@test.de', 'wilma@test.de']);
+  const mw = sentMails.find(m => m.to[0] === 'wilma@test.de');
+  if (process.env.DUMP_MAIL) (await import('fs')).writeFileSync(process.env.DUMP_MAIL, mw.html);
+  assert.match(mw.subject, /Winterreifen/); assert.match(mw.html, /kundenapp\.html\?token=wf-tokwilma/); assert.match(mw.html, /wenig Profil/); assert.match(mw.html, /reifen-abmelden\?id=w1&amp;t=[a-f0-9]{32}/);
+  assert.doesNotMatch(sentMails.find(m => m.to[0] === 'direkt@test.de').html, /Termin online buchen/);
+  assert.match(db.TireSet.find(x => x.id === 'w1').last_reminder_key, /^winter-\d{4}$/);
+  // zweiter Lauf: niemand doppelt
+  r = await fnU('tireReminder', { action: 'send', season: 'winter', ids: ['w1', 'w3'] });
+  assert.equal(r.d.sent, 0);
+  r = await fnU('tireReminder', { action: 'preview', season: 'winter' });
+  assert.equal(r.d.items.find(i => i.id === 'w1').status, 'bereits_erinnert');
+  // Abmelden per Link
+  const link = mw.html.match(/https:\/\/api\.test(\/reifen-abmelden\?id=w1&amp;t=[a-f0-9]{32})/)[1].replace(/&amp;/g, '&');
+  let res = await worker.fetch(new Request('https://api.test' + link), env);
+  assert.equal(res.status, 200); assert.match(await res.text(), /Abgemeldet/); assert.equal(db.TireSet.find(x => x.id === 'w1').reminder_optout, true);
+  res = await worker.fetch(new Request('https://api.test/reifen-abmelden?id=w3&t=' + 'a'.repeat(32)), env);
+  assert.match(await res.text(), /ungültig/); assert.ok(!db.TireSet.find(x => x.id === 'w3').reminder_optout);
+  assert.equal((await fnU('tireReminder', { action: 'preview', season: 'herbst' })).s, 400);
+  assert.equal((await fnU('tireReminder', { action: 'preview', season: 'winter' }, null)).s, 401);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
