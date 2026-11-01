@@ -65,7 +65,7 @@ export function cleanItems(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.slice(0, 200).map(it => ({
     description: str(it && it.description, 500),
-    item_type: ['leistung', 'ersatzteil', 'material', 'sonstiges'].includes(it && it.item_type) ? it.item_type : 'leistung',
+    item_type: ['leistung', 'ersatzteil', 'reifen', 'material', 'sonstiges'].includes(it && it.item_type) ? it.item_type : 'leistung',
     quantity: r2(Number(it && it.quantity)),
     unit_price: r2(Number(it && it.unit_price)),
     service_id: it && it.service_id ? str(it.service_id, 64) : undefined,

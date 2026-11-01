@@ -19,7 +19,7 @@ const db = {
     { id: 'o2', workshop_code: 'AL-T2', customer_name: 'Fremd', license_plate: 'X', status: 'fahrzeug_angenommen', customer_token: 'tok-bbbbbb' },
   ],
   OrderTask: [{ id: 't1', order_id: 'o1', workshop_code: 'AL-T1', title: 'Öl', status: 'offen' }, { id: 't2', order_id: 'o2', workshop_code: 'AL-T2', title: 'X', status: 'offen' }],
-  WorkTime: [], Lift: [], Appointment: [], TireSet: [{ id: 'r1', workshop_code: 'AL-T1', customer_name: 'Kunde A', season: 'winter', tread_depth: 5 }],
+  WorkTime: [], Lift: [], Appointment: [], TireSet: [{ id: 'r1', workshop_code: 'AL-T1', customer_name: 'Kunde A', season: 'winter', tread_depth: 5, protocols: [{ type: 'einlagerung', signer: 'Kunde A', signature: 'data:image/png;base64,AAAA' }] }],
   WorkshopSession: [], InternalNote: [], WorkshopLog: [], ApprovalRequest: [{ id: 'a1', order_id: 'o1', status: 'ausstehend', title: 'Bremse', additional_cost: 120 }],
   MediaItem: [], Service: [{ id: 's1', name: 'Inspektion', is_active: true, workshop_code: 'AL-T1', estimated_duration_minutes: 60 }], InventoryItem: [],
 };
@@ -110,6 +110,13 @@ await t('Tablet-Daten nur eigene Werkstatt, ohne Token/PIN', async () => {
   assert.deepEqual(r.data.tasks.map(x => x.id), ['t1']);
   assert.equal(r.data.employees[0].pin, undefined); assert.equal(r.data.employees[0].pin_salt, undefined);
   assert.equal(r.data.workshop.name, 'Testwerkstatt'); assert.equal(r.data.tire_sets.length, 1);
+  // Unterschrift aus dem Übergabeprotokoll geht nicht ans Tablet
+  assert.equal(r.data.tire_sets[0].protocols[0].signature, undefined); assert.equal(r.data.tire_sets[0].protocols[0].signed, true);
+  assert.equal(db.TireSet[0].protocols[0].signature.startsWith('data:image/png'), true);
+});
+await t('Rechnungsposition Typ „Reifen“ bleibt erhalten', async () => {
+  const { cleanItems } = await import('../src/invoices.js');
+  assert.deepEqual(cleanItems([{ description: 'Reifen 205/55', item_type: 'reifen', quantity: 4, unit_price: 80 }, { description: 'x', item_type: 'quatsch', quantity: 1, unit_price: 1 }]).map(i => i.item_type), ['reifen', 'leistung']);
 });
 await t('Ohne/ungültiger Token → 401', async () => {
   assert.equal((await call('/getTabletData', null, null, 'GET')).status, 401);

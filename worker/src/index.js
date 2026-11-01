@@ -262,6 +262,10 @@ function stripEmployee(e) {
   const { pin, pin_salt, failed_attempts, locked_until, ...rest } = e;
   return rest;
 }
+function stripTireSet(t) {
+  if (!Array.isArray(t.protocols)) return t;
+  return { ...t, protocols: t.protocols.map(({ signature, ...p }) => ({ ...p, signed: !!signature })) };
+}
 async function getTabletData(db, sess) {
   const code = sess.workshop_code;
   const lists = await Promise.all(TABLET_ENTITIES.map(e => cachedList(db, e)));
@@ -287,7 +291,8 @@ async function getTabletData(db, sess) {
     parts: [],
     lifts: mine(by.Lift),
     appointments: mine(by.Appointment),
-    tire_sets: mine(by.TireSet),
+    // Unterschriften aus Übergabeprotokollen bleiben im Dashboard – das Tablet bekommt nur die Eckdaten
+    tire_sets: mine(by.TireSet).map(stripTireSet),
     // Fotos und Sprachberichte zu Aufgaben – damit sie nach Neuladen am Tablet wieder da sind
     task_media: media.filter(m => m.workshop_code === code && orderIds.has(m.order_id) && (m.media_type === 'foto' || !m.media_type))
       .slice(0, 2000).map(m => ({ id: m.id, order_id: m.order_id, task_id: m.task_id || null, caption: m.caption || '', file_url: m.file_url, created_date: m.created_date })),

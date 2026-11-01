@@ -1537,7 +1537,7 @@ function tsAll(){ return Array.isArray(state.tireSets) ? state.tireSets : []; }
 // Ausgelagerte Sätze (Räder sind am Auto) belegen keinen Platz mehr und zählen nicht zum Bestand
 const tsIsStored = t => ((t && t.status) || 'eingelagert') !== 'ausgelagert';
 function tsStored(){ return tsAll().filter(tsIsStored); }
-const TS_HISTORY = { einlagerung:'Eingelagert', auslagerung:'Ausgelagert', umlagerung:'Umgelagert', bearbeitung:'Bearbeitet' };
+const TS_HISTORY = { einlagerung:'Eingelagert', auslagerung:'Ausgelagert', umlagerung:'Umgelagert', bearbeitung:'Bearbeitet', gebuehr:'Lagergebühr berechnet', protokoll:'Protokoll erstellt' };
 function tsFiltered(){
   const q = (state.tireSearch||'').toLowerCase().replace(/[\s-]/g,'');
   return tsAll().filter(t=>{
