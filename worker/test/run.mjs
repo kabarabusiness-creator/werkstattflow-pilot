@@ -844,6 +844,62 @@ await t('Rechnungen GoBD: Server-Nummer, Archiv mit Prüfwert, Storno, Journal, 
   const log = (await fn('invoiceLog', {})).data.events.map(e => e.event);
   for (const ev of ['ausgestellt', 'storniert', 'zahlungsstatus', 'abgerufen']) assert.ok(log.includes(ev), ev);
 });
+await t('Eingangsbeleg per Foto: Werte normalisiert, Netto/MwSt nachgerechnet, nur Bilder, Rechte', async () => {
+  const fnU = (n, body, tok = 'USER-AL-T1-xxxxxxxxxxxxxxxx') => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => ({ s: r.status, d: await r.json() }));
+  let seen = null;
+  env.AI = { async run(m, input) { seen = input; return { response: 'Hier: {"lieferant":"Teilehandel Süd GmbH","belegnummer":"R-2026-4711","datum":"28.10.2026","faellig":"","brutto":"1.190,00 €","netto":"999","mwst":"","mwst_satz":"","beschreibung":"Bremsscheiben und Beläge","kategorie":"ersatzteile","iban":"DE02 1203 0000 0000 2020 51"}' }; } };
+  const img = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+  const r = await fnU('scanReceipt', { images: [img] });
+  assert.equal(r.s, 200, JSON.stringify(r.d));
+  const x = r.d.result;
+  assert.equal(x.supplier_name, 'Teilehandel Süd GmbH'); assert.equal(x.receipt_date, '2026-10-28'); assert.equal(x.gross, 1190);
+  assert.equal(x.vat_rate, 19); assert.equal(x.net, 1000); assert.equal(x.vat, 190); assert.equal(x.category, 'Ersatzteile'); assert.equal(x.iban, 'DE02120300000000202051');
+  assert.equal(seen.messages[0].content[1].type, 'image_url');
+  assert.equal((await fnU('scanReceipt', { images: ['data:application/pdf;base64,JVBERi0='] })).s, 400);
+  assert.equal((await fnU('scanReceipt', { images: [img] }, null)).s, 401);
+});
+await t('Abos: fällige Ausgaben werden als Beleg angelegt, Nachholen, keine Doppelung, Ende', async () => {
+  const fnU = (n, body, tok = 'USER-AL-T1-xxxxxxxxxxxxxxxx') => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => ({ s: r.status, d: await r.json() }));
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
+  const { addMonthsIso } = await import('../src/index.js');
+  assert.equal(addMonthsIso('2026-01-31', 1), '2026-02-28'); assert.equal(addMonthsIso('2026-11-15', 3), '2027-02-15');
+  const twoAgo = addMonthsIso(today, -2);
+  db.Subscription = [
+    { id: 'sub1', workshop_code: 'AL-T1', name: 'Werkstattmiete', amount_gross: 1190, vat_rate: 19, category: 'Miete', interval: 'monatlich', next_date: twoAgo, payment_method: 'ueberweisung', active: true },
+    { id: 'sub2', workshop_code: 'AL-T1', name: 'Software', amount_gross: 59.5, vat_rate: 19, category: 'Software/EDV', interval: 'jaehrlich', next_date: addMonthsIso(today, 1), active: true },
+    { id: 'sub3', workshop_code: 'AL-T2', name: 'Fremd', amount_gross: 10, interval: 'monatlich', next_date: twoAgo, active: true },
+  ];
+  db.ExpenseReceipt = [];
+  let r = await fnU('subscriptionsRun', {});
+  assert.equal(r.s, 200, JSON.stringify(r.d)); assert.equal(r.d.created, 3);
+  const mine = db.ExpenseReceipt.filter(e => e.subscription_id === 'sub1');
+  assert.deepEqual(mine.map(e => e.receipt_date).sort(), [twoAgo, addMonthsIso(today, -1), today].sort());
+  assert.equal(mine[0].account, '4210'); assert.equal(mine[0].net, 1000); assert.equal(mine[0].vat, 190); assert.equal(mine[0].payment_status, 'offen'); assert.equal(mine[0].kind, 'abo');
+  assert.equal(db.Subscription[0].next_date, addMonthsIso(today, 1)); assert.equal(db.ExpenseReceipt.filter(e => e.subscription_id === 'sub3').length, 0);
+  // nochmal → nichts Neues
+  r = await fnU('subscriptionsRun', {}); assert.equal(r.d.created, 0);
+  // Nachtlauf bucht auch fremde Werkstätten; Lastschrift = gleich bezahlt; Ende beendet das Abo
+  db.Subscription[2].payment_method = 'lastschrift'; db.Subscription[2].end_date = twoAgo;
+  await worker.scheduled({ cron: '30 1 * * *' }, env, ctx); await Promise.all(pending.splice(0));
+  const f = db.ExpenseReceipt.filter(e => e.subscription_id === 'sub3');
+  assert.equal(f.length, 1); assert.equal(f[0].payment_status, 'bezahlt'); assert.equal(db.Subscription[2].active, false);
+});
+await t('Belege: private Ablage mit Prüfwert, nur eigene Werkstatt, PDF erlaubt', async () => {
+  const fnU = (n, body, tok = 'USER-AL-T1-xxxxxxxxxxxxxxxx') => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => ({ s: r.status, d: await r.json() }));
+  const pdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 Beleg').toString('base64');
+  const up = await fnU('receiptUpload', { data_url: pdf, name: 'Rechnung Teilehandel.pdf' });
+  assert.equal(up.s, 200, JSON.stringify(up.d)); assert.match(up.d.file_url, /^kv:_rcpt\/AL-T1\/\d{4}-\d{2}\/[0-9a-f]{32}\.pdf$/); assert.equal(up.d.sha256.length, 64);
+  const got = await fnU('receiptFile', { file_url: up.d.file_url });
+  assert.equal(got.s, 200); assert.equal(Buffer.from(got.d.data_base64, 'base64').toString(), '%PDF-1.4 Beleg'); assert.equal(got.d.verified, true); assert.equal(got.d.content_type, 'application/pdf');
+  // fremde Werkstatt / ohne Login / Pfad-Tricks
+  assert.equal((await fnU('receiptFile', { file_url: up.d.file_url.replace('AL-T1', 'AL-T2') })).s, 403);
+  assert.equal((await fnU('receiptFile', { file_url: 'kv:_rcpt/AL-T1/../_inv/AL-T1/_index' })).s, 403);
+  assert.equal((await fnU('receiptFile', { file_url: up.d.file_url }, null)).s, 401);
+  assert.equal((await fnU('receiptUpload', { data_url: 'data:text/html;base64,PGgxPg==' })).s, 400);
+  // über die öffentliche Foto-Adresse nicht abrufbar
+  const pub = await worker.fetch(new Request('https://api.test/photo/' + up.d.file_url.slice(3)), env, ctx);
+  assert.notEqual(pub.status, 200);
+});
 await t('Mahnwesen: Zahlungserinnerung und Mahnungen mit PDF-Anhang, Stufen, Gebühren, Rechte', async () => {
   const fn = async (name, body, tok = 'USER-AL-T1-xxxxxxxxxxxxxxxx') => {
     const res = await worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx);

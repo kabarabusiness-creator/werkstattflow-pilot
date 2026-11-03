@@ -13,7 +13,7 @@
  */
 import { count as countUsage } from './usage.js';
 import { handleInvoice, INVOICE_FUNCTIONS } from './invoices.js';
-import { tireScanImages, registrationScan, capacityDays, alexDashboard } from './ai.js';
+import { tireScanImages, registrationScan, receiptScan, capacityDays, alexDashboard } from './ai.js';
 
 const TOKEN_TTL_MIN = 30;
 const SLOT_LABELS = { 1: 'Reifenflanke', 2: 'Lauffläche', 3: 'Felge' };
@@ -57,6 +57,7 @@ export function computeRecommendations({ orders, approvals, appointments, invent
   return recs.sort((a, b) => b.priority - a.priority || a.sort - b.sort).slice(0, 5).map(({ sort, ...r }) => (r.action ? r : { ...r, action: undefined }));
 }
 
+async function bytesHash(bytes) { const d = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join(''); }
 function b64(bytes) {
   let s = ''; const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
@@ -394,6 +395,63 @@ export async function handleFunction(name, body, c) {
     if (!images.length) throw new HttpError(400, 'upload_failed');
     const result = await registrationScan('u:' + user.id, images, env);
     if (tempKey) await env.PHOTOS.delete(tempKey).catch(() => {}); // Datenschutz: Foto sofort löschen
+    return { ok: true, result };
+  }
+
+  // Belege (Eingangsrechnungen, Quittungen) privat ablegen: nur die eigene Werkstatt kann sie abrufen, nie überschrieben
+  if (name === 'receiptUpload') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    needKv();
+    rateLimit('rcptup:' + user.id, 200, 3600_000);
+    const m = /^data:(image\/(?:jpeg|png|webp)|application\/pdf);base64,([A-Za-z0-9+/=\s]+)$/.exec(String(body.data_url || ''));
+    if (!m) throw new HttpError(400, 'invalid_file', { message: 'Bitte ein Foto (JPG, PNG) oder eine PDF-Datei hochladen.' });
+    const bin = atob(m[2].replace(/\s+/g, ''));
+    if (bin.length > 15 * 1024 * 1024) throw new HttpError(413, 'too_large', { message: 'Datei ist zu groß (max. 15 MB).' });
+    const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' }[m[1]];
+    const key = `_rcpt/${code}/${new Date().toISOString().slice(0, 7)}/${h.randomHex(16)}.${ext}`;
+    const hash = await bytesHash(bytes);
+    const name = String(body.name || '').replace(/[^\w.\- äöüÄÖÜß()]/g, '').slice(0, 100);
+    await env.PHOTOS.put(key, bytes, { metadata: { contentType: m[1], name, sha256: hash, uploaded_at: new Date().toISOString(), by: user.email || user.id } });
+    countUsage('photos', 1, code);
+    return { ok: true, file_url: 'kv:' + key, file_name: name, content_type: m[1], size: bytes.length, sha256: hash };
+  }
+  if (name === 'receiptFile') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    needKv();
+    const key = String(body.file_url || '').replace(/^kv:/, '');
+    if (!key.startsWith(`_rcpt/${code}/`) || key.includes('..')) throw new HttpError(403, 'forbidden');
+    const obj = await env.PHOTOS.getWithMetadata(key, { type: 'arrayBuffer' });
+    if (!obj || !obj.value) throw new HttpError(404, 'not_found', { message: 'Beleg-Datei nicht gefunden.' });
+    const bytes = new Uint8Array(obj.value);
+    const md = obj.metadata || {};
+    return { ok: true, content_type: md.contentType || 'application/octet-stream', file_name: md.name || key.split('/').pop(), data_base64: b64(bytes), verified: !md.sha256 || md.sha256 === await bytesHash(bytes) };
+  }
+
+  // Fällige Abos der eigenen Werkstatt sofort buchen (sonst jede Nacht automatisch)
+  if (name === 'subscriptionsRun') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    rateLimit('subs:' + user.id, 30, 3600_000);
+    return { ok: true, ...(await h.runSubscriptions(code)) };
+  }
+
+  // Eingangsbeleg per Foto auslesen (Buchhaltung → Eingang). Das Foto wird hier nicht gespeichert.
+  if (name === 'scanReceipt') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    await h.gate(code);
+    const images = (Array.isArray(body.images) ? body.images : []).slice(0, 2);
+    images.forEach(d => { const x = decodeDataUrl(d); if (!/^image\//.test(x.contentType || x.type || '')) throw new HttpError(400, 'image_only', { message: 'Bitte ein Foto (JPG/PNG) verwenden. PDFs bitte von Hand erfassen.' }); });
+    if (!images.length) throw new HttpError(400, 'upload_failed');
+    const result = await receiptScan('u:' + user.id, images, env);
+    countUsage('scans', 1, code);
     return { ok: true, result };
   }
 

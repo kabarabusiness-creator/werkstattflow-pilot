@@ -381,6 +381,41 @@ export async function registrationScan(key, images, env) {
   return normalizeRegistration(parsed);
 }
 
+/* ---------- Eingangsbeleg (Rechnung, Quittung) ---------- */
+export const RECEIPT_CATEGORIES = ['Ersatzteile', 'Reifen', 'Öl und Betriebsstoffe', 'Werkzeug', 'Fremdleistung', 'Miete', 'Strom/Gas/Wasser', 'Versicherung', 'Fahrzeugkosten', 'Werbung', 'Telefon/Internet', 'Software/EDV', 'Bürobedarf', 'Entsorgung', 'Reparatur/Instandhaltung', 'Porto/Versand', 'Bewirtung', 'Reisekosten', 'Fortbildung', 'Beiträge/Gebühren', 'Leasing', 'Sonstiges'];
+const RECEIPT_PROMPT = `Du liest ein Foto einer deutschen Eingangsrechnung oder Quittung einer Kfz-Werkstatt.
+Lies nur ab, was wirklich erkennbar ist. Erfinde nichts. Nicht lesbar = "".
+Felder: lieferant (Firmenname des Ausstellers), belegnummer (Rechnungs- oder Belegnummer), datum (Rechnungsdatum, YYYY-MM-DD),
+faellig (Zahlungsziel/fällig am, YYYY-MM-DD, nur falls angegeben), brutto (Gesamtbetrag inkl. MwSt als Zahl), netto (Zahl), mwst (MwSt-Betrag als Zahl),
+mwst_satz (19, 7 oder 0), beschreibung (kurz, was gekauft wurde, max. 80 Zeichen), kategorie (genau eine aus: ${RECEIPT_CATEGORIES.join(', ')}),
+iban (IBAN des Lieferanten, nur falls aufgedruckt).
+Antworte NUR mit JSON: {"lieferant":"","belegnummer":"","datum":"","faellig":"","brutto":0,"netto":0,"mwst":0,"mwst_satz":19,"beschreibung":"","kategorie":"","iban":""}`;
+const num2 = v => { if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v * 100) / 100 : null; let t = String(v || '').replace(/[^\d.,-]/g, ''); if (!t) return null; if (t.includes(',') && t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/,/g, ''); const n = Number(t); return Number.isFinite(n) ? Math.round(n * 100) / 100 : null; };
+const isoDay = v => { const s = String(v || '').trim(); let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`; m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/); if (m) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; } return ''; };
+export function normalizeReceipt(raw) {
+  const r = raw || {};
+  let gross = num2(r.brutto), net = num2(r.netto), vat = num2(r.mwst);
+  let rate = r.mwst_satz !== '' && r.mwst_satz != null && [19, 7, 0].includes(Number(String(r.mwst_satz).replace('%', ''))) ? Number(String(r.mwst_satz).replace('%', '')) : null;
+  if (gross != null && gross < 0) gross = null;
+  if (rate == null && gross && net) { const q = gross / net - 1; rate = Math.abs(q - 0.19) < 0.01 ? 19 : Math.abs(q - 0.07) < 0.01 ? 7 : Math.abs(q) < 0.005 ? 0 : 19; }
+  if (rate == null) rate = 19;
+  if (gross == null && net != null) gross = Math.round(net * (1 + rate / 100) * 100) / 100;
+  if (gross != null && (net == null || Math.abs(net * (1 + rate / 100) - gross) > 0.05)) net = Math.round(gross / (1 + rate / 100) * 100) / 100;
+  if (gross != null && net != null) vat = Math.round((gross - net) * 100) / 100;
+  const cat = RECEIPT_CATEGORIES.find(c => c.toLowerCase() === String(r.kategorie || '').toLowerCase()) || '';
+  const iban = String(r.iban || '').toUpperCase().replace(/\s+/g, '');
+  return {
+    supplier_name: String(r.lieferant || '').trim().slice(0, 120), receipt_number: String(r.belegnummer || '').trim().slice(0, 60),
+    receipt_date: isoDay(r.datum), due_date: isoDay(r.faellig), gross, net, vat, vat_rate: rate,
+    description: String(r.beschreibung || '').trim().slice(0, 120), category: cat, iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban) ? iban : '',
+  };
+}
+export async function receiptScan(key, images, env) {
+  limitPerHour('rcpt:' + key, SCAN_PER_HOUR);
+  if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
+  return normalizeReceipt(await visionJson(env, RECEIPT_PROMPT, images.slice(0, 2), 700));
+}
+
 export async function tireScanImages(key, images, env) {
   limitPerHour('scan:' + key, SCAN_PER_HOUR);
   if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');

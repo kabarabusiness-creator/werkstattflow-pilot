@@ -1366,6 +1366,47 @@ async function readMonitor(env) {
 }
 async function writeMonitor(env, st) { try { await env.PHOTOS.put(MONITOR_KEY, JSON.stringify(st)); } catch (e) { console.log('monitor_write', String(e)); } }
 
+/* ---- Buchhaltung: Abos (wiederkehrende Ausgaben) zum Fälligkeitstag als Eingangsbeleg anlegen ---- */
+export const EXPENSE_ACCOUNTS = { 'Ersatzteile': '3400', 'Reifen': '3400', 'Öl und Betriebsstoffe': '3400', 'Werkzeug': '4985', 'Fremdleistung': '3100', 'Miete': '4210', 'Strom/Gas/Wasser': '4240', 'Versicherung': '4360', 'Fahrzeugkosten': '4530', 'Werbung': '4600', 'Telefon/Internet': '4920', 'Software/EDV': '4806', 'Bürobedarf': '4930', 'Entsorgung': '4969', 'Reparatur/Instandhaltung': '4805', 'Porto/Versand': '4910', 'Bewirtung': '4650', 'Reisekosten': '4670', 'Fortbildung': '4945', 'Beiträge/Gebühren': '4380', 'Leasing': '4570', 'Sonstiges': '4900' };
+const SUB_MONTHS = { monatlich: 1, quartalsweise: 3, halbjaehrlich: 6, jaehrlich: 12 };
+export function addMonthsIso(iso, n) {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), Math.min(d, last))).toISOString().slice(0, 10);
+}
+async function runSubscriptions(db, onlyCode) {
+  const today = berlinToday();
+  const subs = (await db.list('Subscription', onlyCode ? { workshop_code: onlyCode } : {}, { limit: 2000 }).catch(() => []))
+    .filter(x => x.active !== false && x.workshop_code && x.next_date && String(x.next_date) <= today && SUB_MONTHS[x.interval || 'monatlich']);
+  let created = 0;
+  for (const sub of subs) {
+    let next = String(sub.next_date).slice(0, 10); let last = sub.last_created || null; let guard = 0;
+    const existing = await db.list('ExpenseReceipt', { subscription_id: sub.id }, { limit: 500 }).catch(() => []);
+    const have = new Set(existing.map(e => String(e.receipt_date).slice(0, 10)));
+    while (next <= today && guard++ < 24) {
+      if (sub.end_date && next > String(sub.end_date).slice(0, 10)) break;
+      if (!have.has(next)) {
+        const rate = [19, 7, 0].includes(Number(sub.vat_rate)) ? Number(sub.vat_rate) : 19;
+        const gross = Math.round(Number(sub.amount_gross) * 100) / 100;
+        const net = Math.round(gross / (1 + rate / 100) * 100) / 100;
+        const autoPaid = ['lastschrift', 'karte'].includes(sub.payment_method || 'lastschrift');
+        await db.create('ExpenseReceipt', {
+          kind: 'abo', status: 'geprueft', supplier_id: sub.supplier_id || undefined, supplier_name: sub.supplier_name || '', receipt_date: next, due_date: next,
+          description: sub.name, category: sub.category || '', account: sub.account || EXPENSE_ACCOUNTS[sub.category] || '4900',
+          gross, net, vat_rate: rate, vat: Math.round((gross - net) * 100) / 100, payment_method: sub.payment_method || 'lastschrift',
+          payment_status: autoPaid ? 'bezahlt' : 'offen', ...(autoPaid ? { paid_date: next } : {}), subscription_id: sub.id, note: 'Automatisch aus Abo angelegt', workshop_code: sub.workshop_code,
+        });
+        created++;
+      }
+      last = next; next = addMonthsIso(next, SUB_MONTHS[sub.interval || 'monatlich']);
+    }
+    await db.update('Subscription', sub.id, { next_date: next, last_created: last, ...(sub.end_date && next > String(sub.end_date).slice(0, 10) ? { active: false } : {}) });
+  }
+  if (created) invalidate('ExpenseReceipt');
+  return { checked: subs.length, created };
+}
+
 async function runBackup(env) {
   if (!env.PHOTOS) throw new Error('kein Speicher');
   const db = new Base44(env);
@@ -1461,6 +1502,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (event.cron === '30 1 * * *') {
       // Rechnungsarchiv: fehlende Belege in das gesperrte Zweitarchiv (R2) nachtragen
+      ctx.waitUntil(runSubscriptions(new Base44(env)).then(r => console.log('subscriptions', JSON.stringify(r))).catch(e => console.log('subscriptions_failed', String(e))));
       ctx.waitUntil(syncInvoiceMirror(env).then(r => console.log('invoice_mirror', JSON.stringify(r))).catch(e => console.log('invoice_mirror_failed', String(e))));
       ctx.waitUntil(runBackup(env).catch(async e => {
         console.log('backup_failed', String(e));
@@ -1550,7 +1592,7 @@ async function handleFetch(request, env, ctx) {
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia, tireReminder: (code, b) => tireReminder(db, env, code, b, url.origin), sendMail: o => sendMail(env, db, o), mailHtml, contactFooter, workshopInfo: c => workshopInfo(db, c) }, ctx });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia, tireReminder: (code, b) => tireReminder(db, env, code, b, url.origin), runSubscriptions: code => runSubscriptions(db, code), sendMail: o => sendMail(env, db, o), mailHtml, contactFooter, workshopInfo: c => workshopInfo(db, c) }, ctx });
         invalidate('Order');
         if (r instanceof Response) { const hd = new Headers(r.headers); for (const [k, v] of Object.entries(cors)) hd.set(k, v); hd.set('Access-Control-Expose-Headers', 'Content-Disposition'); return new Response(r.body, { status: r.status, headers: hd }); }
         return json(r, 200, cors);
