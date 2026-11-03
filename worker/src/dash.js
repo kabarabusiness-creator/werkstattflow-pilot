@@ -128,7 +128,7 @@ export async function handleFunction(name, body, c) {
   if (INVOICE_FUNCTIONS.has(name)) {
     const user = await authUser();
     rateLimit('inv:' + user.id, 300, 3600_000);
-    return handleInvoice(name, body, { db, env, user, HttpError });
+    return handleInvoice(name, body, { db, env, user, HttpError, sendMail: h.sendMail, mailHtml: h.mailHtml, contactFooter: h.contactFooter, workshopInfo: h.workshopInfo });
   }
 
   /* ---- Mit Login ---- */

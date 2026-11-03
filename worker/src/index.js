@@ -1085,14 +1085,14 @@ async function workshopInfo(db, code) {
 function contactFooter(ws) {
   return `${esc(ws.name)}${ws.address ? ' · ' + esc(ws.address) : ''}${ws.phone ? '<br>Telefon: ' + esc(ws.phone) : ''}${ws.email ? ' · ' + esc(ws.email) : ''}`;
 }
-async function sendMail(env, db, { to, subject, html, replyTo, orderId, code, statusText }) {
+async function sendMail(env, db, { to, subject, html, replyTo, orderId, code, statusText, attachments }) {
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to || ''));
   if (!env.RESEND_API_KEY || !valid) return { sent: false, reason: !env.RESEND_API_KEY ? 'not_configured' : 'no_email' };
   let state = 'gesendet', reason = null;
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST', headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: env.MAIL_FROM || 'AutoLeitwerk <noreply@autoleitwerk.de>', to: [to], subject, html, reply_to: replyTo || undefined }),
+      body: JSON.stringify({ from: env.MAIL_FROM || 'AutoLeitwerk <noreply@autoleitwerk.de>', to: [to], subject, html, reply_to: replyTo || undefined, ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}) }),
     });
     if (!res.ok) { state = 'fehlgeschlagen'; reason = `${res.status} ${(await res.text()).slice(0, 200)}`; console.log('mail_error', reason); }
   } catch (e) { state = 'fehlgeschlagen'; reason = String(e); }
@@ -1550,7 +1550,7 @@ async function handleFetch(request, env, ctx) {
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia, tireReminder: (code, b) => tireReminder(db, env, code, b, url.origin) }, ctx });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia, tireReminder: (code, b) => tireReminder(db, env, code, b, url.origin), sendMail: o => sendMail(env, db, o), mailHtml, contactFooter, workshopInfo: c => workshopInfo(db, c) }, ctx });
         invalidate('Order');
         if (r instanceof Response) { const hd = new Headers(r.headers); for (const [k, v] of Object.entries(cors)) hd.set(k, v); hd.set('Access-Control-Expose-Headers', 'Content-Disposition'); return new Response(r.body, { status: r.status, headers: hd }); }
         return json(r, 200, cors);

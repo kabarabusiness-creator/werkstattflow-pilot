@@ -844,6 +844,60 @@ await t('Rechnungen GoBD: Server-Nummer, Archiv mit Prüfwert, Storno, Journal, 
   const log = (await fn('invoiceLog', {})).data.events.map(e => e.event);
   for (const ev of ['ausgestellt', 'storniert', 'zahlungsstatus', 'abgerufen']) assert.ok(log.includes(ev), ev);
 });
+await t('Mahnwesen: Zahlungserinnerung und Mahnungen mit PDF-Anhang, Stufen, Gebühren, Rechte', async () => {
+  const fn = async (name, body, tok = 'USER-AL-T1-xxxxxxxxxxxxxxxx') => {
+    const res = await worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx);
+    await Promise.all(pending.splice(0));
+    return { status: res.status, data: await res.json().catch(() => ({})) };
+  };
+  db.Order.push({ id: 'o25', order_number: '2005', email: 'kunde5@example.com', workshop_code: 'AL-T1', customer_name: 'Kunde Fünf', license_plate: 'MIL-K 5', vehicle_brand: 'BMW', vehicle_model: '320d', status: 'abgeschlossen' },
+    { id: 'o26', order_number: '2006', workshop_code: 'AL-T1', customer_name: 'Ohne Mail', license_plate: 'MIL-K 6', vehicle_brand: 'VW', vehicle_model: 'Golf', status: 'abgeschlossen' });
+  db.WorkshopProfile[0].dunning_fee_2 = 7.5;
+  let r = await fn('invoiceIssue', { order_id: 'o25', items: [{ description: 'Bremsen vorne', quantity: 1, unit_price: 100 }], due_days: 14 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const num = r.data.invoice.number;
+  // noch nicht fällig
+  r = await fn('invoiceDunning', { order_id: 'o25', level: 1 });
+  assert.equal(r.status, 400); assert.equal(r.data.error, 'not_due');
+  // Fälligkeit in die Vergangenheit setzen
+  const ik = '_inv/AL-T1/_index'; const ix = JSON.parse(new TextDecoder().decode(kv.get(ik).v));
+  ix.find(e => e.number === num).due_date = '2026-01-15'; kv.set(ik, { v: new TextEncoder().encode(JSON.stringify(ix)), m: kv.get(ik).m });
+  const m0 = mails.length;
+  r = await fn('invoiceDunning', { order_id: 'o25', level: 1 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.dunning.level, 1); assert.equal(r.data.dunning.fee, 0); assert.equal(r.data.dunning.mailed_to, 'kunde5@example.com');
+  const mail = mails[m0]; assert.ok(mail, 'Mail fehlt');
+  assert.match(mail.subject, new RegExp('^Zahlungserinnerung zu Rechnung ' + num)); assert.deepEqual(mail.to, ['kunde5@example.com']);
+  assert.equal(mail.attachments.length, 1); assert.equal(mail.attachments[0].filename, `Rechnung_${num}.pdf`);
+  assert.equal(Buffer.from(mail.attachments[0].content, 'base64').slice(0, 5).toString(), '%PDF-');
+  assert.match(mail.html, /DE02 1203 0000 0000 2020 51/); assert.match(mail.html, /119,00/);
+  // gleiche Stufe nicht zweimal
+  assert.equal((await fn('invoiceDunning', { order_id: 'o25', level: 1 })).status, 409);
+  // 1. Mahnung mit Gebühr aus den Firmendaten, Summe offen = Rechnung + Gebühren
+  r = await fn('invoiceDunning', { order_id: 'o25', level: 2 });
+  assert.equal(r.status, 200); assert.equal(r.data.dunning.fee, 7.5); assert.equal(r.data.dunning.fees_total, 7.5);
+  assert.match(mails.at(-1).subject, /^1\. Mahnung/); assert.match(mails.at(-1).html, /126,50/);
+  // 2. Mahnung als Brief (ohne Mail), Gebühr manuell
+  const m1 = mails.length;
+  r = await fn('invoiceDunning', { order_id: 'o25', level: 3, send_mail: false, fee: 10 });
+  assert.equal(r.status, 200); assert.equal(r.data.dunning.fees_total, 17.5); assert.equal(r.data.dunning.mailed_to, null); assert.equal(mails.length, m1);
+  const j = await fn('invoiceJournal', {});
+  const e = j.data.entries.find(x => x.number === num);
+  assert.equal(e.dunning.length, 3); assert.equal(e.dunning_level, 3); assert.equal(e.payment_status, 'ueberfaellig');
+  assert.equal(db.Order.find(o => o.id === 'o25').payment_status, 'ueberfaellig');
+  const log = await fn('invoiceLog', { number: num });
+  assert.equal(log.data.events.filter(ev => ev.event === 'mahnung').length, 3);
+  // ohne E-Mail-Adresse → Hinweis auf Brief
+  r = await fn('invoiceIssue', { order_id: 'o26', items: [{ description: 'Öl', quantity: 1, unit_price: 50 }] });
+  const ix2 = JSON.parse(new TextDecoder().decode(kv.get(ik).v)); ix2.find(x => x.number === r.data.invoice.number).due_date = '2026-01-01'; kv.set(ik, { v: new TextEncoder().encode(JSON.stringify(ix2)), m: kv.get(ik).m });
+  r = await fn('invoiceDunning', { order_id: 'o26', level: 1 });
+  assert.equal(r.status, 400); assert.equal(r.data.error, 'no_email');
+  // bezahlt → keine Mahnung
+  await fn('invoiceSetPayment', { order_id: 'o26', payment_status: 'bezahlt' });
+  assert.equal((await fn('invoiceDunning', { order_id: 'o26', level: 1, send_mail: false })).status, 409);
+  // fremde Werkstatt
+  assert.equal((await fn('invoiceDunning', { order_id: 'o2', level: 1 })).status, 403);
+});
 await t('Berichtsheft-Vorschlag: nur eigene Tätigkeiten des Tages, ohne Kundendaten, Fallback ohne KI', async () => {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
   const now = new Date().toISOString();

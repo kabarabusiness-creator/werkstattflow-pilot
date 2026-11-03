@@ -331,6 +331,31 @@ const indexEntry = (r, extra) => ({
   issued_at: r.issued_at, issued_by: r.issued_by && r.issued_by.name, kleinunternehmer: r.kleinunternehmer, legacy: !!r.legacy, sha_record: r.sha_record, ...extra,
 });
 
+/* ---------- Mahnwesen ---------- */
+export const DUNNING_LABEL = { 1: 'Zahlungserinnerung', 2: '1. Mahnung', 3: '2. Mahnung' };
+const DUNNING_FEES = { 1: 0, 2: 5, 3: 10 };
+const eurC = n => eur(n) + ' €';
+const escH = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+export function dunningMail({ level, entry, rec, profile, ws, customer }) {
+  const total = r2(Number(entry.gross) + Number(rec.fees_total || 0));
+  const intro = {
+    1: `sicher ist es Ihrer Aufmerksamkeit entgangen: Für unsere Rechnung <b>${escH(entry.number)}</b> vom ${deDate(entry.invoice_date)} konnten wir noch keinen Zahlungseingang feststellen. Bitte überweisen Sie den offenen Betrag bis zum <b>${deDate(rec.due)}</b>. Falls Sie inzwischen bezahlt haben, betrachten Sie diese Nachricht bitte als gegenstandslos.`,
+    2: `leider ist für unsere Rechnung <b>${escH(entry.number)}</b> vom ${deDate(entry.invoice_date)} trotz Zahlungserinnerung noch kein Zahlungseingang zu verzeichnen. Bitte überweisen Sie den offenen Betrag${rec.fees_total ? ' einschließlich Mahngebühr' : ''} bis zum <b>${deDate(rec.due)}</b>.`,
+    3: `für unsere Rechnung <b>${escH(entry.number)}</b> vom ${deDate(entry.invoice_date)} ist trotz Erinnerung und Mahnung noch kein Zahlungseingang zu verzeichnen. Wir bitten Sie letztmalig, den offenen Betrag bis zum <b>${deDate(rec.due)}</b> zu überweisen. Danach behalten wir uns weitere Schritte vor.`,
+  }[level];
+  const rows = [['Rechnung', entry.number], ['Rechnungsdatum', deDate(entry.invoice_date)], ['Fällig seit', (deDate(entry.due_date) || '–')], ['Rechnungsbetrag', eurC(entry.gross)]];
+  if (rec.fees_total) rows.push(['Mahngebühren', eurC(rec.fees_total)]);
+  rows.push(['Offener Betrag', eurC(total)], ['Zahlbar bis', deDate(rec.due)]);
+  if (profile.bank_iban) rows.push(['IBAN', profile.bank_iban + (profile.bank_bic ? ' · BIC ' + profile.bank_bic : '')]);
+  rows.push(['Verwendungszweck', entry.number]);
+  return {
+    subject: `${DUNNING_LABEL[level]} zu Rechnung ${entry.number} – ${ws.name || profile.company_name || ''}`.trim(),
+    title: `Guten Tag ${customer || ''},`.replace(/\s+,$/, ','),
+    intro: intro + '<br><br>Die Rechnung finden Sie noch einmal im Anhang.',
+    rows,
+  };
+}
+
 /* ---------- Funktionen für das Dashboard ---------- */
 export async function handleInvoice(name, body, c) {
   const { db, env, user, HttpError } = c;
@@ -497,6 +522,50 @@ export async function handleInvoice(name, body, c) {
     });
   }
 
+  /* Mahnwesen: Zahlungserinnerung (1), 1. Mahnung (2), 2. Mahnung (3) – wird am Archiveintrag festgehalten */
+  if (name === 'invoiceDunning') {
+    const { order, code } = await orderFor(body.order_id);
+    const level = Number(body.level);
+    if (![1, 2, 3].includes(level)) throw new HttpError(400, 'params');
+    const send = body.send_mail !== false;
+    return withLock(code, async () => {
+      const index = await readIndex(env, code);
+      const e = index.find(x => x.order_id === order.id && x.type === 'rechnung' && x.status === 'gueltig');
+      if (!e) throw new HttpError(404, 'not_archived', { message: 'Zu diesem Auftrag gibt es keine gültige, festgeschriebene Rechnung.' });
+      if (['bezahlt', 'erstattet'].includes(e.payment_status)) throw new HttpError(409, 'already_paid', { message: `Rechnung ${e.number} ist bereits als bezahlt markiert.` });
+      const today = berlinDay();
+      if (e.due_date && e.due_date >= today) throw new HttpError(400, 'not_due', { message: `Rechnung ${e.number} ist erst am ${e.due_date.split('-').reverse().join('.')} fällig.` });
+      const prev = Array.isArray(e.dunning) ? e.dunning : [];
+      if (prev.some(d => d.level >= level)) throw new HttpError(409, 'level_done', { message: `${DUNNING_LABEL[level]} wurde für ${e.number} schon verschickt.` });
+      const profile = await profileFor(code);
+      const feeRaw = body.fee != null && body.fee !== '' ? body.fee : (profile[`dunning_fee_${level}`] != null ? profile[`dunning_fee_${level}`] : DUNNING_FEES[level]);
+      const fee = r2(Math.max(0, Math.min(100, Number(feeRaw) || 0)));
+      const dueDays = Math.max(1, Math.min(60, Number(profile.dunning_due_days) || 7));
+      const rec = { level, date: today, at: new Date().toISOString(), fee, fees_total: r2(prev.reduce((s, d) => s + (Number(d.fee) || 0), 0) + fee), due: addDays(today, dueDays), by: who.name, mailed_to: null };
+      let mail = null;
+      if (send) {
+        const to = str(order.email, 200);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new HttpError(400, 'no_email', { message: 'Für diesen Kunden ist keine E-Mail-Adresse hinterlegt. Bitte als Brief drucken.' });
+        if (!c.sendMail || !env.RESEND_API_KEY) throw new HttpError(503, 'mail_unavailable', { message: 'Der E-Mail-Versand ist nicht eingerichtet. Bitte als Brief drucken.' });
+        const pdf = await env.PHOTOS.get(docKey(code, e.number, 'pdf'), { type: 'arrayBuffer' });
+        const ws = c.workshopInfo ? await c.workshopInfo(code) : { name: profile.company_name || '' };
+        const m = dunningMail({ level, entry: e, rec, profile, ws, customer: order.customer_name });
+        mail = await c.sendMail({ to, subject: m.subject, html: c.mailHtml({ title: m.title, intro: m.intro, rows: m.rows, footer: c.contactFooter ? c.contactFooter(ws) : '' }),
+          replyTo: ws.email || undefined, orderId: order.id, code, statusText: DUNNING_LABEL[level],
+          attachments: pdf ? [{ filename: `Rechnung_${e.number}.pdf`, content: b64(new Uint8Array(pdf)) }] : undefined });
+        if (!mail.sent) throw new HttpError(502, 'mail_failed', { message: 'Die E-Mail konnte nicht verschickt werden. Bitte später erneut versuchen oder als Brief drucken.' });
+        rec.mailed_to = to;
+      }
+      e.dunning = [...prev, rec];
+      e.dunning_level = level;
+      e.payment_status = 'ueberfaellig';
+      await writeIndex(env, code, index);
+      await db.update('Order', order.id, { payment_status: 'ueberfaellig' }).catch(() => {});
+      await logEvent(env, code, 'mahnung', who, { number: e.number, order_id: order.id, level, fee, mailed: !!rec.mailed_to });
+      return { ok: true, dunning: rec, entry: e };
+    });
+  }
+
   /* Rechnungsausgangsbuch (Journal) */
   if (name === 'invoiceJournal') {
     const code = await codeFor(body.workshop_code);
@@ -574,4 +643,4 @@ export async function handleInvoice(name, body, c) {
   throw new HttpError(404, 'unknown_function');
 }
 
-export const INVOICE_FUNCTIONS = new Set(['invoiceExport', 'invoiceIssue', 'invoiceCancel', 'invoiceSetPayment', 'invoiceJournal', 'invoiceLog', 'invoiceDocument']);
+export const INVOICE_FUNCTIONS = new Set(['invoiceExport', 'invoiceIssue', 'invoiceCancel', 'invoiceSetPayment', 'invoiceJournal', 'invoiceLog', 'invoiceDocument', 'invoiceDunning']);
