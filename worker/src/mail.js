@@ -625,8 +625,8 @@ export async function handleMail(name, body, c) {
   const ws = (await db.list('Workshop', { code }, { limit: 1 }).catch(() => []))[0] || null;
   const raw = await env.PHOTOS.get(cfgKey(code), { type: 'json' }).catch(() => null);
   const cfg = raw && raw.v ? raw : null;
-  const canManage = user.role === 'admin' || !ws || !ws.owner_user_id || ws.owner_user_id === user.id || (cfg && cfg.owner_user_id === user.id);
-  const canUse = cfg && (!cfg.private || cfg.owner_user_id === user.id || user.role === 'admin');
+  const canManage = !!(user.role === 'admin' || !ws || !ws.owner_user_id || ws.owner_user_id === user.id || (cfg && cfg.owner_user_id === user.id));
+  const canUse = !!cfg && (!cfg.private || cfg.owner_user_id === user.id || user.role === 'admin');
   const fail = e => {
     if (e instanceof MailError) {
       const status = { auth: 401, params: 400, too_large: 413, config: 503 }[e.kind] || 502;
