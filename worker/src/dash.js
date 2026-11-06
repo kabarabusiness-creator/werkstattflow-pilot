@@ -34,27 +34,27 @@ export function computeRecommendations({ orders, approvals, appointments, invent
   const open = orders.filter(o => !OPEN_DONE.includes(o.status));
   for (const o of open) {
     const due = o.planned_completion ? new Date(o.planned_completion).getTime() : null;
-    if (due && due < now) recs.push({ priority: 3, sort: due, title: `Überfällig: ${ref(o)}`, detail: `Fertig geplant ${fmtDT(o.planned_completion)} · Kunde ${o.customer_name || '–'} informieren`, action: { kind: 'open_order', order_id: o.id } });
-    else if (o.priority === 'eilig') recs.push({ priority: 3, sort: due || now, title: `Eilig: ${ref(o)}`, detail: `${o.description || 'Eilauftrag'}${o.assigned_mechanic ? ' · ' + o.assigned_mechanic : ' · noch niemand zugewiesen'}`, action: { kind: 'open_order', order_id: o.id } });
-    else if (o.planned_completion && String(o.planned_completion).slice(0, 10) === today) recs.push({ priority: 2, sort: due, title: `Heute fertig: ${ref(o)}`, detail: `bis ${fmtDT(o.planned_completion).split(' ')[1] || ''} Uhr · ${o.assigned_mechanic || 'kein Mechaniker zugewiesen'}`, action: { kind: 'open_order', order_id: o.id } });
-    if (o.next_hu && o.next_hu >= today && o.next_hu <= in30) recs.push({ priority: 1, sort: now, title: `HU fällig: ${ref(o)}`, detail: `Nächste HU am ${fmtD(o.next_hu)} – gleich mit anbieten`, action: { kind: 'open_order', order_id: o.id } });
+    if (due && due < now) recs.push({ type: 'overdue', priority: 3, sort: due, title: `Überfällig: ${ref(o)}`, detail: `Fertig geplant ${fmtDT(o.planned_completion)} · Kunde ${o.customer_name || '–'} informieren`, action: { kind: 'open_order', order_id: o.id } });
+    else if (o.priority === 'eilig') recs.push({ type: 'urgent', priority: 3, sort: due || now, title: `Eilig: ${ref(o)}`, detail: `${o.description || 'Eilauftrag'}${o.assigned_mechanic ? ' · ' + o.assigned_mechanic : ' · noch niemand zugewiesen'}`, action: { kind: 'open_order', order_id: o.id } });
+    else if (o.planned_completion && String(o.planned_completion).slice(0, 10) === today) recs.push({ type: 'due_today', priority: 2, sort: due, title: `Heute fertig: ${ref(o)}`, detail: `bis ${fmtDT(o.planned_completion).split(' ')[1] || ''} Uhr · ${o.assigned_mechanic || 'kein Mechaniker zugewiesen'}`, action: { kind: 'open_order', order_id: o.id } });
+    if (o.next_hu && o.next_hu >= today && o.next_hu <= in30) recs.push({ type: 'hu_due', priority: 1, sort: now, title: `HU fällig: ${ref(o)}`, detail: `Nächste HU am ${fmtD(o.next_hu)} – gleich mit anbieten`, action: { kind: 'open_order', order_id: o.id } });
   }
   const orderById = Object.fromEntries(orders.map(o => [o.id, o]));
   for (const a of approvals.filter(a => a.status === 'ausstehend')) {
     const o = orderById[a.order_id];
-    recs.push({ priority: 3, sort: now - 1, title: `Freigabe offen: ${a.title || 'Zusatzarbeit'} (${euro(a.additional_cost)})`, detail: `${a.customer_name || (o && o.customer_name) || 'Kunde'} · ${[a.vehicle_brand, a.license_plate].filter(Boolean).join(' ') || (o ? ref(o) : '')} – nachfassen`, action: o ? { kind: 'open_order', order_id: o.id } : null });
+    recs.push({ type: 'stuck_approval', priority: 3, sort: now - 1, title: `Freigabe offen: ${a.title || 'Zusatzarbeit'} (${euro(a.additional_cost)})`, detail: `${a.customer_name || (o && o.customer_name) || 'Kunde'} · ${[a.vehicle_brand, a.license_plate].filter(Boolean).join(' ') || (o ? ref(o) : '')} – nachfassen`, action: o ? { kind: 'open_order', order_id: o.id } : null });
   }
   const waiting = orders.filter(o => ['warte_auf_ersatzteile', 'ersatzteile_bestellt'].includes(o.status));
-  if (waiting.length) recs.push({ priority: 1, sort: now, title: waiting.length === 1 ? '1 Auftrag wartet auf Teile' : `${waiting.length} Aufträge warten auf Teile`, detail: waiting.slice(0, 3).map(ref).join(' · '), action: { kind: 'open_order', order_id: waiting[0].id } });
+  if (waiting.length) recs.push({ type: 'stuck_parts', priority: 1, sort: now, title: waiting.length === 1 ? '1 Auftrag wartet auf Teile' : `${waiting.length} Aufträge warten auf Teile`, detail: waiting.slice(0, 3).map(ref).join(' · '), action: { kind: 'open_order', order_id: waiting[0].id } });
   for (const i of inventory.filter(i => Number(i.min_stock) > 0 && Number(i.stock_quantity || 0) <= Number(i.min_stock)).slice(0, 2)) {
-    recs.push({ priority: 2, sort: now, title: `Nachbestellen: ${i.name}`, detail: `Bestand ${i.stock_quantity || 0} ${i.unit || 'Stück'} (Mindestbestand ${i.min_stock})${i.supplier_name ? ' · ' + i.supplier_name : ''}`, action: null });
+    recs.push({ type: 'part_low', priority: 2, sort: now, title: `Nachbestellen: ${i.name}`, detail: `Bestand ${i.stock_quantity || 0} ${i.unit || 'Stück'} (Mindestbestand ${i.min_stock})${i.supplier_name ? ' · ' + i.supplier_name : ''}`, action: { kind: 'part_order', part_name: i.name, part_number: i.part_number || '', supplier_name: i.supplier_name || '' } });
   }
   const cap = capacityDays(appointments, employees.length ? employees : [{}], 6).filter(c => c.status === 'rot');
-  if (cap.length) recs.push({ priority: 2, sort: now, title: `Werkstatt voll: ${cap.map(c => fmtD(c.datum)).join(', ')}`, detail: `Auslastung ${cap.map(c => c.pct + ' %').join(' / ')} – keine weiteren Termine annehmen oder umplanen`, action: { kind: 'capacity' } });
+  if (cap.length) recs.push({ type: 'overbooked', priority: 2, sort: now, title: `Werkstatt voll: ${cap.map(c => fmtD(c.datum)).join(', ')}`, detail: `Auslastung ${cap.map(c => c.pct + ' %').join(' / ')} – keine weiteren Termine annehmen oder umplanen`, action: { kind: 'capacity' } });
   const todays = appointments.filter(a => a.appointment_date === today && a.status !== 'storniert').sort((a, b) => String(a.time_slot).localeCompare(String(b.time_slot)));
-  if (todays.length) recs.push({ priority: 1, sort: now, title: `Heute ${todays.length} Termin${todays.length > 1 ? 'e' : ''}`, detail: todays.slice(0, 3).map(a => `${a.time_slot || ''} ${a.customer_name || ''} (${a.service_name || a.appointment_type || 'Termin'})`.trim()).join(' · '), action: { kind: 'capacity' } });
+  if (todays.length) recs.push({ type: 'today_apts', priority: 1, sort: now, title: `Heute ${todays.length} Termin${todays.length > 1 ? 'e' : ''}`, detail: todays.slice(0, 3).map(a => `${a.time_slot || ''} ${a.customer_name || ''} (${a.service_name || a.appointment_type || 'Termin'})`.trim()).join(' · '), action: { kind: 'capacity' } });
   const worn = tires.filter(t => (Number(t.tread_depth) > 0 && Number(t.tread_depth) < 3) || t.condition === 'abgefahren');
-  if (worn.length) recs.push({ priority: 1, sort: now, title: `${worn.length} eingelagerte Reifensätze abgefahren`, detail: `${worn.slice(0, 3).map(t => `${t.customer_name || ''} ${t.tread_depth ? t.tread_depth + ' mm' : ''}`.trim()).join(' · ')} – neue Reifen anbieten`, action: { kind: 'tire_list' } });
+  if (worn.length) recs.push({ type: 'tire_profile', priority: 1, sort: now, title: `${worn.length} eingelagerte Reifensätze abgefahren`, detail: `${worn.slice(0, 3).map(t => `${t.customer_name || ''} ${t.tread_depth ? t.tread_depth + ' mm' : ''}`.trim()).join(' · ')} – neue Reifen anbieten`, action: { kind: 'tire_list' } });
   return recs.sort((a, b) => b.priority - a.priority || a.sort - b.sort).slice(0, 5).map(({ sort, ...r }) => (r.action ? r : { ...r, action: undefined }));
 }
 
