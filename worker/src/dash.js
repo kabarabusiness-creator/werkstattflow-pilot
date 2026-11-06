@@ -14,6 +14,7 @@
 import { count as countUsage } from './usage.js';
 import { handleInvoice, INVOICE_FUNCTIONS } from './invoices.js';
 import { tireScanImages, registrationScan, receiptScan, capacityDays, alexDashboard } from './ai.js';
+import { handleMail, MAIL_FUNCTIONS } from './mail.js';
 
 const TOKEN_TTL_MIN = 30;
 const SLOT_LABELS = { 1: 'Reifenflanke', 2: 'Lauffläche', 3: 'Felge' };
@@ -396,6 +397,27 @@ export async function handleFunction(name, body, c) {
     const result = await registrationScan('u:' + user.id, images, env);
     if (tempKey) await env.PHOTOS.delete(tempKey).catch(() => {}); // Datenschutz: Foto sofort löschen
     return { ok: true, result };
+  }
+
+  // E-Mail-Postfach der Werkstatt (IMAP/SMTP, Zugangsdaten verschlüsselt im Speicher)
+  if (MAIL_FUNCTIONS.has(name)) {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    await h.gate(code);
+    const storeReceipt = async ({ bytes, contentType, filename, source }) => {
+      const ext = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' }[contentType] || (/\.pdf$/i.test(filename) ? 'pdf' : null);
+      if (!ext) throw new HttpError(400, 'invalid_file', { message: 'Nur PDF- und Bilddateien (JPG, PNG) können als Beleg übernommen werden.' });
+      if (bytes.length > 15 * 1024 * 1024) throw new HttpError(413, 'too_large', { message: 'Datei ist zu groß (max. 15 MB).' });
+      const ct = ext === 'pdf' ? 'application/pdf' : ext === 'jpg' ? 'image/jpeg' : 'image/' + ext;
+      const key = `_rcpt/${code}/${new Date().toISOString().slice(0, 7)}/${h.randomHex(16)}.${ext}`;
+      const hash = await bytesHash(bytes);
+      const fname = String(filename || '').replace(/[^\w.\- äöüÄÖÜß()]/g, '').slice(0, 100);
+      await env.PHOTOS.put(key, bytes, { metadata: { contentType: ct, name: fname, sha256: hash, uploaded_at: new Date().toISOString(), by: user.email || user.id, source: String(source || '').slice(0, 200) } });
+      countUsage('photos', 1, code);
+      return { file_url: 'kv:' + key, file_name: fname, content_type: ct, size: bytes.length, sha256: hash };
+    };
+    return handleMail(name, body, { env, db, user, code, h: { HttpError, rateLimit }, storeReceipt });
   }
 
   // Belege (Eingangsrechnungen, Quittungen) privat ablegen: nur die eigene Werkstatt kann sie abrufen, nie überschrieben

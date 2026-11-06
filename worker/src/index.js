@@ -1573,7 +1573,7 @@ async function handleFetch(request, env, ctx) {
       let body = {};
       if (request.method === 'POST' && !(request.headers.get('Content-Type') || '').includes('form')) {
         const len = Number(request.headers.get('Content-Length') || 0);
-        if (len > (path === '/fn/uploadFile' ? 30_000_000 : 9_000_000)) throw new HttpError(413, 'too_large');
+        if (len > (['/fn/uploadFile', '/fn/mailSend', '/fn/mailDraft'].includes(path) ? 30_000_000 : 9_000_000)) throw new HttpError(413, 'too_large');
         body = await request.json().catch(() => ({}));
       }
       if (path === '/workshopProfiles') return json(await workshopProfiles(db, body, request.headers.get('CF-Connecting-IP') || 'x'), 200, cors);
