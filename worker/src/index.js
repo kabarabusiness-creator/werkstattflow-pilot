@@ -1287,7 +1287,7 @@ async function tireOptout(db, env, url) {
 }
 
 /* ---------------- Nachrichten & Live-Chat ---------------- */
-const DASHBOARD_URL = 'https://autoleitwerk.base44.app';
+const DASHBOARD_URL = 'https://login.autoleitwerk.de';
 const SUPPORT_TO = env => env.SUPPORT_EMAIL || 'info@autoleitwerk.de';
 const notifyThrottle = new Map();
 // höchstens eine Benachrichtigung pro Gesprächsrichtung in `ms` (verhindert Mail-Flut bei vielen kurzen Nachrichten)
@@ -1359,7 +1359,8 @@ const FAIL_THRESHOLD = 2; // erst nach 2 Fehlprüfungen in Folge (30 Min.) alarm
 const SITE_CHECKS = [
   ['Tablet-App', 'https://kabarabusiness-creator.github.io/werkstattflow-pilot/index.html'],
   ['Kundenportal', 'https://kabarabusiness-creator.github.io/werkstattflow-pilot/kundenapp.html'],
-  ['Dashboard', 'https://autoleitwerk.base44.app/'],
+  ['Dashboard', 'https://login.autoleitwerk.de/'],
+  ['Dashboard (Base44-Adresse)', 'https://autoleitwerk.base44.app/'],
 ];
 async function readMonitor(env) {
   try { return (await env.PHOTOS.get(MONITOR_KEY, { type: 'json' })) || {}; } catch { return {}; }
