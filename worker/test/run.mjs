@@ -43,6 +43,7 @@ globalThis.fetch = async (url, init = {}) => {
   const [, ent, rest] = m; calls.push(method + ' ' + ent);
   const table = db[ent] || (db[ent] = []);
   const ok = d => new Response(JSON.stringify(d), { status: 200 });
+  if (ent === 'User' && !rest && method === 'GET') return ok(table);
   if (rest === 'v2/list') {
     const q = u.searchParams.get('q') ? JSON.parse(u.searchParams.get('q')) : {};
     const items = table.filter(r => Object.entries(q).every(([k, v]) => r[k] === v));

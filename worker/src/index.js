@@ -185,7 +185,10 @@ async function userDirectory(db) {
   const hit = cache.get('_users');
   if (hit && Date.now() - hit.ts < 5 * 60_000) return hit.map;
   try {
-    const rows = await db.list('User', null, { limit: 1000 });
+    // „List app users“ ist GET /entities/User (die v2-Liste gilt nicht für Nutzer)
+    let rows;
+    try { const d = await db.req('GET', '/User?limit=1000'); rows = Array.isArray(d) ? d : (d && (d.items || d.results)) || []; }
+    catch { rows = await db.list('User', null, { limit: 1000 }); }
     const map = new Map(rows.map(u => [u.id, { role: u.role, workshop_code: u.workshop_code || '' }]));
     cache.set('_users', { ts: Date.now(), map });
     creatorCheck = { state: 'ok', at: nowIso() };
