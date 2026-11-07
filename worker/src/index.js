@@ -175,6 +175,43 @@ async function requireSession(db, request) {
   return s;
 }
 
+/* ---------------- Mitarbeiter-Herkunft (Mandantenschutz) ----------------
+ * Base44 prüft beim Ändern nur den alten Datensatz. Ein Dashboard-Nutzer könnte deshalb einen eigenen Mitarbeiter
+ * nachträglich in eine fremde Werkstatt verschieben und sich dort am Tablet anmelden. Darum zählen fürs Tablet nur
+ * Mitarbeiter, die ein Admin, der Server/eine Backend-Funktion (service_…), der Werkstatt-Inhaber oder ein Nutzer
+ * derselben Werkstatt angelegt hat. Ist die Nutzerliste nicht lesbar, wird nicht gesperrt (nur protokolliert). */
+let creatorCheck = { state: 'unbekannt', at: null };
+async function userDirectory(db) {
+  const hit = cache.get('_users');
+  if (hit && Date.now() - hit.ts < 5 * 60_000) return hit.map;
+  try {
+    const rows = await db.list('User', null, { limit: 1000 });
+    const map = new Map(rows.map(u => [u.id, { role: u.role, workshop_code: u.workshop_code || '' }]));
+    cache.set('_users', { ts: Date.now(), map });
+    creatorCheck = { state: 'ok', at: nowIso() };
+    return map;
+  } catch (e) {
+    console.log('user_directory_failed', String(e && e.message || e));
+    creatorCheck = { state: 'nicht verfügbar', at: nowIso() };
+    return null;
+  }
+}
+function trustedEmployee(emp, users, workshops) {
+  const by = String(emp.created_by_id || '');
+  if (!by || by.startsWith('service_') || !users) return true;
+  const ws = workshops.find(w => w.code === emp.workshop_code);
+  if (ws && ws.owner_user_id === by) return true;
+  const u = users.get(by);
+  if (!u) { console.log('employee_untrusted', emp.id, emp.workshop_code, 'creator_unknown'); return false; }
+  if (u.role === 'admin' || (u.workshop_code && u.workshop_code === emp.workshop_code)) return true;
+  console.log('employee_untrusted', emp.id, emp.workshop_code, 'creator_from', u.workshop_code || '-');
+  return false;
+}
+async function trustedEmployees(db, list) {
+  const [users, workshops] = await Promise.all([userDirectory(db), cachedList(db, 'Workshop')]);
+  return list.filter(e => trustedEmployee(e, users, workshops));
+}
+
 /* ---------------- Profilauswahl (Netflix-Stil) ----------------
  * Öffentlich mit Werkstatt-Code: nur Vorname + Initial, Rolle, Sperrstatus – keine PINs, keine IDs anderer Werkstätten.
  * Einfache Bremse gegen Durchprobieren von Codes pro IP. */
@@ -206,7 +243,7 @@ async function workshopProfiles(db, body, ip) {
   if (!/^[A-Z0-9-]{3,20}$/.test(code)) throw new HttpError(404, 'unknown_code');
   const [workshops, emps] = await Promise.all([cachedList(db, 'Workshop'), cachedList(db, 'Employee')]);
   const ws = workshops.find(w => w.code === code);
-  const active = emps.filter(e => e.workshop_code === code && e.is_active !== false);
+  const active = await trustedEmployees(db, emps.filter(e => e.workshop_code === code && e.is_active !== false));
   if (!ws && !active.length) throw new HttpError(404, 'unknown_code');
   const order = { admin: 0, serviceberater: 1, meister: 2, mechaniker: 3 };
   return {
@@ -225,7 +262,7 @@ async function workshopLogin(db, body, env) {
   if (!code || (!name && !empId) || !/^\d{4,8}$/.test(pin)) throw new HttpError(400, 'invalid');
   await workshopGate(db, env, code, 'tablet');
   const emps = await db.list('Employee', { workshop_code: code });
-  const active = emps.filter(e => e.is_active !== false);
+  const active = await trustedEmployees(db, emps.filter(e => e.is_active !== false && e.workshop_code === code));
   // per Profil-ID (Profilauswahl), sonst exakter Name, sonst eindeutiger Vorname
   let emp = empId ? active.find(e => e.id === empId) : active.find(e => norm(e.name) === name);
   if (!emp && !empId) {
@@ -285,7 +322,7 @@ async function getTabletData(db, sess) {
       const svc = t.service_id ? by.Service.find(x => x.id === t.service_id) : null;
       return svc && svc.category ? { ...t, category: svc.category } : t;
     }),
-    employees: mine(by.Employee).filter(e => e.is_active !== false).map(stripEmployee),
+    employees: (await trustedEmployees(db, mine(by.Employee).filter(e => e.is_active !== false))).map(stripEmployee),
     // auch Timer ohne Werkstatt-Code (z. B. im Dashboard gestartet), sofern sie zu einem eigenen Auftrag gehören
     worktimes: by.WorkTime.filter(w => w.workshop_code === code || (!w.workshop_code && orderIds.has(w.order_id))).slice(0, 300),
     parts: [],
@@ -1525,7 +1562,7 @@ async function handleFetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
-      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, ...(await (async () => { if (!env.PHOTOS) return {}; const st = await readMonitor(env); return { last_backup: st.last_backup ? st.last_backup.day : null, monitor: st.down ? 'störung' : 'ok', checked_at: st.checked_at || null }; })()), secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, ...(await (async () => { if (!env.PHOTOS) return {}; const st = await readMonitor(env); return { last_backup: st.last_backup ? st.last_backup.day : null, monitor: st.down ? 'störung' : 'ok', checked_at: st.checked_at || null }; })()), creator_check: creatorCheck.state, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
       if (path === '/status') { const r = await statusReport(env); return json(r, r.ok ? 200 : 503, cors); }
       if (path === '/demo' && request.method === 'GET') {
         // Demo-Dashboard: frischer Einmal-Login (60 s gültig) für den Demo-Nutzer, sieht per RLS nur AL-DEMO

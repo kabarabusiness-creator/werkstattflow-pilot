@@ -21,6 +21,7 @@ const db = {
   OrderTask: [{ id: 't1', order_id: 'o1', workshop_code: 'AL-T1', title: 'Öl', status: 'offen' }, { id: 't2', order_id: 'o2', workshop_code: 'AL-T2', title: 'X', status: 'offen' }],
   WorkTime: [], Lift: [], Appointment: [], TireSet: [{ id: 'r1', workshop_code: 'AL-T1', customer_name: 'Kunde A', season: 'winter', tread_depth: 5, protocols: [{ type: 'einlagerung', signer: 'Kunde A', signature: 'data:image/png;base64,AAAA' }] }],
   WorkshopSession: [], InternalNote: [], WorkshopLog: [], ApprovalRequest: [{ id: 'a1', order_id: 'o1', status: 'ausstehend', title: 'Bremse', additional_cost: 120 }],
+  User: [{ id: 'u1', role: 'user', workshop_code: 'AL-T1' }, { id: 'u9', role: 'user', workshop_code: 'AL-T9' }, { id: 'ua', role: 'admin' }],
   MediaItem: [], Service: [{ id: 's1', name: 'Inspektion', is_active: true, workshop_code: 'AL-T1', estimated_duration_minutes: 60 }], InventoryItem: [],
 };
 const calls = [];
@@ -32,6 +33,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.host === 'api.resend.com') { assert.equal(init.headers.Authorization, 'Bearer RE_TEST'); mails.push(JSON.parse(init.body)); return new Response('{"id":"m1"}', { status: 200 }); }
   if (u.pathname.endsWith('/entities/User/me')) {
     const a = (init.headers && (init.headers.Authorization || init.headers.authorization)) || '';
+    if (a === 'Bearer USER-NOCODE-xxxxxxxxxxxxxxx') return new Response(JSON.stringify({ id: 'u7', role: 'user', email: 'neu@test.de', full_name: 'Neu' }), { status: 200 });
     if (a === 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') return new Response(JSON.stringify({ id: 'u1', role: 'user', workshop_code: 'AL-T1', email: 'chef@werkstatt.test', full_name: 'Chef T1' }), { status: 200 });
     return new Response('{"detail":"unauthorized"}', { status: 401 });
   }
@@ -102,6 +104,23 @@ await t('Login falscher PIN → invalid, nach 5 Versuchen gesperrt', async () =>
 });
 await t('Fremde Werkstatt-Mitarbeiter nicht anmeldbar', async () => {
   assert.equal((await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'Otto Fremd', pin: '1111' })).data.error, 'invalid');
+});
+await t('Mandantenschutz: verschobener Mitarbeiter aus fremder Werkstatt kann sich nicht anmelden', async () => {
+  const add = (id, name, by, pin) => db.Employee.push({ id, name, role: 'mechaniker', is_active: true, workshop_code: 'AL-T1', pin_salt: 's' + id, pin: sha(`s${id}:${pin}`), created_by_id: by });
+  add('e3', 'Mia Eigen', 'u1', '2222'); add('e4', 'Max Verschoben', 'u9', '3333'); add('e5', 'Ali Admin', 'ua', '4444'); add('e6', 'Sven Server', 'service_abc', '5555'); add('e7', 'Kim Unbekannt', 'u-gelöscht', '6666');
+  assert.equal((await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'Mia Eigen', pin: '2222' })).status, 200, 'Nutzer derselben Werkstatt');
+  assert.equal((await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'Ali Admin', pin: '4444' })).status, 200, 'Admin');
+  assert.equal((await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'Sven Server', pin: '5555' })).status, 200, 'Server');
+  const bad = await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'Max Verschoben', pin: '3333' });
+  assert.equal(bad.status, 401); assert.equal(bad.data.error, 'invalid');
+  assert.equal((await call('/workshopLogin', { workshop_code: 'AL-T1', employee_id: 'e4', pin: '3333' })).data.error, 'invalid');
+  assert.equal((await call('/workshopLogin', { workshop_code: 'AL-T1', name: 'Kim Unbekannt', pin: '6666' })).data.error, 'invalid');
+  db.Employee.splice(2);
+  db.WorkshopSession.splice(1);
+});
+await t('Dashboard-Funktion: Nutzer ohne Werkstatt-Code wird abgelehnt', async () => {
+  const r = await worker.fetch(new Request('https://api.test/fn/notifyCustomer', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer USER-NOCODE-xxxxxxxxxxxxxxx' }, body: JSON.stringify({ action: 'status_update', order_id: 'o2' }) }), env, ctx);
+  assert.equal(r.status, 403); assert.equal((await r.json()).error, 'no_workshop');
 });
 await t('Tablet-Daten nur eigene Werkstatt, ohne Token/PIN', async () => {
   const r = await call('/getTabletData', null, token, 'GET');

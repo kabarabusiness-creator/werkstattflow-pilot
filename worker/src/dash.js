@@ -78,18 +78,22 @@ export async function handleFunction(name, body, c) {
     if (token.length < 20) throw new HttpError(401, 'unauthorized');
     const key = await sha256Hex(token);
     const hit = userCache.get(key);
-    if (hit && Date.now() - hit.ts < 300_000) return hit.user;
+    if (hit && Date.now() - hit.ts < 300_000) return (authed = hit.user);
     const res = await fetch(`${env.BASE44_API_BASE || 'https://app.base44.com'}/api/apps/${env.BASE44_APP_ID}/entities/User/me`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw new HttpError(401, 'unauthorized');
     const u = await res.json().catch(() => null);
     if (!u || !u.id) throw new HttpError(401, 'unauthorized');
     const user = { id: u.id, role: u.role, workshop_code: u.workshop_code || '', email: u.email || '', name: u.full_name || '' };
-    userCache.set(key, { ts: Date.now(), user });
+    userCache.set(key, { ts: Date.now(), user }); authed = user;
     if (userCache.size > 2000) userCache.clear();
     return user;
   }
+  // Nutzer ohne eigene Werkstatt dürfen keine Werkstatt-Datensätze anfassen (vorher lief der Vergleich bei leerem Code durch)
+  let authed = null;
   function sameWorkshop(rec, code) {
-    if (rec.workshop_code && code && rec.workshop_code !== code) throw new HttpError(403, 'forbidden');
+    if (authed && authed.role === 'admin') return;
+    if (!code) throw new HttpError(403, 'no_workshop');
+    if (rec.workshop_code && rec.workshop_code !== code) throw new HttpError(403, 'forbidden');
   }
   async function getRec(entity, id) {
     try { return await db.get(entity, id); } catch (e) { if (e.extra && e.extra.upstream === 404) return null; throw e; }
