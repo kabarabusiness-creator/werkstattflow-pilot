@@ -15,6 +15,7 @@ import { count as countUsage } from './usage.js';
 import { handleInvoice, INVOICE_FUNCTIONS } from './invoices.js';
 import { tireScanImages, registrationScan, receiptScan, capacityDays, alexDashboard } from './ai.js';
 import { handleMail, MAIL_FUNCTIONS } from './mail.js';
+import { handleInvite, INVITE_FUNCTIONS } from './invites.js';
 
 const TOKEN_TTL_MIN = 30;
 const SLOT_LABELS = { 1: 'Reifenflanke', 2: 'Lauffläche', 3: 'Felge' };
@@ -129,6 +130,13 @@ export async function handleFunction(name, body, c) {
     return { token, expires_at: expires };
   }
   const readJson = (s, d) => { try { return s ? (typeof s === 'string' ? JSON.parse(s) : s) : d; } catch { return d; } };
+
+  /* ---- Einladungscodes (Registrierung nur mit Code) ---- */
+  if (INVITE_FUNCTIONS.has(name)) {
+    const user = name === 'inviteCheck' ? null : await authUser();
+    return handleInvite(name, body, { db, user, HttpError, sha256Hex, rateLimit, ip, sendMail: h.sendMail, mailHtml: h.mailHtml, dashboardUrl: h.dashboardUrl,
+      invalidate: (...e) => h.invalidate(...e), onUserChanged: () => { userCache.clear(); h.invalidate('_users'); } });
+  }
 
   /* ---- Rechnungen (GoBD: Server vergibt Nummern, Archiv, Storno, Protokoll) ---- */
   if (INVOICE_FUNCTIONS.has(name)) {

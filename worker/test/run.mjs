@@ -21,7 +21,7 @@ const db = {
   OrderTask: [{ id: 't1', order_id: 'o1', workshop_code: 'AL-T1', title: 'Öl', status: 'offen' }, { id: 't2', order_id: 'o2', workshop_code: 'AL-T2', title: 'X', status: 'offen' }],
   WorkTime: [], Lift: [], Appointment: [], TireSet: [{ id: 'r1', workshop_code: 'AL-T1', customer_name: 'Kunde A', season: 'winter', tread_depth: 5, protocols: [{ type: 'einlagerung', signer: 'Kunde A', signature: 'data:image/png;base64,AAAA' }] }],
   WorkshopSession: [], InternalNote: [], WorkshopLog: [], ApprovalRequest: [{ id: 'a1', order_id: 'o1', status: 'ausstehend', title: 'Bremse', additional_cost: 120 }],
-  User: [{ id: 'u1', role: 'user', workshop_code: 'AL-T1' }, { id: 'u9', role: 'user', workshop_code: 'AL-T9' }, { id: 'ua', role: 'admin' }],
+  User: [{ id: 'u1', role: 'user', workshop_code: 'AL-T1' }, { id: 'u9', role: 'user', workshop_code: 'AL-T9' }, { id: 'ua', role: 'admin' }, { id: 'u7', role: 'user', email: 'neu@test.de' }],
   MediaItem: [], Service: [{ id: 's1', name: 'Inspektion', is_active: true, workshop_code: 'AL-T1', estimated_duration_minutes: 60 }], InventoryItem: [],
 };
 const calls = [];
@@ -33,6 +33,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.host === 'api.resend.com') { assert.equal(init.headers.Authorization, 'Bearer RE_TEST'); mails.push(JSON.parse(init.body)); return new Response('{"id":"m1"}', { status: 200 }); }
   if (u.pathname.endsWith('/entities/User/me')) {
     const a = (init.headers && (init.headers.Authorization || init.headers.authorization)) || '';
+    if (a === 'Bearer USER-ADMIN-xxxxxxxxxxxxxxxx') return new Response(JSON.stringify({ id: 'ua', role: 'admin', email: 'mert@test.de', full_name: 'Mert' }), { status: 200 });
     if (a === 'Bearer USER-NOCODE-xxxxxxxxxxxxxxx') return new Response(JSON.stringify({ id: 'u7', role: 'user', email: 'neu@test.de', full_name: 'Neu' }), { status: 200 });
     if (a === 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') return new Response(JSON.stringify({ id: 'u1', role: 'user', workshop_code: 'AL-T1', email: 'chef@werkstatt.test', full_name: 'Chef T1' }), { status: 200 });
     return new Response('{"detail":"unauthorized"}', { status: 401 });
@@ -1194,6 +1195,31 @@ await t('Reifenlager: Saison-Erinnerung (Vorschau, Versand, keine Doppelung, Abm
   assert.match(await res.text(), /ungültig/); assert.ok(!db.TireSet.find(x => x.id === 'w3').reminder_optout);
   assert.equal((await fnU('tireReminder', { action: 'preview', season: 'herbst' })).s, 400);
   assert.equal((await fnU('tireReminder', { action: 'preview', season: 'winter' }, null)).s, 401);
+});
+await t('Einladungscode: anlegen (nur Admin), prüfen, einlösen, nur einmal, nur passende E-Mail', async () => {
+  const fnT = async (name, body, tok) => { const r = await worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx); await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; };
+  assert.equal((await fnT('inviteCreate', { workshop_code: 'AL-T1' }, 'USER-AL-T1-xxxxxxxxxxxxxxxx')).s, 403, 'kein Admin');
+  const m0 = mails.length;
+  const c = await fnT('inviteCreate', { workshop_code: 'AL-T1', email: 'Neu@Test.de', role_label: 'inhaber', send: true }, 'USER-ADMIN-xxxxxxxxxxxxxxxx');
+  assert.equal(c.s, 200, JSON.stringify(c.d)); assert.match(c.d.code, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/); assert.equal(c.d.sent, true);
+  assert.equal(mails.length, m0 + 1); assert.deepEqual(mails.at(-1).to, ['neu@test.de']); assert.ok(mails.at(-1).html.includes(c.d.code));
+  const inv = db.WorkshopInvite.at(-1); assert.ok(!JSON.stringify(inv).includes(c.d.code.replace(/-/g, '')), 'Code nur als Hash gespeichert');
+  const chk = await fnT('inviteCheck', { code: c.d.code.toLowerCase() });
+  assert.equal(chk.s, 200); assert.equal(chk.d.workshop_name, 'Testwerkstatt');
+  assert.equal((await fnT('inviteCheck', { code: 'AAAA-BBBB-CCCC' })).d.error, 'invalid_code');
+  const red = await fnT('inviteRedeem', { code: c.d.code }, 'USER-NOCODE-xxxxxxxxxxxxxxx');
+  assert.equal(red.s, 200, JSON.stringify(red.d)); assert.equal(db.User.find(u => u.id === 'u7').workshop_code, 'AL-T1');
+  assert.equal(db.Workshop.find(w => w.code === 'AL-T1').owner_user_id, 'u7'); assert.equal(db.WorkshopInvite.at(-1).used_count, 1);
+  assert.equal((await fnT('inviteCheck', { code: c.d.code })).d.error, 'used', 'nur einmal');
+  const c2 = await fnT('inviteCreate', { workshop_code: 'AL-T1', email: 'andere@test.de' }, 'USER-ADMIN-xxxxxxxxxxxxxxxx');
+  assert.equal((await fnT('inviteRedeem', { code: c2.d.code }, 'USER-NOCODE-xxxxxxxxxxxxxxx')).d.error, 'email_mismatch');
+  const l = await fnT('inviteList', { workshop_code: 'AL-T1' }, 'USER-ADMIN-xxxxxxxxxxxxxxxx');
+  assert.equal(l.d.invites.length, 2); assert.equal(l.d.invites.find(i => i.id === inv.id).state, 'eingelöst'); assert.equal(l.d.invites[0].code_hash, undefined);
+  assert.equal((await fnT('inviteRevoke', { id: c2.d.invite.id }, 'USER-ADMIN-xxxxxxxxxxxxxxxx')).s, 200);
+  assert.equal((await fnT('inviteCheck', { code: c2.d.code })).d.error, 'revoked');
+  const w = await fnT('workshopCreate', { name: 'Neue Werkstatt' }, 'USER-ADMIN-xxxxxxxxxxxxxxxx');
+  assert.equal(w.s, 200); assert.match(w.d.workshop.code, /^AL-[A-Z2-9]{6}$/);
+  db.User.find(u => u.id === 'u7').workshop_code = undefined; db.Workshop.find(x => x.code === 'AL-T1').owner_user_id = undefined;
 });
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
