@@ -131,6 +131,34 @@ export async function handleFunction(name, body, c) {
   }
   const readJson = (s, d) => { try { return s ? (typeof s === 'string' ? JSON.parse(s) : s) : d; } catch { return d; } };
 
+  /* ---- Mitarbeiterwechsel im Dashboard: PIN prüfen, ohne Base44-Funktion (keine Credits) ----
+   * Angemeldeter Nutzer wechselt oben rechts auf einen Mitarbeiter seiner Werkstatt. Gleiche Sperre wie am Tablet:
+   * 5 Fehlversuche → 15 Minuten gesperrt. Es entsteht keine Tablet-Sitzung. */
+  if (name === 'employeeSwitch') {
+    const user = await authUser();
+    rateLimit('empswitch:' + user.id, 20, 60_000);
+    const empId = String(body.employee_id || '').trim();
+    const pin = String(body.pin || '').trim();
+    if (!empId || !/^\d{4,8}$/.test(pin)) throw new HttpError(400, 'invalid', { message: 'Bitte die PIN (4–8 Ziffern) eingeben.' });
+    const emp = await getRec('Employee', empId);
+    if (!emp || emp.is_active === false) throw new HttpError(401, 'invalid');
+    if (user.role !== 'admin' && (!user.workshop_code || emp.workshop_code !== user.workshop_code)) throw new HttpError(401, 'invalid');
+    if (emp.locked_until && new Date(emp.locked_until) > new Date()) throw new HttpError(423, 'locked', { retry_at: emp.locked_until });
+    if (!emp.pin_salt || !emp.pin) throw new HttpError(409, 'no_pin', { message: 'Für diesen Mitarbeiter ist noch keine PIN hinterlegt.' });
+    const calc = await sha256Hex(`${emp.pin_salt}:${pin}`); const want = String(emp.pin);
+    let diff = calc.length ^ want.length; for (let i = 0; i < Math.min(calc.length, want.length); i++) diff |= calc.charCodeAt(i) ^ want.charCodeAt(i);
+    if (diff) {
+      const failed = (Number(emp.failed_attempts) || 0) + 1;
+      const upd = { failed_attempts: failed };
+      if (failed >= 5) { upd.locked_until = new Date(Date.now() + 15 * 60_000).toISOString(); upd.failed_attempts = 0; }
+      await db.update('Employee', emp.id, upd);
+      if (upd.locked_until) throw new HttpError(423, 'locked', { retry_at: upd.locked_until });
+      throw new HttpError(401, 'invalid');
+    }
+    if (emp.failed_attempts || emp.locked_until) await db.update('Employee', emp.id, { failed_attempts: 0, locked_until: null });
+    return { ok: true, employee: { id: emp.id, name: emp.name, role: emp.role } };
+  }
+
   /* ---- Einladungscodes (Registrierung nur mit Code) ---- */
   if (INVITE_FUNCTIONS.has(name)) {
     const user = name === 'inviteCheck' ? null : await authUser();

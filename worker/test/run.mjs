@@ -1221,5 +1221,23 @@ await t('Einladungscode: anlegen (nur Admin), prüfen, einlösen, nur einmal, nu
   assert.equal(w.s, 200); assert.match(w.d.workshop.code, /^AL-[A-Z2-9]{6}$/);
   db.User.find(u => u.id === 'u7').workshop_code = undefined; db.Workshop.find(x => x.code === 'AL-T1').owner_user_id = undefined;
 });
+await t('Mitarbeiterwechsel mit PIN im Dashboard (ohne Base44-Funktion)', async () => {
+  const sw = (body, tok = 'USER-AL-T1-xxxxxxxxxxxxxxxx') => worker.fetch(new Request('https://api.test/fn/employeeSwitch', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => ({ s: r.status, d: await r.json() }));
+  const sessions = db.WorkshopSession.length;
+  const ok = await sw({ employee_id: 'e1', pin: '1234' });
+  assert.equal(ok.s, 200, JSON.stringify(ok.d)); assert.equal(ok.d.employee.name, 'Erika Muster');
+  assert.equal(db.WorkshopSession.length, sessions, 'keine Tablet-Sitzung');
+  assert.equal((await sw({ employee_id: 'e1', pin: '1234' }, null)).s, 401, 'ohne Anmeldung');
+  assert.equal((await sw({ employee_id: 'e2', pin: '1111' })).d.error, 'invalid', 'fremde Werkstatt');
+  assert.equal((await sw({ employee_id: 'e1', pin: '12' })).s, 400);
+  for (let i = 0; i < 4; i++) assert.equal((await sw({ employee_id: 'e1', pin: '9999' })).d.error, 'invalid');
+  const locked = await sw({ employee_id: 'e1', pin: '9999' });
+  assert.equal(locked.s, 423); assert.equal(locked.d.error, 'locked');
+  assert.equal((await sw({ employee_id: 'e1', pin: '1234' })).d.error, 'locked', 'gesperrt trotz richtiger PIN');
+  db.Employee[0].locked_until = null; db.Employee[0].failed_attempts = 0;
+  db.Employee.push({ id: 'e9', name: 'Ohne Pin', role: 'mechaniker', is_active: true, workshop_code: 'AL-T1' });
+  assert.equal((await sw({ employee_id: 'e9', pin: '1234' })).d.error, 'no_pin');
+  db.Employee.pop();
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
