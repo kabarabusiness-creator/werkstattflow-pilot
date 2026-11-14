@@ -1379,7 +1379,32 @@ async function mailSupportChat(env, { toAdmin, session, content, user, attachmen
 /* ---------------- Daten-Backup ---------------- */
 const EXPORT_ENTITIES = ['Workshop', 'WorkshopProfile', 'Employee', 'Order', 'OrderTask', 'InvoiceItem', 'Service', 'ServiceTaskTemplate',
   'Appointment', 'ApprovalRequest', 'InternalNote', 'MediaItem', 'WorkTime', 'WorkshopLog', 'Notification', 'Lift', 'TireSet',
-  'InventoryItem', 'PartOrder', 'OrderMessage', 'ChatSession', 'ChatMessage', 'AlexKnowledge'];
+  'InventoryItem', 'PartOrder', 'OrderMessage', 'ChatSession', 'ChatMessage', 'AlexKnowledge',
+  // Stammdaten, Planung und Buchhaltung (fehlten bis 1.12.2 in der Sicherung)
+  'Customer', 'Vehicle', 'ImportRun', 'WorkAssignment', 'EmployeeAbsence',
+  'Supplier', 'ExpenseReceipt', 'Subscription', 'BankAccount', 'BankTransaction', 'CashEntry', 'JournalEntry'];
+
+/* Nächtliche Prüfung auf untergeschobene Datensätze: Ein Datensatz, den ein normaler Nutzer einer
+ * anderen Werkstatt angelegt hat, gehört nicht in diese Werkstatt. Seit 1.12.2 verhindert eine Feldregel
+ * das Verschieben; die Prüfung findet Altfälle und meldet sie (es wird nichts gelöscht). */
+const INTEGRITY_SKIP = new Set(['Workshop', 'ChatSession', 'ChatMessage', 'AlexKnowledge']);
+function integrityCheck(data, users, workshops) {
+  const found = [];
+  if (!users) return { checked: false, found };
+  const owners = new Map((workshops || []).map(w => [w.code, w.owner_user_id]));
+  for (const [ent, rows] of Object.entries(data.entities || {})) {
+    if (INTEGRITY_SKIP.has(ent) || !Array.isArray(rows)) continue;
+    for (const r of rows) {
+      const code = r.workshop_code; const by = String(r.created_by_id || '');
+      if (!code || !by || by.startsWith('service_')) continue;
+      if (owners.get(code) === by) continue;
+      const u = users.get(by);
+      if (!u || u.role === 'admin') continue;
+      if (u.workshop_code && u.workshop_code !== code) found.push({ entity: ent, id: r.id, workshop_code: code, creator_workshop: u.workshop_code });
+    }
+  }
+  return { checked: true, found };
+}
 async function exportAll(db) {
   const out = { exported_at: nowIso(), entities: {} };
   for (const e of EXPORT_ENTITIES) {
@@ -1464,6 +1489,17 @@ async function runBackup(env) {
   for (const k of listed.keys) { const d = k.name.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10); if (d < cutoff) await env.PHOTOS.delete(k.name); }
   const st = await readMonitor(env);
   st.last_backup = { day, at: nowIso(), bytes: raw.length, failed };
+  try {
+    const users = await userDirectory(db);
+    const ws = Array.isArray(data.entities.Workshop) ? data.entities.Workshop : [];
+    const ic = integrityCheck(data, users, ws);
+    const prev = (st.integrity && st.integrity.count) || 0;
+    st.integrity = { at: nowIso(), checked: ic.checked, count: ic.found.length, sample: ic.found.slice(0, 20) };
+    if (ic.found.length && ic.found.length !== prev) {
+      await sendMail(env, null, { to: SUPPORT_TO(env), subject: `⚠️ AutoLeitwerk: ${ic.found.length} Datensätze aus fremder Werkstatt`,
+        html: mailHtml({ title: 'Datensätze aus fremder Werkstatt gefunden', intro: 'Bei der nächtlichen Prüfung wurden Datensätze gefunden, die ein Nutzer einer anderen Werkstatt angelegt hat. Bitte prüfen – es wurde nichts gelöscht.</p><pre style="font-size:12px;white-space:pre-wrap">' + esc(ic.found.slice(0, 20).map(x => `${x.entity} ${x.id}: in ${x.workshop_code}, angelegt von Nutzer aus ${x.creator_workshop}`).join('\n')) + '</pre><p>' }) }).catch(() => {});
+    }
+  } catch (e) { console.log('integrity_failed', String(e && e.message || e)); }
   await writeMonitor(env, st);
   return st.last_backup;
 }
@@ -1565,7 +1601,17 @@ async function handleFetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/functions/, '').replace(/\/+$/, '') || '/';
     try {
-      if (path === '/' || path === '/health') return json({ ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, ...(await (async () => { if (!env.PHOTOS) return {}; const st = await readMonitor(env); return { last_backup: st.last_backup ? st.last_backup.day : null, monitor: st.down ? 'störung' : 'ok', checked_at: st.checked_at || null }; })()), creator_check: env.BASE44_TOKEN ? ((await userDirectory(new Base44(env)).catch(() => null)) ? 'ok' : 'nicht verfügbar') : creatorCheck.state, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: String(env.ADMIN_KEY || '').trim().length >= 16 }, env_names: Object.keys(env).sort(), time: nowIso() }, 200, cors);
+      if (path === '/' || path === '/health') {
+        // Öffentlich nur das Nötigste für die Überwachung; Details (Schlüssel, Variablen) nur mit Admin-Schlüssel
+        const base = { ok: true, service: 'autoleitwerk-api', configured: !!env.BASE44_TOKEN, photos: !!env.PHOTOS, ai: !!env.AI, email: !!env.RESEND_API_KEY, ...(await (async () => { if (!env.PHOTOS) return {}; const st = await readMonitor(env); return { last_backup: st.last_backup ? st.last_backup.day : null, monitor: st.down ? 'störung' : 'ok', checked_at: st.checked_at || null }; })()), time: nowIso() };
+        const hk = request.headers.get('X-Admin-Key') || '';
+        const adminKeyH = String(env.ADMIN_KEY || '').trim();
+        if (hk) rateLimit('admin:' + (request.headers.get('CF-Connecting-IP') || 'x'), 10, 15 * 60_000);
+        if (hk && adminKeyH.length >= 16 && safeEqual(hk.trim(), adminKeyH)) {
+          Object.assign(base, { creator_check: env.BASE44_TOKEN ? ((await userDirectory(new Base44(env)).catch(() => null)) ? 'ok' : 'nicht verfügbar') : creatorCheck.state, secrets: { BASE44_TOKEN: !!env.BASE44_TOKEN, ADMIN_KEY: !!env.ADMIN_KEY, ADMIN_KEY_long_enough: adminKeyH.length >= 16, INVOICE_ARCHIVE: !!env.INVOICE_ARCHIVE }, env_names: Object.keys(env).sort() });
+        }
+        return json(base, 200, { ...cors, 'Cache-Control': 'no-store' });
+      }
       if (path === '/status') { const r = await statusReport(env); return json(r, r.ok ? 200 : 503, cors); }
       if (path === '/demo' && request.method === 'GET') {
         // Demo-Dashboard: frischer Einmal-Login (60 s gültig) für den Demo-Nutzer, sieht per RLS nur AL-DEMO
@@ -1650,6 +1696,7 @@ async function handleFetch(request, env, ctx) {
       }
       if (path === '/admin/backups' || path === '/admin/backup') {
         if (request.method !== 'POST') throw new HttpError(405, 'method');
+        rateLimit('admin:' + (request.headers.get('CF-Connecting-IP') || 'x'), 10, 15 * 60_000);
         const form = await request.formData();
         const adminKey = String(env.ADMIN_KEY || '').trim();
         if (adminKey.length < 16 || !safeEqual(String(form.get('key') || '').trim(), adminKey)) throw new HttpError(401, 'unauthorized');
@@ -1668,11 +1715,13 @@ async function handleFetch(request, env, ctx) {
           { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY' } });
       }
       if (path === '/admin/export') {
+        rateLimit('admin:' + (request.headers.get('CF-Connecting-IP') || 'x'), 10, 15 * 60_000);
         let formKey = '';
         if (request.method === 'POST' && (request.headers.get('Content-Type') || '').includes('form')) {
           formKey = String((await request.formData()).get('key') || '').trim();
         }
-        const key = formKey || request.headers.get('X-Admin-Key') || url.searchParams.get('key') || '';
+        // Schlüssel nur per Formular oder Kopfzeile – nie in der Adresse (landet sonst in Protokollen)
+        const key = formKey || request.headers.get('X-Admin-Key') || '';
         const adminKey = String(env.ADMIN_KEY || '').trim();
         if (adminKey.length < 16 || !safeEqual(String(key).trim(), adminKey)) throw new HttpError(401, 'unauthorized');
         const data = await exportAll(db);
