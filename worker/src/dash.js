@@ -20,6 +20,8 @@ import { handleInvite, INVITE_FUNCTIONS } from './invites.js';
 const TOKEN_TTL_MIN = 30;
 const SLOT_LABELS = { 1: 'Reifenflanke', 2: 'Lauffläche', 3: 'Felge' };
 const userCache = new Map();
+const cashLocks = new Map();
+function withCashLock(key, fn) { const prev = cashLocks.get(key) || Promise.resolve(); const p = prev.catch(() => {}).then(fn); cashLocks.set(key, p.catch(() => {})); return p; }
 const recCache = new Map();
 const OPEN_DONE = ['abholbereit', 'abgeschlossen'];
 const fmtDT = iso => { const d = new Date(iso); if (isNaN(d)) return ''; return new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(d).replace(',', ''); };
@@ -330,6 +332,83 @@ export async function handleFunction(name, body, c) {
     await h.gate(code);
     rateLimit('vehrem:' + user.id + ':' + (body.action === 'send' ? 's' : 'p'), body.action === 'send' ? 6 : 60, 3600_000);
     return h.vehicleReminder(code, body);
+  }
+  // Kassenbuch: Einträge nur über den Server (fortlaufende Nummer, Bestand, kein Minus, keine Änderung – nur Storno)
+  if (name === 'cashEntry') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    await h.gate(code);
+    rateLimit('cash:' + user.id, 300, 3600_000);
+    const bad = (msg) => new HttpError(400, 'invalid', { message: msg });
+    const acc = await getRec('BankAccount', String(body.account_id || ''));
+    if (!acc || acc.kind !== 'kasse') throw bad('Bitte eine Kasse auswählen.');
+    sameWorkshop(acc, code);
+    if (!acc.workshop_code && !(authed && authed.role === 'admin')) throw new HttpError(403, 'forbidden');
+    return withCashLock(acc.id, async () => {
+      const prof = (await db.list('WorkshopProfile', { workshop_code: code }, { limit: 5 }))[0] || {};
+      const closed = String(prof.books_closed_until || '').slice(0, 10);
+      const today = berlinIso(0);
+      const entries = await db.list('CashEntry', { account_id: acc.id }, { limit: 10000 });
+      const opening = Math.round(Number(acc.opening_balance || 0) * 100);
+      const openDate = String(acc.opening_date || '').slice(0, 10);
+      const cents = (x) => Math.round(Number(x || 0) * 100);
+      // Bestand in zeitlicher Reihenfolge – darf an keinem Tag unter 0 fallen
+      const check = (list) => {
+        const sorted = [...list].sort((a, b) => (String(a.entry_date) < String(b.entry_date) ? -1 : String(a.entry_date) > String(b.entry_date) ? 1 : (a.number || 0) - (b.number || 0)));
+        let bal = opening; const after = new Map();
+        for (const e of sorted) { bal += cents(e.amount); after.set(e, bal); if (bal < 0) return { ok: false, day: e.entry_date }; }
+        return { ok: true, after, end: bal };
+      };
+      const nextNo = entries.reduce((m, e) => Math.max(m, Number(e.number) || 0), 0) + 1;
+      const by = String(body.by || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 80) || user.name || user.email || 'Dashboard';
+      const fmt = (c) => (c / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+
+      if (body.action === 'storno') {
+        const orig = entries.find((e) => e.id === body.id);
+        if (!orig) throw new HttpError(404, 'not_found', { message: 'Kassenbuchung nicht gefunden.' });
+        if (orig.kind === 'storno') throw bad('Ein Storno kann nicht storniert werden.');
+        if (orig.cancelled_by || entries.some((e) => e.storno_of === orig.id)) throw bad('Diese Buchung ist bereits storniert.');
+        const rec = { workshop_code: code, account_id: acc.id, account: acc.name || 'Kasse', number: nextNo, entry_date: today, kind: 'storno', amount: -Number(orig.amount || 0),
+          vat_rate: Number(orig.vat_rate || 0), description: `Storno Nr. ${orig.number}: ${String(orig.description || '').slice(0, 150)}`, storno_of: orig.id,
+          invoice_number: orig.invoice_number || undefined, receipt_id: orig.receipt_id || undefined, by, recorded_at: new Date().toISOString() };
+        const r = check([...entries, rec]);
+        if (!r.ok) throw bad(`Storno nicht möglich: der Kassenbestand würde am ${fmtD(r.day)} unter 0 € fallen.`);
+        rec.balance_after = r.after.get(rec) / 100;
+        const created = await db.create('CashEntry', Object.fromEntries(Object.entries(rec).filter(([, v]) => v !== undefined)));
+        await db.update('CashEntry', orig.id, { cancelled_by: created.id });
+        return { ok: true, entry: created, balance: r.end / 100 };
+      }
+
+      const SIGN = { einnahme: 1, einlage: 1, bank_abhebung: 1, ausgabe: -1, entnahme: -1, bank_einzahlung: -1 };
+      const kind = String(body.kind || '');
+      if (!SIGN[kind]) throw bad('Unbekannte Buchungsart.');
+      const amt = Math.round(Number(String(body.amount).replace(',', '.')) * 100);
+      if (!Number.isFinite(amt) || amt <= 0 || amt > 10_000_000) throw bad('Bitte einen Betrag über 0 € eingeben.');
+      const date = String(body.entry_date || today).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) throw bad('Das Datum darf nicht in der Zukunft liegen.');
+      if (closed && date <= closed) throw bad(`Der Zeitraum bis ${fmtD(closed)}${closed.slice(0, 4)} ist abgeschlossen.`);
+      if (openDate && date < openDate) throw bad('Das Datum liegt vor dem Anfangsbestand der Kasse.');
+      if (date < berlinIso(-31)) throw bad('Kassenbuchungen bitte zeitnah erfassen (höchstens 31 Tage zurück).');
+      const description = String(body.description || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200);
+      if (!description) throw bad('Bitte einen Buchungstext eingeben.');
+      const vat = ['einnahme', 'ausgabe'].includes(kind) ? Number(body.vat_rate || 0) : 0;
+      if (![0, 7, 19].includes(vat)) throw bad('Steuersatz 0, 7 oder 19 %.');
+      const rec = { workshop_code: code, account_id: acc.id, account: acc.name || 'Kasse', number: nextNo, entry_date: date, kind, amount: (SIGN[kind] * amt) / 100, vat_rate: vat,
+        description, by, recorded_at: new Date().toISOString() };
+      if (kind === 'einnahme' && body.invoice_number) rec.invoice_number = String(body.invoice_number).slice(0, 40);
+      if (kind === 'ausgabe' && body.receipt_id) {
+        const rc = await getRec('ExpenseReceipt', String(body.receipt_id));
+        if (!rc) throw bad('Beleg nicht gefunden.');
+        sameWorkshop(rc, code);
+        rec.receipt_id = rc.id;
+      }
+      const r = check([...entries, rec]);
+      if (!r.ok) throw bad(`Nicht möglich: der Kassenbestand würde am ${fmtD(r.day)} unter 0 € fallen (Bestand jetzt ${fmt(check(entries).end ?? opening)}).`);
+      rec.balance_after = r.after.get(rec) / 100;
+      const created = await db.create('CashEntry', rec);
+      return { ok: true, entry: created, balance: r.end / 100 };
+    });
   }
   if (name === 'alexExecute') {
     const user = await authUser();

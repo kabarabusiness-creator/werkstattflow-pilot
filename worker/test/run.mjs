@@ -1301,5 +1301,51 @@ await t('Mitarbeiterwechsel mit PIN im Dashboard (ohne Base44-Funktion)', async 
   assert.equal((await sw({ employee_id: 'e9', pin: '1234' })).d.error, 'no_pin');
   db.Employee.pop();
 });
+await t('Kassenbuch: fortlaufende Nummer, Bestand, kein Minus, Storno, Abschluss, fremde Kasse', async () => {
+  const fnU = (n, body, auth = 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  const day = n => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(Date.now() + n * 864e5));
+  db.BankAccount = (db.BankAccount || []).concat([
+    { id: 'k1', workshop_code: 'AL-T1', name: 'Barkasse', kind: 'kasse', opening_balance: 100, opening_date: day(-60) },
+    { id: 'k2', workshop_code: 'AL-T2', name: 'Fremd', kind: 'kasse', opening_balance: 0 },
+    { id: 'b1', workshop_code: 'AL-T1', name: 'Giro', kind: 'bank', opening_balance: 0 },
+  ]);
+  db.CashEntry = db.CashEntry || [];
+  db.ExpenseReceipt = (db.ExpenseReceipt || []).concat([{ id: 'er1', workshop_code: 'AL-T1', gross: 30 }, { id: 'er2', workshop_code: 'AL-T2', gross: 5 }]);
+  let r = await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: '59,50', vat_rate: 19, description: 'Barverkauf Wischer', invoice_number: 'RE-2026-0001' });
+  assert.equal(r.s, 200, JSON.stringify(r.d)); assert.equal(r.d.entry.number, 1); assert.equal(r.d.entry.amount, 59.5); assert.equal(r.d.balance, 159.5);
+  assert.equal(r.d.entry.workshop_code, 'AL-T1'); assert.equal(r.d.entry.by, 'Chef T1'); assert.ok(r.d.entry.recorded_at);
+  r = await fnU('cashEntry', { account_id: 'k1', kind: 'ausgabe', amount: 30, vat_rate: 19, description: 'Tanken', receipt_id: 'er1', by: 'Max (Kasse)' });
+  assert.equal(r.d.entry.number, 2); assert.equal(r.d.entry.amount, -30); assert.equal(r.d.entry.receipt_id, 'er1'); assert.equal(r.d.entry.by, 'Max (Kasse)'); assert.equal(r.d.balance, 129.5);
+  r = await fnU('cashEntry', { account_id: 'k1', kind: 'entnahme', amount: 500, description: 'zu viel' });
+  assert.equal(r.s, 400); assert.match(r.d.message, /unter 0/);
+  // rückdatiert: am Tag vor der Einnahme waren nur 100 € da
+  r = await fnU('cashEntry', { account_id: 'k1', kind: 'bank_einzahlung', amount: 120, description: 'zur Bank', entry_date: day(-2) });
+  assert.equal(r.s, 400, 'Bestand darf auch rückwirkend nicht unter 0 fallen');
+  r = await fnU('cashEntry', { account_id: 'k1', kind: 'bank_einzahlung', amount: 80, description: 'zur Bank', entry_date: day(-2) });
+  assert.equal(r.s, 200); assert.equal(r.d.entry.balance_after, 20); assert.equal(r.d.entry.number, 3); assert.equal(r.d.balance, 49.5);
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 5, description: 'x', entry_date: day(1) })).s, 400, 'keine Zukunft');
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 5, description: 'x', entry_date: day(-40) })).s, 400, 'nicht zu alt');
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 0, description: 'x' })).s, 400);
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 5, description: '' })).s, 400);
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'storno', amount: 5, description: 'x' })).s, 400, 'Storno nur über action');
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'ausgabe', amount: 5, description: 'x', receipt_id: 'er2' })).s, 403, 'fremder Beleg');
+  assert.equal((await fnU('cashEntry', { account_id: 'k2', kind: 'einnahme', amount: 5, description: 'x' })).s, 403, 'fremde Kasse');
+  assert.equal((await fnU('cashEntry', { account_id: 'b1', kind: 'einnahme', amount: 5, description: 'x' })).s, 400, 'nur Kassen');
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 5, description: 'x' }, null)).s, 401);
+  // Abschluss sperrt den Zeitraum
+  db.WorkshopProfile[0].books_closed_until = day(-1);
+  assert.match((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 5, description: 'x', entry_date: day(-1) })).d.message, /abgeschlossen/);
+  // Storno
+  const first = db.CashEntry.find(e => e.number === 1);
+  r = await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: first.id });
+  assert.equal(r.s, 400, 'Storno der Einnahme würde den Bestand unter 0 bringen'); 
+  const second = db.CashEntry.find(e => e.number === 2);
+  r = await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: second.id });
+  assert.equal(r.s, 200, JSON.stringify(r.d)); assert.equal(r.d.entry.kind, 'storno'); assert.equal(r.d.entry.amount, 30); assert.equal(r.d.entry.storno_of, second.id); assert.equal(r.d.entry.number, 4);
+  assert.equal(r.d.entry.receipt_id, 'er1'); assert.equal(second.cancelled_by, r.d.entry.id); assert.equal(r.d.balance, 79.5);
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: second.id })).d.message, 'Diese Buchung ist bereits storniert.');
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: r.d.entry.id })).s, 400, 'Storno vom Storno');
+  db.WorkshopProfile[0].books_closed_until = undefined;
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
