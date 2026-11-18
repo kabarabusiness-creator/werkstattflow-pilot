@@ -405,6 +405,16 @@ export function parseRegistrationLines(lines) {
     const m = l.match(/^(\d{4}) ([0-9A-Z]{4}) (\d{2,5}|-)$/);
     if (m) { out.emissionsschluessel = m[2]; if (m[3] !== '-') out.hubraum_ccm = Number(m[3]); break; }
   }
+  // Nach der FIN-Zeile: D.1 Marke, dann bis zu drei kurze Zeilen D.2 (Typ, Variante, Version), dann D.3 Handelsbezeichnung
+  const fi = C.findIndex((l) => out.fin && l.includes(out.fin));
+  if (fi >= 0 && C[fi + 1] && /^[A-Z][A-Z0-9 .\-&]{1,30}$/.test(C[fi + 1])) {
+    out.marke = L[fi + 1].replace(/\s*\|.*$/, '');
+    const d2 = []; let j = fi + 2;
+    while (j < C.length && d2.length < 3 && /^[A-Z0-9][A-Z0-9\-/]{0,11}$/.test(C[j])) { d2.push(C[j]); j++; }
+    if (d2.length) out.typ_variante = d2.join(' ');
+    if (d2.length && C[j] && /[A-Z]/.test(C[j]) && C[j].length <= 40 && !/[*\/]/.test(C[j])) out.modell_handelsbezeichnung = L[j];
+    out._vehicle_text = C.slice(fi).join(' ');
+  }
   const tyres = [];
   C.forEach((l) => { const re = /(\d{3}\/\d{2} ?Z?R ?\d{2}(?: ?C)? ?\d{2,3}(?:\/\d{2,3})? ?[A-Z]{1,2}\b)/g; let m; while ((m = re.exec(l))) tyres.push(m[1].replace(/\s+/g, ' ')); });
   if (tyres[0]) out.reifen_achse1 = tyres[0];
@@ -457,7 +467,14 @@ export function normalizeRegistration(raw) {
   const r = { ...(raw || {}) }; const out = {};
   // Werte aus der zeilenweisen Abschrift haben Vorrang, wenn ihr festes Muster passt
   const parsed = parseRegistrationLines(r.zeilen);
+  const vehicleText = parsed._vehicle_text || ''; delete parsed._vehicle_text;
   for (const [k, v] of Object.entries(parsed)) if (v !== '' && v != null) r[k] = { value: v, confidence: 0.95 };
+  // Halter steht nur auf der Halterseite – Wörter aus den Fahrzeugdaten sind ein Lesefehler
+  if (vehicleText && r.halter_name) {
+    const hv = String(r.halter_name && typeof r.halter_name === 'object' ? r.halter_name.value : r.halter_name || '').toUpperCase();
+    const words = hv.split(/[^A-ZÄÖÜ0-9]+/).filter((w) => w.length >= 3);
+    if (words.length && words.filter((w) => vehicleText.includes(w)).length / words.length >= 0.5) r.halter_name = { value: '', confidence: 0 };
+  }
   for (const k of REG_FIELDS) {
     let f = r[k]; let v = f && typeof f === 'object' && 'value' in f ? f.value : f; let c = f && typeof f === 'object' ? Number(f.confidence) : 0.5;
     if (!Number.isFinite(c)) c = 0.5; c = Math.max(0, Math.min(1, c));
@@ -481,6 +498,7 @@ export function normalizeRegistration(raw) {
   for (const k of ['reifen_achse1', 'reifen_achse2']) fix(k, /\d{3}\/\d{2}\s?Z?R\s?\d{2}/i, v => v.toUpperCase().replace(/\s+/g, ' '));
   out.kennzeichen.value = String(out.kennzeichen.value).toUpperCase();
 
+  if (out.datum_zulassung.value && out.datum_zulassung.value === out.erstzulassung.value) out.datum_zulassung.confidence = Math.min(out.datum_zulassung.confidence, 0.5);
   // FIN gegen die Prüfziffer aus Feld (3) prüfen – fängt die meisten Lesefehler ab
   const fin = String(out.fin.value || ''); const check = String(out.pruefziffer.value || '');
   out.fin_pruefung = { status: 'ohne', hinweis: '' };
@@ -500,9 +518,7 @@ export async function registrationScan(key, images, env) {
   limitPerHour('reg:' + key, SCAN_PER_HOUR);
   if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
   const parsed = await visionJson(env, REG_PROMPT, images.slice(0, 2), 1800);
-  const out = normalizeRegistration(parsed);
-  if (env.REG_DEBUG_LINES === '1') out._zeilen = parsed && parsed.zeilen; // TEMP Diagnose
-  return out;
+  return normalizeRegistration(parsed);
 }
 
 /* ---------- Eingangsbeleg (Rechnung, Quittung) ---------- */
