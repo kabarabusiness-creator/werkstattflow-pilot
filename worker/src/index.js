@@ -1326,6 +1326,115 @@ async function tireOptout(db, env, url) {
   return page('Abgemeldet', 'Sie erhalten keine Saison-Erinnerungen mehr zu Ihren eingelagerten Reifen. Ihre Reifen bleiben selbstverständlich weiter bei Ihrer Werkstatt eingelagert.');
 }
 
+/* ---- HU- und Service-Erinnerung: Kunden vor der fälligen HU/AU oder dem nächsten Service anschreiben ----
+ * Wie die Reifen-Erinnerung: Vorschau + Versand löst die Werkstatt im Dashboard aus (nichts geht automatisch raus).
+ * Datenquellen: Fahrzeug-Stammdaten (Vehicle + Customer) und Aufträge (HU/Service-Datum, E-Mail, Portal-Link).
+ * Je Fahrzeug, Art und Fälligkeitsdatum höchstens eine Mail; jeder Empfänger kann sich per Link abmelden
+ * (Abmeldung gilt für alle HU-/Service-Erinnerungen dieser Werkstatt). Protokoll in ReminderLog. */
+const VEH_REM_KIND = { hu: { word: 'HU/AU', subject: 'Ihre HU/AU', field: 'hu' }, service: { word: 'Inspektion/Service', subject: 'Ihr Service', field: 'service' } };
+const VEH_REM_OVERDUE_DAYS = 120; // überfällige Termine bis 4 Monate zurück noch anschreiben
+const isoDay = v => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10) : null);
+const laterDay = (a, b) => (!a ? b : !b ? a : a > b ? a : b);
+const validMail = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '').trim());
+async function vehicleOptoutToken(env, id) { return (await sha256Hex(`${env.ADMIN_KEY || 'al'}|veh-optout|${id}`)).slice(0, 32); }
+async function vehicleReminderList(db, code, kind, days, now = new Date()) {
+  const [vehicles, customers, orders, logs] = await Promise.all([
+    db.list('Vehicle', { workshop_code: code }, { limit: 5000 }).catch(() => []),
+    db.list('Customer', { workshop_code: code }, { limit: 5000 }).catch(() => []),
+    db.list('Order', { workshop_code: code }, { limit: 3000 }),
+    db.list('ReminderLog', { workshop_code: code }, { limit: 10000 }).catch(() => []),
+  ]);
+  const custById = new Map(customers.map(c => [c.id, c]));
+  const byPlate = new Map();
+  const entry = p => { if (!byPlate.has(p)) byPlate.set(p, { plate: p, display: '', name: '', email: '', hu: null, service: null, service_km: null, vehicle: null, customer: null, order: null, brand: '', model: '' }); return byPlate.get(p); };
+  for (const v of vehicles) {
+    const p = plateNorm(v.license_plate); if (!p || p === 'OHNEKENNZEICHEN' || v.is_active === false) continue;
+    const e = entry(p); const c = v.customer_id ? custById.get(v.customer_id) : null;
+    e.vehicle = v; e.customer = c || e.customer; e.display = e.display || v.license_plate;
+    e.brand = e.brand || v.vehicle_brand || ''; e.model = e.model || v.vehicle_model || '';
+    e.name = e.name || (c && c.name) || v.customer_name || ''; if (!e.email && c && validMail(c.email)) e.email = String(c.email).trim();
+    e.hu = laterDay(e.hu, isoDay(v.tuv_next_date)); e.service = laterDay(e.service, isoDay(v.next_service_date)); e.service_km = e.service_km || v.next_service_km || null;
+  }
+  const sorted = orders.slice().sort((a, b) => String(b.created_date || '').localeCompare(String(a.created_date || '')));
+  for (const o of sorted) {
+    const p = plateNorm(o.license_plate); if (!p || p === '—' || p === 'OHNEKENNZEICHEN') continue;
+    const e = entry(p);
+    e.display = e.display || o.license_plate; e.brand = e.brand || o.vehicle_brand || ''; e.model = e.model || o.vehicle_model || '';
+    e.name = e.name || o.customer_name || ''; if (!e.email && validMail(o.email)) e.email = String(o.email).trim();
+    if (!e.order && o.customer_token) e.order = o;
+    e.hu = laterDay(e.hu, laterDay(isoDay(o.tuv_next_date), isoDay(o.next_hu))); e.service = laterDay(e.service, isoDay(o.next_service_date));
+  }
+  const today = now.toISOString().slice(0, 10);
+  const until = new Date(now.getTime() + days * 864e5).toISOString().slice(0, 10);
+  const from = new Date(now.getTime() - VEH_REM_OVERDUE_DAYS * 864e5).toISOString().slice(0, 10);
+  const sentKeys = new Set(logs.filter(l => l.status === 'gesendet').map(l => `${l.plate}|${l.reminder_key}`));
+  const optout = new Set(logs.filter(l => l.kind === 'optout' && l.email).map(l => String(l.email).toLowerCase()));
+  const list = [];
+  for (const e of byPlate.values()) {
+    const due = e[VEH_REM_KIND[kind].field];
+    if (!due || due > until || due < from) continue;
+    const key = `${kind}-${due}`;
+    const status = e.email && optout.has(e.email.toLowerCase()) ? 'abgemeldet' : sentKeys.has(`${e.plate}|${key}`) ? 'bereits_erinnert' : !e.email ? 'keine_email' : 'bereit';
+    list.push({ ...e, due, key, overdue: due < today, status });
+  }
+  return list.sort((a, b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name, 'de'));
+}
+async function mailVehicleReminder(env, db, ws, x, kind, logId, origin) {
+  const k = VEH_REM_KIND[kind];
+  const car = [x.brand, x.model].filter(Boolean).join(' ');
+  const intro = kind === 'hu'
+    ? (x.overdue
+      ? `die Hauptuntersuchung (HU/AU) für Ihr Fahrzeug war am <b>${fmtDate(x.due)}</b> fällig. Damit Sie wieder sicher und ohne Ärger unterwegs sind, kümmern wir uns gern darum – inklusive Vorab-Check, damit die Plakette beim ersten Mal klappt.`
+      : `die Hauptuntersuchung (HU/AU) für Ihr Fahrzeug ist am <b>${fmtDate(x.due)}</b> fällig. Wir übernehmen den Termin für Sie – inklusive Vorab-Check, damit die Plakette beim ersten Mal klappt.`)
+    : (x.overdue
+      ? `der nächste Service für Ihr Fahrzeug war am <b>${fmtDate(x.due)}</b> fällig. Regelmäßige Wartung schützt vor teuren Schäden und erhält den Wert Ihres Fahrzeugs.`
+      : `der nächste Service für Ihr Fahrzeug ist am <b>${fmtDate(x.due)}</b> fällig. Vereinbaren Sie jetzt Ihren Termin – regelmäßige Wartung schützt vor teuren Schäden und erhält den Wert Ihres Fahrzeugs.`);
+  const optUrl = `${origin}/erinnerung-abmelden?id=${encodeURIComponent(logId)}&t=${await vehicleOptoutToken(env, logId)}`;
+  const booking = x.order && x.order.customer_token ? { label: 'Termin online buchen', href: portalLink(x.order) } : null;
+  const rows = [['Kennzeichen', x.display || '–'], ...(car ? [['Fahrzeug', car]] : []), [kind === 'hu' ? 'HU/AU fällig' : 'Service fällig', fmtDate(x.due) + (kind === 'service' && x.service_km ? ` oder bei ${Number(x.service_km).toLocaleString('de-DE')} km` : '')]];
+  return sendMail(env, db, {
+    to: x.email, replyTo: ws.email, orderId: x.order ? x.order.id : null, code: ws.code, statusText: `Erinnerung ${k.word}`,
+    subject: `${k.subject} ist ${x.overdue ? 'überfällig' : 'bald fällig'} – ${x.display || car || ws.name}`,
+    html: mailHtml({ title: `Hallo ${x.name || ''},`, intro, rows, button: booking,
+      footer: `${booking ? '' : 'Für einen Termin antworten Sie einfach auf diese Mail oder rufen Sie uns an.<br>'}${contactFooter(ws)}<br><br>Sie erhalten diese Nachricht, weil Ihr Fahrzeug bei uns betreut wird. Keine Erinnerungen mehr? <a href="${esc(optUrl)}" style="color:#6b6b88">Hier abmelden</a>.` }),
+  });
+}
+async function vehicleReminder(db, env, code, body, origin) {
+  const kind = VEH_REM_KIND[body.kind] ? body.kind : null;
+  if (!kind) throw new HttpError(400, 'params');
+  const days = [30, 60, 90].includes(Number(body.days)) ? Number(body.days) : 60;
+  const list = await vehicleReminderList(db, code, kind, days);
+  const counts = list.reduce((a, x) => { a[x.status] = (a[x.status] || 0) + 1; return a; }, {});
+  const view = x => ({ id: x.plate, customer_name: x.name, license_plate: x.display, vehicle: [x.brand, x.model].filter(Boolean).join(' '), due: x.due, overdue: x.overdue,
+    email: x.email, status: x.status, booking: !!(x.order && x.order.customer_token), consent: !!(x.customer && x.customer.marketing_consent === true) });
+  if (body.action !== 'send') return { ok: true, kind, days, counts, max_per_run: REMINDER_MAX_PER_RUN, mail_ready: !!env.RESEND_API_KEY, items: list.map(view) };
+  if (!env.RESEND_API_KEY) throw new HttpError(503, 'not_available', { message: 'E-Mail-Versand ist noch nicht eingerichtet.' });
+  const only = Array.isArray(body.ids) && body.ids.length ? new Set(body.ids.map(String)) : null;
+  const todo = list.filter(x => x.status === 'bereit' && (!only || only.has(x.plate)));
+  const batch = todo.slice(0, REMINDER_MAX_PER_RUN);
+  const ws = { ...(await workshopInfo(db, code)), code };
+  let sent = 0, failed = 0;
+  for (const x of batch) {
+    const log = await db.create('ReminderLog', { workshop_code: code, kind, plate: x.plate, license_plate: x.display, due_date: x.due, reminder_key: x.key, email: x.email,
+      customer_name: x.name, vehicle_id: x.vehicle ? x.vehicle.id : undefined, order_id: x.order ? x.order.id : undefined, status: 'geplant' });
+    const r = await mailVehicleReminder(env, db, ws, x, kind, log.id, origin);
+    await db.update('ReminderLog', log.id, r.sent ? { status: 'gesendet', sent_at: nowIso() } : { status: 'fehlgeschlagen', error: String(r.reason || '').slice(0, 200) }).catch(e => console.log('vrem_mark', String(e)));
+    if (r.sent) sent++; else failed++;
+  }
+  return { ok: true, kind, sent, failed, remaining: todo.length - batch.length };
+}
+async function vehicleOptout(db, env, url) {
+  const id = url.searchParams.get('id') || '', tok = url.searchParams.get('t') || '';
+  const page = (title, text) => new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:48px 16px;color:#1a1a2e}main{max-width:440px;margin:auto;background:#fff;padding:28px;border-radius:14px;box-shadow:0 2px 12px #0001}p{color:#556;line-height:1.5}</style></head><body><main><h2>${esc(title)}</h2><p>${text}</p></main></body></html>`, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id) || tok !== await vehicleOptoutToken(env, id)) return page('Link ungültig', 'Dieser Abmelde-Link ist nicht gültig. Bitte wenden Sie sich direkt an Ihre Werkstatt.');
+  const log = await db.get('ReminderLog', id).catch(() => null);
+  if (!log || !log.email || !log.workshop_code) return page('Link ungültig', 'Diese Erinnerung ist nicht mehr gespeichert. Bitte wenden Sie sich direkt an Ihre Werkstatt.');
+  const email = String(log.email).toLowerCase();
+  const existing = await db.list('ReminderLog', { workshop_code: log.workshop_code, kind: 'optout' }, { limit: 10000 }).catch(() => []);
+  if (!existing.some(l => String(l.email || '').toLowerCase() === email)) await db.create('ReminderLog', { workshop_code: log.workshop_code, kind: 'optout', email, status: 'abgemeldet', sent_at: nowIso() });
+  return page('Abgemeldet', 'Sie erhalten von Ihrer Werkstatt keine HU- und Service-Erinnerungen mehr per E-Mail. Termine können Sie natürlich weiterhin jederzeit vereinbaren.');
+}
+
 /* ---------------- Nachrichten & Live-Chat ---------------- */
 const DASHBOARD_URL = 'https://login.autoleitwerk.de';
 const SUPPORT_TO = env => env.SUPPORT_EMAIL || 'info@autoleitwerk.de';
@@ -1382,7 +1491,7 @@ const EXPORT_ENTITIES = ['Workshop', 'WorkshopProfile', 'Employee', 'Order', 'Or
   'InventoryItem', 'PartOrder', 'OrderMessage', 'ChatSession', 'ChatMessage', 'AlexKnowledge',
   // Stammdaten, Planung und Buchhaltung (fehlten bis 1.12.2 in der Sicherung)
   'Customer', 'Vehicle', 'ImportRun', 'WorkAssignment', 'EmployeeAbsence',
-  'Supplier', 'ExpenseReceipt', 'Subscription', 'BankAccount', 'BankTransaction', 'CashEntry', 'JournalEntry'];
+  'Supplier', 'ExpenseReceipt', 'Subscription', 'BankAccount', 'BankTransaction', 'CashEntry', 'JournalEntry', 'ReminderLog'];
 
 /* Nächtliche Prüfung auf untergeschobene Datensätze: Ein Datensatz, den ein normaler Nutzer einer
  * anderen Werkstatt angelegt hat, gehört nicht in diese Werkstatt. Seit 1.12.2 verhindert eine Feldregel
@@ -1679,12 +1788,13 @@ async function handleFetch(request, env, ctx) {
       if (path === '/portalApi') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path === '/fn/portalApi' && request.method === 'POST') return json(await portalApi(db, body, env, ctx, url.origin), 200, cors);
       if (path.startsWith('/fn/') && request.method === 'POST') {
-        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia, tireReminder: (code, b) => tireReminder(db, env, code, b, url.origin), runSubscriptions: code => runSubscriptions(db, code), sendMail: o => sendMail(env, db, o), mailHtml, contactFooter, workshopInfo: c => workshopInfo(db, c), invalidate, dashboardUrl: DASHBOARD_URL }, ctx });
+        const r = await handleFunction(path.slice(4), body, { db, env, request, origin: url.origin, h: { gate: (c, m) => workshopGate(db, env, c, m), getData: c => getTabletData(db, { workshop_code: c }), mailPortalLink: o => mailPortalLink(env, db, o), HttpError, sha256Hex, randomHex, decodeDataUrl, rateLimit, mailWorkshopMessage, mailSupportChat, storeAttachment, cleanAttachments, ATTACH_MARK, storeTicket, mailStatusUpdate, mailAppointmentConfirm, mailReviewRequest, storeMedia, tireReminder: (code, b) => tireReminder(db, env, code, b, url.origin), vehicleReminder: (code, b) => vehicleReminder(db, env, code, b, url.origin), runSubscriptions: code => runSubscriptions(db, code), sendMail: o => sendMail(env, db, o), mailHtml, contactFooter, workshopInfo: c => workshopInfo(db, c), invalidate, dashboardUrl: DASHBOARD_URL }, ctx });
         invalidate('Order');
         if (r instanceof Response) { const hd = new Headers(r.headers); for (const [k, v] of Object.entries(cors)) hd.set(k, v); hd.set('Access-Control-Expose-Headers', 'Content-Disposition'); return new Response(r.body, { status: r.status, headers: hd }); }
         return json(r, 200, cors);
       }
       if (path === '/reifen-abmelden' && request.method === 'GET') return await tireOptout(db, env, url);
+      if (path === '/erinnerung-abmelden' && request.method === 'GET') return await vehicleOptout(db, env, url);
       if (path === '/admin' && request.method === 'GET') {
         return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoLeitwerk – Daten-Backup</title>
 <style>body{font:16px -apple-system,Segoe UI,sans-serif;background:#f4f4f7;margin:0;padding:40px 16px;color:#1a1a2e}main{max-width:420px;margin:auto;background:#fff;padding:24px;border-radius:14px;box-shadow:0 2px 12px #0001}input,button{width:100%;box-sizing:border-box;font:inherit;padding:12px;border-radius:10px;margin-top:10px}input{border:1px solid #ccd}button{background:#7c3aed;color:#fff;border:0;font-weight:600;cursor:pointer}p{color:#556;font-size:14px}</style></head>

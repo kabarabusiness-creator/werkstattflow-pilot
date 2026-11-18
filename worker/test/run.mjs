@@ -1196,6 +1196,68 @@ await t('Reifenlager: Saison-Erinnerung (Vorschau, Versand, keine Doppelung, Abm
   assert.equal((await fnU('tireReminder', { action: 'preview', season: 'herbst' })).s, 400);
   assert.equal((await fnU('tireReminder', { action: 'preview', season: 'winter' }, null)).s, 401);
 });
+await t('HU-/Service-Erinnerung (Vorschau, Fälligkeit, Versand, keine Doppelung, Abmelden)', async () => {
+  const fnU = (n, body, auth = 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx') => worker.fetch(new Request('https://api.test/fn/' + n, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; });
+  const day = n => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+  db.Customer = (db.Customer || []).concat([
+    { id: 'c1', workshop_code: 'AL-T1', name: 'Hanna HU', email: 'hanna@test.de', marketing_consent: true },
+    { id: 'c2', workshop_code: 'AL-T1', name: 'Ohne Mail' },
+  ]);
+  db.Vehicle = (db.Vehicle || []).concat([
+    { id: 'v1', workshop_code: 'AL-T1', customer_id: 'c1', license_plate: 'AB-HU 1', vehicle_brand: 'VW', vehicle_model: 'Golf', tuv_next_date: day(20), next_service_date: day(200) },
+    { id: 'v2', workshop_code: 'AL-T1', customer_id: 'c2', license_plate: 'AB-OM 3', tuv_next_date: day(10) },
+    { id: 'v3', workshop_code: 'AL-T1', customer_id: 'c1', license_plate: 'AB-SP 4', tuv_next_date: day(300) },
+    { id: 'v4', workshop_code: 'AL-T2', license_plate: 'AB-FR 5', tuv_next_date: day(5) },
+  ]);
+  // Fahrzeug nur aus Aufträgen bekannt, HU überfällig; neuerer Auftrag hat Portal-Link
+  db.Order.push({ id: 'oh1', workshop_code: 'AL-T1', customer_name: 'Otto Order', license_plate: 'AB-OO 7', email: 'otto@test.de', next_hu: day(-30), created_date: '2026-01-01T10:00:00Z' });
+  db.Order.push({ id: 'oh2', workshop_code: 'AL-T1', customer_name: 'Otto Order', license_plate: 'AB OO 7', email: 'otto@test.de', customer_token: 'wf-tokotto', created_date: '2026-06-01T10:00:00Z' });
+  db.Order.push({ id: 'oh3', workshop_code: 'AL-T1', customer_name: 'Hanna HU', license_plate: 'AB-HU1', customer_token: 'wf-tokhanna', created_date: '2026-05-01T10:00:00Z' });
+  db.Order.push({ id: 'oh4', workshop_code: 'AL-T1', customer_name: 'Uralt', license_plate: 'AB-UA 8', email: 'ua@test.de', next_hu: day(-400) });
+  let r = await fnU('vehicleReminder', { action: 'preview', kind: 'hu', days: 60 });
+  assert.equal(r.s, 200, JSON.stringify(r.d));
+  const st = Object.fromEntries(r.d.items.map(i => [i.id, i]));
+  assert.equal(st.ABHU1.status, 'bereit'); assert.equal(st.ABHU1.consent, true); assert.equal(st.ABHU1.booking, true); assert.equal(st.ABHU1.vehicle, 'VW Golf');
+  assert.equal(st.ABOM3.status, 'keine_email');
+  assert.equal(st.ABOO7.status, 'bereit'); assert.equal(st.ABOO7.overdue, true); assert.equal(st.ABOO7.booking, true);
+  assert.ok(!st.ABSP4 && !st.ABFR5 && !st.ABUA8, 'nicht fällig, fremde Werkstatt oder zu lange überfällig');
+  assert.equal(r.d.items[0].id, 'ABOO7', 'nach Fälligkeit sortiert');
+  const m0 = mails.length;
+  r = await fnU('vehicleReminder', { action: 'send', kind: 'hu', days: 60, ids: ['ABHU1', 'ABOO7', 'ABOM3', 'ABFR5'] });
+  assert.equal(r.d.sent, 2); assert.equal(r.d.failed, 0);
+  const sent = mails.slice(m0);
+  assert.deepEqual(sent.map(m => m.to[0]).sort(), ['hanna@test.de', 'otto@test.de']);
+  const mo = sent.find(m => m.to[0] === 'otto@test.de');
+  assert.match(mo.subject, /HU\/AU ist überfällig/); assert.match(mo.html, /kundenapp\.html\?token=wf-tokotto/); assert.match(mo.html, /erinnerung-abmelden\?id=n\d+&amp;t=[a-f0-9]{32}/);
+  assert.equal(mo.reply_to, 'a@b.de');
+  assert.match(sent.find(m => m.to[0] === 'hanna@test.de').subject, /bald fällig/);
+  assert.equal(db.ReminderLog.filter(l => l.status === 'gesendet').length, 2);
+  assert.ok(db.ReminderLog.every(l => l.workshop_code === 'AL-T1'));
+  r = await fnU('vehicleReminder', { action: 'send', kind: 'hu', days: 60 });
+  assert.equal(r.d.sent, 0, 'keine Doppelung');
+  r = await fnU('vehicleReminder', { action: 'preview', kind: 'hu', days: 60 });
+  assert.equal(r.d.items.find(i => i.id === 'ABHU1').status, 'bereits_erinnert');
+  // neues HU-Datum = neue Erinnerung möglich
+  db.Vehicle.find(v => v.id === 'v1').tuv_next_date = day(25);
+  r = await fnU('vehicleReminder', { action: 'preview', kind: 'hu', days: 60 });
+  assert.equal(r.d.items.find(i => i.id === 'ABHU1').status, 'bereit');
+  // Service-Erinnerung getrennt
+  r = await fnU('vehicleReminder', { action: 'preview', kind: 'service', days: 90 });
+  assert.equal(r.d.items.length, 0);
+  // Abmelden gilt für alle Erinnerungen an diese Adresse
+  const link = mo.html.match(/https:\/\/api\.test(\/erinnerung-abmelden\?id=n\d+&amp;t=[a-f0-9]{32})/)[1].replace(/&amp;/g, '&');
+  let res = await worker.fetch(new Request('https://api.test' + link), env);
+  assert.equal(res.status, 200); assert.match(await res.text(), /Abgemeldet/);
+  await worker.fetch(new Request('https://api.test' + link), env);
+  assert.equal(db.ReminderLog.filter(l => l.kind === 'optout').length, 1, 'nur einmal');
+  db.Order.find(o => o.id === 'oh2').next_hu = day(40);
+  r = await fnU('vehicleReminder', { action: 'preview', kind: 'hu', days: 60 });
+  assert.equal(r.d.items.find(i => i.id === 'ABOO7').status, 'abgemeldet');
+  res = await worker.fetch(new Request('https://api.test/erinnerung-abmelden?id=n1&t=' + 'a'.repeat(32)), env);
+  assert.match(await res.text(), /ungültig/);
+  assert.equal((await fnU('vehicleReminder', { action: 'preview', kind: 'tuev' })).s, 400);
+  assert.equal((await fnU('vehicleReminder', { action: 'preview', kind: 'hu' }, null)).s, 401);
+});
 await t('Einladungscode: anlegen (nur Admin), prüfen, einlösen, nur einmal, nur passende E-Mail', async () => {
   const fnT = async (name, body, tok) => { const r = await worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) }), env, ctx); await Promise.all(pending.splice(0)); return { s: r.status, d: await r.json() }; };
   assert.equal((await fnT('inviteCreate', { workshop_code: 'AL-T1' }, 'USER-AL-T1-xxxxxxxxxxxxxxxx')).s, 403, 'kein Admin');
