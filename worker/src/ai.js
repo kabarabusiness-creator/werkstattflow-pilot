@@ -473,7 +473,10 @@ export function normalizeRegistration(raw) {
   if (vehicleText && r.halter_name) {
     const hv = String(r.halter_name && typeof r.halter_name === 'object' ? r.halter_name.value : r.halter_name || '').toUpperCase();
     const words = hv.split(/[^A-ZÄÖÜ0-9]+/).filter((w) => w.length >= 3);
-    if (words.length && words.filter((w) => vehicleText.includes(w)).length / words.length >= 0.5) r.halter_name = { value: '', confidence: 0 };
+    if (words.length && words.filter((w) => vehicleText.includes(w)).length / words.length >= 0.5) {
+      r.halter_name = { value: '', confidence: 0 };
+      if (r.halter_adresse && typeof r.halter_adresse === 'object') r.halter_adresse = { ...r.halter_adresse, confidence: Math.min(Number(r.halter_adresse.confidence) || 0.5, 0.5) };
+    }
   }
   for (const k of REG_FIELDS) {
     let f = r[k]; let v = f && typeof f === 'object' && 'value' in f ? f.value : f; let c = f && typeof f === 'object' ? Number(f.confidence) : 0.5;
