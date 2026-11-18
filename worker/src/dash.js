@@ -368,15 +368,19 @@ export async function handleFunction(name, body, c) {
         const orig = entries.find((e) => e.id === body.id);
         if (!orig) throw new HttpError(404, 'not_found', { message: 'Kassenbuchung nicht gefunden.' });
         if (orig.kind === 'storno') throw bad('Ein Storno kann nicht storniert werden.');
-        if (orig.cancelled_by || entries.some((e) => e.storno_of === orig.id)) throw bad('Diese Buchung ist bereits storniert.');
-        const rec = { workshop_code: code, account_id: acc.id, account: acc.name || 'Kasse', number: nextNo, entry_date: today, kind: 'storno', amount: -Number(orig.amount || 0),
-          vat_rate: Number(orig.vat_rate || 0), description: `Storno Nr. ${orig.number}: ${String(orig.description || '').slice(0, 150)}`, storno_of: orig.id,
+        if (orig.cancelled_by || entries.some((e) => e.kind === 'storno' && Number(e.storno_of) === Number(orig.number))) throw bad('Diese Buchung ist bereits storniert.');
+        const rec = { workshop_code: code, account_id: acc.id, account: orig.account || undefined, number: nextNo, entry_date: today, kind: 'storno', amount: -Number(orig.amount || 0),
+          vat_rate: Number(orig.vat_rate || 0), description: `Storno Nr. ${orig.number}: ${String(orig.description || '').slice(0, 150)}`, storno_of: Number(orig.number),
           invoice_number: orig.invoice_number || undefined, receipt_id: orig.receipt_id || undefined, by, recorded_at: new Date().toISOString() };
         const r = check([...entries, rec]);
         if (!r.ok) throw bad(`Storno nicht möglich: der Kassenbestand würde am ${fmtD(r.day)} unter 0 € fallen.`);
         rec.balance_after = r.after.get(rec) / 100;
         const created = await db.create('CashEntry', Object.fromEntries(Object.entries(rec).filter(([, v]) => v !== undefined)));
-        await db.update('CashEntry', orig.id, { cancelled_by: created.id });
+        await db.update('CashEntry', orig.id, { cancelled_by: created.number });
+        if (orig.receipt_id && orig.kind === 'ausgabe') {
+          const rc = await getRec('ExpenseReceipt', orig.receipt_id);
+          if (rc && rc.cash_entry_id === orig.id) await db.update('ExpenseReceipt', rc.id, { cash_entry_id: '', payment_status: 'offen', paid_date: null });
+        }
         return { ok: true, entry: created, balance: r.end / 100 };
       }
 
@@ -394,19 +398,25 @@ export async function handleFunction(name, body, c) {
       if (!description) throw bad('Bitte einen Buchungstext eingeben.');
       const vat = ['einnahme', 'ausgabe'].includes(kind) ? Number(body.vat_rate || 0) : 0;
       if (![0, 7, 19].includes(vat)) throw bad('Steuersatz 0, 7 oder 19 %.');
-      const rec = { workshop_code: code, account_id: acc.id, account: acc.name || 'Kasse', number: nextNo, entry_date: date, kind, amount: (SIGN[kind] * amt) / 100, vat_rate: vat,
+      const rec = { workshop_code: code, account_id: acc.id, number: nextNo, entry_date: date, kind, amount: (SIGN[kind] * amt) / 100, vat_rate: vat,
         description, by, recorded_at: new Date().toISOString() };
+      // Gegenkonto (SKR03) für Einnahmen/Ausgaben ohne Rechnung bzw. Beleg
+      const gk = String(body.account || '').replace(/\D/g, '').slice(0, 5);
+      if (gk && ['einnahme', 'ausgabe'].includes(kind)) rec.account = gk;
       if (kind === 'einnahme' && body.invoice_number) rec.invoice_number = String(body.invoice_number).slice(0, 40);
       if (kind === 'ausgabe' && body.receipt_id) {
         const rc = await getRec('ExpenseReceipt', String(body.receipt_id));
         if (!rc) throw bad('Beleg nicht gefunden.');
         sameWorkshop(rc, code);
-        rec.receipt_id = rc.id;
+        if (rc.cash_entry_id || rc.bank_transaction_id) throw bad('Dieser Beleg ist bereits einer Zahlung zugeordnet.');
+        rec.receipt_id = rc.id; delete rec.account;
       }
+      if (rec.invoice_number) delete rec.account;
       const r = check([...entries, rec]);
       if (!r.ok) throw bad(`Nicht möglich: der Kassenbestand würde am ${fmtD(r.day)} unter 0 € fallen (Bestand jetzt ${fmt(check(entries).end ?? opening)}).`);
       rec.balance_after = r.after.get(rec) / 100;
       const created = await db.create('CashEntry', rec);
+      if (rec.receipt_id) await db.update('ExpenseReceipt', rec.receipt_id, { cash_entry_id: created.id, payment_status: 'bezahlt', payment_method: 'bar', paid_date: date });
       return { ok: true, entry: created, balance: r.end / 100 };
     });
   }

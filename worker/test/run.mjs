@@ -1315,14 +1315,19 @@ await t('Kassenbuch: fortlaufende Nummer, Bestand, kein Minus, Storno, Abschluss
   assert.equal(r.s, 200, JSON.stringify(r.d)); assert.equal(r.d.entry.number, 1); assert.equal(r.d.entry.amount, 59.5); assert.equal(r.d.balance, 159.5);
   assert.equal(r.d.entry.workshop_code, 'AL-T1'); assert.equal(r.d.entry.by, 'Chef T1'); assert.ok(r.d.entry.recorded_at);
   r = await fnU('cashEntry', { account_id: 'k1', kind: 'ausgabe', amount: 30, vat_rate: 19, description: 'Tanken', receipt_id: 'er1', by: 'Max (Kasse)' });
-  assert.equal(r.d.entry.number, 2); assert.equal(r.d.entry.amount, -30); assert.equal(r.d.entry.receipt_id, 'er1'); assert.equal(r.d.entry.by, 'Max (Kasse)'); assert.equal(r.d.balance, 129.5);
+  assert.equal(r.d.entry.number, 2); assert.equal(r.d.entry.amount, -30); assert.equal(r.d.entry.receipt_id, 'er1');
+  const er1 = db.ExpenseReceipt.find(x => x.id === 'er1'); assert.equal(er1.payment_status, 'bezahlt'); assert.equal(er1.cash_entry_id, r.d.entry.id); assert.equal(er1.payment_method, 'bar');
+  assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'ausgabe', amount: 30, description: 'doppelt', receipt_id: 'er1' })).s, 400, 'Beleg nur einmal bezahlen'); assert.equal(r.d.entry.by, 'Max (Kasse)'); assert.equal(r.d.balance, 129.5);
+  r = await fnU('cashEntry', { account_id: 'k1', kind: 'ausgabe', amount: 1, vat_rate: 19, description: 'Porto', account: '4910' });
+  assert.equal(r.d.entry.account, '4910'); assert.equal(r.d.entry.number, 3);
+  r = await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: r.d.entry.id }); assert.equal(r.d.entry.account, '4910');
   r = await fnU('cashEntry', { account_id: 'k1', kind: 'entnahme', amount: 500, description: 'zu viel' });
   assert.equal(r.s, 400); assert.match(r.d.message, /unter 0/);
   // rückdatiert: am Tag vor der Einnahme waren nur 100 € da
   r = await fnU('cashEntry', { account_id: 'k1', kind: 'bank_einzahlung', amount: 120, description: 'zur Bank', entry_date: day(-2) });
   assert.equal(r.s, 400, 'Bestand darf auch rückwirkend nicht unter 0 fallen');
   r = await fnU('cashEntry', { account_id: 'k1', kind: 'bank_einzahlung', amount: 80, description: 'zur Bank', entry_date: day(-2) });
-  assert.equal(r.s, 200); assert.equal(r.d.entry.balance_after, 20); assert.equal(r.d.entry.number, 3); assert.equal(r.d.balance, 49.5);
+  assert.equal(r.s, 200); assert.equal(r.d.entry.balance_after, 20); assert.equal(r.d.entry.number, 5); assert.equal(r.d.balance, 49.5);
   assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 5, description: 'x', entry_date: day(1) })).s, 400, 'keine Zukunft');
   assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 5, description: 'x', entry_date: day(-40) })).s, 400, 'nicht zu alt');
   assert.equal((await fnU('cashEntry', { account_id: 'k1', kind: 'einnahme', amount: 0, description: 'x' })).s, 400);
@@ -1341,8 +1346,8 @@ await t('Kassenbuch: fortlaufende Nummer, Bestand, kein Minus, Storno, Abschluss
   assert.equal(r.s, 400, 'Storno der Einnahme würde den Bestand unter 0 bringen'); 
   const second = db.CashEntry.find(e => e.number === 2);
   r = await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: second.id });
-  assert.equal(r.s, 200, JSON.stringify(r.d)); assert.equal(r.d.entry.kind, 'storno'); assert.equal(r.d.entry.amount, 30); assert.equal(r.d.entry.storno_of, second.id); assert.equal(r.d.entry.number, 4);
-  assert.equal(r.d.entry.receipt_id, 'er1'); assert.equal(second.cancelled_by, r.d.entry.id); assert.equal(r.d.balance, 79.5);
+  assert.equal(r.s, 200, JSON.stringify(r.d)); assert.equal(r.d.entry.kind, 'storno'); assert.equal(r.d.entry.amount, 30); assert.equal(r.d.entry.storno_of, 2); assert.equal(r.d.entry.number, 6);
+  assert.equal(r.d.entry.receipt_id, 'er1'); assert.equal(second.cancelled_by, 6); assert.equal(er1.payment_status, 'offen'); assert.equal(er1.cash_entry_id, ''); assert.equal(r.d.balance, 79.5);
   assert.equal((await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: second.id })).d.message, 'Diese Buchung ist bereits storniert.');
   assert.equal((await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: r.d.entry.id })).s, 400, 'Storno vom Storno');
   db.WorkshopProfile[0].books_closed_until = undefined;
