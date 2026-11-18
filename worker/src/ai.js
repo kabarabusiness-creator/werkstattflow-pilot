@@ -500,7 +500,9 @@ export async function registrationScan(key, images, env) {
   limitPerHour('reg:' + key, SCAN_PER_HOUR);
   if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
   const parsed = await visionJson(env, REG_PROMPT, images.slice(0, 2), 1800);
-  return normalizeRegistration(parsed);
+  const out = normalizeRegistration(parsed);
+  if (env.REG_DEBUG_LINES === '1') out._zeilen = parsed && parsed.zeilen; // TEMP Diagnose
+  return out;
 }
 
 /* ---------- Eingangsbeleg (Rechnung, Quittung) ---------- */
