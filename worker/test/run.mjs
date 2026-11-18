@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import worker from '../src/index.js';
-import { finCheckDigit, normalizeRegistration } from '../src/ai.js';
+import { finCheckDigit, normalizeRegistration, parseRegistrationLines } from '../src/ai.js';
 
 const sha = s => createHash('sha256').update(s).digest('hex');
 const APP = 'app1';
@@ -1365,6 +1365,18 @@ await t('Fahrzeugschein: Prüfziffer zur FIN (Feld 3) und typische Lesefehler', 
   assert.equal(scan(ok, '-').fin_pruefung.status, 'ohne');
   r = normalizeRegistration({ tsn: { value: 'BMS00011', confidence: 0.9 }, naechste_hu: { value: '05/2027', confidence: 0.9 }, reifen_achse1: { value: '205/55 r16 91v', confidence: 0.9 }, emissionsschluessel: { value: '0 4 5 5', confidence: 0.9 } });
   assert.equal(r.tsn.value, 'BMS'); assert.equal(r.naechste_hu.value, '2027-05'); assert.equal(r.reifen_achse1.value, '205/55 R16 91V'); assert.equal(r.emissionsschluessel.value, '0455');
+});
+await t('Fahrzeugschein: Abschrift schlägt falsche KI-Zuordnung (HSN nicht aus F.1, Erstzulassung nicht aus Feld 6)', async () => {
+  const zeilen = ['AB MK4545', 'KABARA', 'MERT', '11.2025', '01.07.2025', '16.10.2006 | 0005 | AAM00001 9', 'M1 | AB', 'WBAUF11030PT77446 | X', 'BMW', 'EURO 4', 'Benzin', '0001 | 0462 | 1596',
+    '2 | 1 | 85/6000 | 200', '4227-4227 | 1751-1751', '181 | 1745 | 1745', '195/55 R16 87H', '195/55 R16 87H', 'Blau | 5', '17.10.2005 | K | GX112510'];
+  const r = normalizeRegistration({ hsn: { value: '1745', confidence: 1 }, tsn: { value: '175', confidence: 1 }, erstzulassung: { value: '2005-10-17', confidence: 1 }, leistung_kw: { value: 181, confidence: 1 }, hubraum_ccm: { value: 1955, confidence: 1 }, fin: { value: 'WBAUF11030PT77446', confidence: 1 }, pruefziffer: { value: 'X', confidence: 1 }, zeilen });
+  assert.equal(r.hsn.value, '0005'); assert.equal(r.tsn.value, 'AAM'); assert.equal(r.erstzulassung.value, '2006-10-16');
+  assert.equal(r.leistung_kw.value, 85); assert.equal(r.hubraum_ccm.value, 1596); assert.equal(r.naechste_hu.value, '2025-11'); assert.equal(r.fin_pruefung.status, 'ok');
+  assert.equal(r.reifen_achse2.value, '195/55 R16 87H'); assert.equal(r.emissionsschluessel.value, '0462');
+  // mit Feldcodes in der Abschrift
+  const p = parseRegistrationLines(['B 16.10.2006 (2.1) 0005 (2.2) AAM00001 9', 'E WBAUF11030PT77446 (3) X', '(10) 0001 (14.1) 0462 P.1 1596']);
+  assert.equal(p.hsn, '0005'); assert.equal(p.pruefziffer, 'X'); assert.equal(p.hubraum_ccm, 1596);
+  assert.deepEqual(parseRegistrationLines(null), {});
 });
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

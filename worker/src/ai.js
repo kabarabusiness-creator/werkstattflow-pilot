@@ -351,24 +351,72 @@ export async function tireScan(sess, body, env, checkImage) {
 // (15.1)/(15.2) Bereifung Achse 1/2). Die nächste HU steht vorne im Feld „Nächste HU“ (Monat/Jahr) bzw. als Stempel.
 const REG_FIELDS = ['kennzeichen', 'erstzulassung', 'datum_zulassung', 'halter_name', 'halter_adresse', 'marke', 'typ_variante', 'modell_handelsbezeichnung', 'fin', 'pruefziffer', 'hsn', 'tsn', 'kraftstoff', 'leistung_kw', 'hubraum_ccm', 'farbe', 'naechste_hu', 'fahrzeugklasse', 'schadstoffklasse', 'emissionsschluessel', 'reifen_achse1', 'reifen_achse2'];
 const REG_PROMPT = `Du liest ein Foto einer deutschen Zulassungsbescheinigung Teil I (Fahrzeugschein, Format seit 2005).
-Jedes Feld ist mit seinem Code beschriftet: Buchstaben (A, B, C.1.1 …) sind EU-einheitlich, Ziffern in Klammern ((2.1), (3), (15.1) …) sind deutsche Felder.
+Jedes Feld ist mit einem kleinen Code beschriftet: Buchstaben (A, B, C.1.1 …) sind EU-einheitlich, Ziffern ((2.1), (3), (15.1) …) sind deutsche Felder.
+Aufbau des aufgeklappten Scheins:
+- Links (Halterseite): A Kennzeichen (groß), C.1.1 Name, C.1.2 Vorname, C.1.3 Anschrift, unten "Nächste HU Monat/Jahr" (z. B. 11.2025) und I Datum dieser Zulassung.
+- Mitte, Fahrzeugdaten von oben nach unten:
+  Zeile 1: B Datum der Erstzulassung | (2.1) HSN, 4 Ziffern | (2.2) 8 Zeichen, die ersten 3 sind die TSN, dahinter eine Prüfziffer
+  Zeile 2: J Fahrzeugklasse | (4) Aufbauart
+  Zeile 3: E FIN (17 Zeichen) | (3) Prüfziffer, EIN Zeichen
+  danach D.1 Marke, D.2 in drei Zeilen (Typ, Variante, Version), D.3 Handelsbezeichnung, (2) Hersteller, (5) Fahrzeugart/Aufbau, V.9 | (14) Schadstoffklasse, P.3 Kraftstoff,
+  vorletzte Zeile: (10) Code Kraftstoff | (14.1) Emissionsschlüssel | P.1 Hubraum
+- Rechts: L Achsen | (9) | P.2/P.4 "kW/Drehzahl" (z. B. 85/6000) | T Höchstgeschwindigkeit; Maße (18)(19)(20) und G; F.1, F.2, Achslasten, O.1, O.2, S.1;
+  (15.1)/(15.2)/(15.3) Reifen; R Farbe | (11); K Typgenehmigung; (6) Datum zu K | (17) | (16).
+WICHTIG: 4-stellige Zahlen auf der rechten Seite (Massen F.1, F.2, G, Achslasten, Maße) sind NIE die HSN. Die HSN steht in Zeile 1 direkt rechts neben dem Datum B.
+Das Datum bei (6) rechts unten ist NICHT die Erstzulassung. V.7 (CO₂, z. B. 181) ist NICHT die Leistung – die Leistung ist die Zahl vor dem Schrägstrich bei P.2/P.4.
 Lies nur ab, was wirklich erkennbar ist. Erfinde nichts. Nicht lesbar = Wert "" und confidence 0.
-Felder:
-- kennzeichen (A, z. B. "M-AB 1234")
-- erstzulassung (B, Datum der Erstzulassung, als YYYY-MM-DD)
-- datum_zulassung (I, Datum dieser Zulassung, als YYYY-MM-DD)
-- halter_name (C.1.1 Name/Firma, dahinter C.1.2 Vorname), halter_adresse (C.1.3 Straße, PLZ Ort)
-- marke (D.1), typ_variante (D.2), modell_handelsbezeichnung (D.3)
-- fin (E, genau 17 Zeichen, nie I, O oder Q)
-- pruefziffer (Feld (3) direkt bei der FIN: genau EIN Zeichen, Ziffer 0–9 oder X; "-" falls ein Strich)
-- hsn (2.1, genau 4 Ziffern)
-- tsn (2.2: dort stehen 8 Zeichen; gib die ersten 3 Zeichen zurück)
-- kraftstoff (P.3, z. B. Benzin, Diesel, Elektro), leistung_kw (P.2, Zahl vor dem Schrägstrich), hubraum_ccm (P.1, Zahl)
-- farbe (R), fahrzeugklasse (J, z. B. M1)
-- schadstoffklasse (V.9, z. B. "EURO 6D"), emissionsschluessel (14.1, Code aus Ziffern/Buchstaben)
-- reifen_achse1 (15.1), reifen_achse2 (15.2), jeweils die Reifengröße wie aufgedruckt, z. B. "205/55R16 91V"
-- naechste_hu (Feld bzw. Stempel "Nächste HU", Monat und Jahr, als YYYY-MM; nur falls sichtbar)
-Antworte NUR mit JSON: {"kennzeichen":{"value":"","confidence":0}, ...} – für jedes der genannten Felder ein Objekt mit value und confidence (0–1).`;
+Felder: kennzeichen (A), erstzulassung (B, YYYY-MM-DD), datum_zulassung (I, YYYY-MM-DD), halter_name (C.1.1 und C.1.2), halter_adresse (C.1.3),
+marke (D.1), typ_variante (D.2, alle drei Zeilen mit Leerzeichen), modell_handelsbezeichnung (D.3), fin (E), pruefziffer ((3), "-" falls Strich),
+hsn ((2.1)), tsn (erste 3 Zeichen von (2.2)), kraftstoff (P.3), leistung_kw (Zahl), hubraum_ccm (P.1, Zahl), farbe (R), fahrzeugklasse (J),
+schadstoffklasse (14, z. B. "EURO 4"), emissionsschluessel ((14.1)), reifen_achse1 ((15.1)), reifen_achse2 ((15.2)), naechste_hu (YYYY-MM).
+Außerdem "zeilen": eine Abschrift ALLER Zeilen der Fahrzeugdaten (Mitte und rechts) und der Halterseite, von oben nach unten, Werte einer Zeile mit " | " getrennt, ohne die kleinen Feldcodes.
+Antworte NUR mit JSON: {"kennzeichen":{"value":"","confidence":0}, …, "zeilen":["16.10.2006 | 0005 | AAM00001 9", …]}.`;
+
+// Abschrift zeilenweise auswerten: feste Muster sind zuverlässiger als die Feldzuordnung der KI
+export function parseRegistrationLines(lines) {
+  const out = {};
+  if (!Array.isArray(lines)) return out;
+  const L = lines.map((l) => String(l || '').toUpperCase().replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 80);
+  // kleine Feldcodes wie "2.1", "(15.1)", "P.3" entfernen, Datumsangaben bleiben erhalten
+  const clean = (l) => l
+    .replace(/\(\d{1,2}(?:\.\d)?\)/g, ' ')
+    .replace(/(?<![\w.])[A-Z]\.\d(?:\.\d)?(?:\/[A-Z]\.\d)?(?![\w.])/g, ' ')
+    .replace(/(?<![\d.])\d{1,2}\.\d(?![\d.])/g, ' ')
+    .replace(/[|:;]/g, ' ').replace(/\s+/g, ' ').trim();
+  const C = L.map(clean);
+  const iso = (d, m, y) => `${y}-${m}-${d}`;
+  // Zeile 1: B Datum | (2.1) HSN | (2.2) TSN + 5 Zeichen + Prüfziffer
+  for (const l of C) {
+    const m = l.match(/(\d{2})\.(\d{2})\.((?:19|20)\d{2}) (\d{4}) ([A-Z0-9]{3}) ?([A-Z0-9]{5})(?: ([0-9X]))?\b/);
+    if (m) { out.erstzulassung = iso(m[1], m[2], m[3]); out.hsn = m[4]; out.tsn = m[5].replace(/O/g, '0'); break; }
+  }
+  // FIN mit Prüfziffer (3) dahinter
+  for (const l of C) {
+    const m = l.match(/\b([A-HJ-NPR-Z0-9]{17})\b(?: ([0-9X-]))?/);
+    if (m && /[A-Z]/.test(m[1]) && /\d/.test(m[1])) { out.fin = m[1]; if (m[2]) out.pruefziffer = m[2] === '-' ? '' : m[2]; break; }
+  }
+  // P.2/P.4 Leistung/Drehzahl, z. B. 85/6000
+  for (const l of C) {
+    const m = l.match(/(?:^| )(\d{1,4}(?:[.,]\d)?) ?\/ ?(\d{4,5})(?: |$)/);
+    if (m && Number(m[2]) >= 1000 && Number(m[2]) <= 20000) { out.leistung_kw = Math.round(Number(m[1].replace(',', '.'))); break; }
+  }
+  // (10) | (14.1) | P.1, z. B. "0001 0462 1596"
+  for (const l of C) {
+    const m = l.match(/^(\d{4}) ([0-9A-Z]{4}) (\d{2,5}|-)$/);
+    if (m) { out.emissionsschluessel = m[2]; if (m[3] !== '-') out.hubraum_ccm = Number(m[3]); break; }
+  }
+  const tyres = [];
+  C.forEach((l) => { const re = /(\d{3}\/\d{2} ?Z?R ?\d{2}(?: ?C)? ?\d{2,3}(?:\/\d{2,3})? ?[A-Z]{1,2}\b)/g; let m; while ((m = re.exec(l))) tyres.push(m[1].replace(/\s+/g, ' ')); });
+  if (tyres[0]) out.reifen_achse1 = tyres[0];
+  if (tyres[1]) out.reifen_achse2 = tyres[1];
+  for (const l of C) { const m = l.match(/\bEURO ?(\d[A-Z]?(?:[- ]?(?:TEMP|ISC|FCM|D|C|B|A)){0,2})\b/); if (m) { out.schadstoffklasse = 'EURO ' + m[1].replace(/ /g, '-'); break; } }
+  for (const l of C) { const m = l.match(/^(BENZIN|DIESEL|ELEKTRO|HYBR[A-Z/ ]*|ERDGAS[A-Z ]*|FLÜSSIGGAS[A-Z ]*|LPG|CNG|WASSERSTOFF)\b/); if (m) { out.kraftstoff = m[1].charAt(0) + m[1].slice(1).toLowerCase(); break; } }
+  // Nächste HU: Monat/Jahr ohne Tag, nur wenn eindeutig
+  const hu = new Set(); C.forEach((l) => { const re = /(?<![\d.])(0[1-9]|1[0-2])[./](20\d{2})(?![\d.])/g; let m; while ((m = re.exec(l))) hu.add(`${m[2]}-${m[1]}`); });
+  if (hu.size === 1) out.naechste_hu = [...hu][0];
+  return out;
+}
+
 
 // Prüfziffer zur FIN (Feld 3) nach KBA, Modulo 11: Buchstaben A–I und J–R = 1–9, S–Z = 2–9; Gewichte 9..2,10,9..2; Rest 10 = X
 const FIN_WEIGHTS = [9, 8, 7, 6, 5, 4, 3, 2, 10, 9, 8, 7, 6, 5, 4, 3, 2];
@@ -406,7 +454,10 @@ function finRepair(fin, check) {
 }
 
 export function normalizeRegistration(raw) {
-  const r = raw || {}; const out = {};
+  const r = { ...(raw || {}) }; const out = {};
+  // Werte aus der zeilenweisen Abschrift haben Vorrang, wenn ihr festes Muster passt
+  const parsed = parseRegistrationLines(r.zeilen);
+  for (const [k, v] of Object.entries(parsed)) if (v !== '' && v != null) r[k] = { value: v, confidence: 0.95 };
   for (const k of REG_FIELDS) {
     let f = r[k]; let v = f && typeof f === 'object' && 'value' in f ? f.value : f; let c = f && typeof f === 'object' ? Number(f.confidence) : 0.5;
     if (!Number.isFinite(c)) c = 0.5; c = Math.max(0, Math.min(1, c));
@@ -448,7 +499,7 @@ export function normalizeRegistration(raw) {
 export async function registrationScan(key, images, env) {
   limitPerHour('reg:' + key, SCAN_PER_HOUR);
   if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');
-  const parsed = await visionJson(env, REG_PROMPT, images.slice(0, 2), 1000);
+  const parsed = await visionJson(env, REG_PROMPT, images.slice(0, 2), 1800);
   return normalizeRegistration(parsed);
 }
 
