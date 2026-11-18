@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import worker from '../src/index.js';
+import { finCheckDigit, normalizeRegistration } from '../src/ai.js';
 
 const sha = s => createHash('sha256').update(s).digest('hex');
 const APP = 'app1';
@@ -1351,6 +1352,19 @@ await t('Kassenbuch: fortlaufende Nummer, Bestand, kein Minus, Storno, Abschluss
   assert.equal((await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: second.id })).d.message, 'Diese Buchung ist bereits storniert.');
   assert.equal((await fnU('cashEntry', { account_id: 'k1', action: 'storno', id: r.d.entry.id })).s, 400, 'Storno vom Storno');
   db.WorkshopProfile[0].books_closed_until = undefined;
+});
+await t('Fahrzeugschein: Prüfziffer zur FIN (Feld 3) und typische Lesefehler', async () => {
+  assert.equal(finCheckDigit('A1BS31Z0430336179'), '4'); // Rechenbeispiel des KBA
+  assert.equal(finCheckDigit('ZU KURZ'), null);
+  const scan = (fin, pz, extra = {}) => normalizeRegistration({ fin: { value: fin, confidence: 0.9 }, pruefziffer: { value: pz, confidence: 0.9 }, ...extra });
+  const ok = 'WVWZZZ1KZAW123456'; const pz = finCheckDigit(ok);
+  assert.equal(scan(ok, pz).fin_pruefung.status, 'ok');
+  let r = scan('WVWZZZ1K2AW123456', pz); assert.equal(r.fin.value, ok); assert.equal(r.fin_pruefung.status, 'korrigiert');
+  r = scan('WVWZZZ1KZAW1234S6', pz); assert.equal(r.fin.value, ok);
+  r = scan('WVW2ZZ1KZAW123456', pz); assert.equal(r.fin_pruefung.status, 'abweichend', 'mehrdeutig → nicht raten'); assert.ok(r.fin.confidence <= 0.3);
+  assert.equal(scan(ok, '-').fin_pruefung.status, 'ohne');
+  r = normalizeRegistration({ tsn: { value: 'BMS00011', confidence: 0.9 }, naechste_hu: { value: '05/2027', confidence: 0.9 }, reifen_achse1: { value: '205/55 r16 91v', confidence: 0.9 }, emissionsschluessel: { value: '0 4 5 5', confidence: 0.9 } });
+  assert.equal(r.tsn.value, 'BMS'); assert.equal(r.naechste_hu.value, '2027-05'); assert.equal(r.reifen_achse1.value, '205/55 R16 91V'); assert.equal(r.emissionsschluessel.value, '0455');
 });
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

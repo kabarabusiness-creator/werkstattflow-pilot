@@ -345,13 +345,65 @@ export async function tireScan(sess, body, env, checkImage) {
 }
 
 /* ---------- Fahrzeugschein (Zulassungsbescheinigung Teil I) ---------- */
-const REG_FIELDS = ['kennzeichen', 'erstzulassung', 'halter_name', 'halter_adresse', 'marke', 'typ_variante', 'modell_handelsbezeichnung', 'fin', 'hsn', 'tsn', 'kraftstoff', 'leistung_kw', 'hubraum_ccm', 'farbe', 'naechste_hu'];
-const REG_PROMPT = `Du liest ein Foto der Vorderseite einer deutschen Zulassungsbescheinigung Teil I (Fahrzeugschein).
+// Aufbau nach Anlage 6 FZV: Buchstabenfelder EU-einheitlich (A Kennzeichen, B Erstzulassung, C.1.x Halter, D.1–D.3 Marke/Typ/Handelsname,
+// E FIN, I Datum dieser Zulassung, J Fahrzeugklasse, P.1 Hubraum, P.2/P.4 kW/Drehzahl, P.3 Kraftstoff, R Farbe, V.9 Schadstoffklasse),
+// Ziffernfelder in Klammern national ((2.1) HSN, (2.2) TSN + Varianten-Code mit Prüfziffer, (3) Prüfziffer zur FIN, (14.1) Emissionsschlüssel,
+// (15.1)/(15.2) Bereifung Achse 1/2). Die nächste HU steht vorne im Feld „Nächste HU“ (Monat/Jahr) bzw. als Stempel.
+const REG_FIELDS = ['kennzeichen', 'erstzulassung', 'datum_zulassung', 'halter_name', 'halter_adresse', 'marke', 'typ_variante', 'modell_handelsbezeichnung', 'fin', 'pruefziffer', 'hsn', 'tsn', 'kraftstoff', 'leistung_kw', 'hubraum_ccm', 'farbe', 'naechste_hu', 'fahrzeugklasse', 'schadstoffklasse', 'emissionsschluessel', 'reifen_achse1', 'reifen_achse2'];
+const REG_PROMPT = `Du liest ein Foto einer deutschen Zulassungsbescheinigung Teil I (Fahrzeugschein, Format seit 2005).
+Jedes Feld ist mit seinem Code beschriftet: Buchstaben (A, B, C.1.1 …) sind EU-einheitlich, Ziffern in Klammern ((2.1), (3), (15.1) …) sind deutsche Felder.
 Lies nur ab, was wirklich erkennbar ist. Erfinde nichts. Nicht lesbar = Wert "" und confidence 0.
-Felder: kennzeichen (A, z. B. "M-AB 1234"), erstzulassung (B, als YYYY-MM-DD), halter_name (C.1 Name/Firma), halter_adresse (C.1 Straße, PLZ Ort),
-marke (D.1), typ_variante (D.2), modell_handelsbezeichnung (D.3), fin (E, genau 17 Zeichen ohne I/O/Q), hsn (2.1, genau 4 Ziffern),
-tsn (2.2, die ersten 3 Zeichen), kraftstoff (P.3), leistung_kw (P.2, Zahl), hubraum_ccm (P.1, Zahl), farbe (R), naechste_hu (YYYY-MM-DD, nur falls sichtbar).
+Felder:
+- kennzeichen (A, z. B. "M-AB 1234")
+- erstzulassung (B, Datum der Erstzulassung, als YYYY-MM-DD)
+- datum_zulassung (I, Datum dieser Zulassung, als YYYY-MM-DD)
+- halter_name (C.1.1 Name/Firma, dahinter C.1.2 Vorname), halter_adresse (C.1.3 Straße, PLZ Ort)
+- marke (D.1), typ_variante (D.2), modell_handelsbezeichnung (D.3)
+- fin (E, genau 17 Zeichen, nie I, O oder Q)
+- pruefziffer (Feld (3) direkt bei der FIN: genau EIN Zeichen, Ziffer 0–9 oder X; "-" falls ein Strich)
+- hsn (2.1, genau 4 Ziffern)
+- tsn (2.2: dort stehen 8 Zeichen; gib die ersten 3 Zeichen zurück)
+- kraftstoff (P.3, z. B. Benzin, Diesel, Elektro), leistung_kw (P.2, Zahl vor dem Schrägstrich), hubraum_ccm (P.1, Zahl)
+- farbe (R), fahrzeugklasse (J, z. B. M1)
+- schadstoffklasse (V.9, z. B. "EURO 6D"), emissionsschluessel (14.1, Code aus Ziffern/Buchstaben)
+- reifen_achse1 (15.1), reifen_achse2 (15.2), jeweils die Reifengröße wie aufgedruckt, z. B. "205/55R16 91V"
+- naechste_hu (Feld bzw. Stempel "Nächste HU", Monat und Jahr, als YYYY-MM; nur falls sichtbar)
 Antworte NUR mit JSON: {"kennzeichen":{"value":"","confidence":0}, ...} – für jedes der genannten Felder ein Objekt mit value und confidence (0–1).`;
+
+// Prüfziffer zur FIN (Feld 3) nach KBA, Modulo 11: Buchstaben A–I und J–R = 1–9, S–Z = 2–9; Gewichte 9..2,10,9..2; Rest 10 = X
+const FIN_WEIGHTS = [9, 8, 7, 6, 5, 4, 3, 2, 10, 9, 8, 7, 6, 5, 4, 3, 2];
+function finCharValue(ch) {
+  if (/\d/.test(ch)) return Number(ch);
+  const c = ch.charCodeAt(0);
+  if (c >= 65 && c <= 73) return c - 64; // A–I
+  if (c >= 74 && c <= 82) return c - 73; // J–R
+  if (c >= 83 && c <= 90) return c - 81; // S–Z
+  return null;
+}
+export function finCheckDigit(fin) {
+  const v = String(fin || '').toUpperCase();
+  if (!/^[A-Z0-9]{17}$/.test(v)) return null;
+  let sum = 0;
+  for (let i = 0; i < 17; i++) { const n = finCharValue(v[i]); if (n == null) return null; sum += n * FIN_WEIGHTS[i]; }
+  const r = sum % 11;
+  return r === 10 ? 'X' : String(r);
+}
+// Typische Lesefehler bei Fotos: je Stelle eine Verwechslung probieren, bis die Prüfziffer passt
+const FIN_CONFUSION = { '0': ['D'], D: ['0'], '8': ['B'], B: ['8'], '5': ['S'], S: ['5'], '2': ['Z'], Z: ['2'], '6': ['G'], G: ['6'], '4': ['A'], A: ['4'], U: ['V'], V: ['U'] };
+function finRepair(fin, check) {
+  const found = new Map();
+  for (let i = 0; i < 17; i++) {
+    for (const alt of FIN_CONFUSION[fin[i]] || []) {
+      const cand = fin.slice(0, i) + alt + fin.slice(i + 1);
+      if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(cand) || finCheckDigit(cand) !== check) continue;
+      // Plausibilität: hinten (laufende Nummer) stehen fast immer Ziffern, vorne (Herstellercode) meist Buchstaben
+      const digit = /\d/.test(alt);
+      const score = i >= 11 ? (digit ? 2 : -2) : i < 3 ? (digit ? -1 : 1) : 0;
+      found.set(cand, score);
+    }
+  }
+  return [...found.entries()].sort((x, y) => y[1] - x[1]);
+}
 
 export function normalizeRegistration(raw) {
   const r = raw || {}; const out = {};
@@ -363,14 +415,33 @@ export function normalizeRegistration(raw) {
     else v = String(v).trim().slice(0, 120);
     out[k] = { value: v, confidence: v === '' || v === 0 ? 0 : c };
   }
-  const fix = (k, re, transform) => { const f = out[k]; if (!f.value) return; const v = transform ? transform(String(f.value)) : String(f.value); f.value = v; if (!re.test(v)) f.confidence = Math.min(f.confidence, 0.4); };
+  const fix = (k, re, transform) => { const f = out[k]; if (!f.value) return; const v = transform ? transform(String(f.value)) : String(f.value); f.value = v; if (!v) f.confidence = 0; else if (!re.test(v)) f.confidence = Math.min(f.confidence, 0.4); };
   fix('fin', /^[A-HJ-NPR-Z0-9]{17}$/, v => v.toUpperCase().replace(/[\s-]/g, ''));
+  fix('pruefziffer', /^[0-9X]$/, v => v.toUpperCase().replace(/[^0-9X]/g, '').slice(0, 1));
   fix('hsn', /^\d{4}$/, v => v.replace(/\s/g, ''));
   fix('tsn', /^[A-Z0-9]{3}$/, v => v.toUpperCase().replace(/\s/g, '').slice(0, 3));
   const isoDate = v => { const m = v.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/); return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : v.slice(0, 10); };
+  const isoMonth = v => { const m = v.match(/^(\d{1,2})[./](\d{2,4})$/); if (m) return `${m[2].length === 2 ? '20' + m[2] : m[2]}-${m[1].padStart(2, '0')}`; return isoDate(v); };
   fix('erstzulassung', /^\d{4}-\d{2}-\d{2}$/, isoDate);
-  fix('naechste_hu', /^\d{4}-\d{2}(-\d{2})?$/, isoDate);
+  fix('datum_zulassung', /^\d{4}-\d{2}-\d{2}$/, isoDate);
+  fix('naechste_hu', /^\d{4}-\d{2}(-\d{2})?$/, isoMonth);
+  fix('fahrzeugklasse', /^[A-Z][0-9A-Z]{0,3}$/, v => v.toUpperCase().replace(/\s/g, ''));
+  fix('emissionsschluessel', /^[0-9A-Z]{2,6}$/, v => v.toUpperCase().replace(/\s/g, ''));
+  for (const k of ['reifen_achse1', 'reifen_achse2']) fix(k, /\d{3}\/\d{2}\s?Z?R\s?\d{2}/i, v => v.toUpperCase().replace(/\s+/g, ' '));
   out.kennzeichen.value = String(out.kennzeichen.value).toUpperCase();
+
+  // FIN gegen die Prüfziffer aus Feld (3) prüfen – fängt die meisten Lesefehler ab
+  const fin = String(out.fin.value || ''); const check = String(out.pruefziffer.value || '');
+  out.fin_pruefung = { status: 'ohne', hinweis: '' };
+  if (fin.length === 17 && /^[0-9X]$/.test(check)) {
+    if (finCheckDigit(fin) === check) { out.fin_pruefung = { status: 'ok', hinweis: 'FIN passt zur Prüfziffer (Feld 3).' }; out.fin.confidence = Math.max(out.fin.confidence, 0.97); }
+    else {
+      const ranked = finRepair(fin, check); const cands = ranked.map((x) => x[0]);
+      const fixed = ranked.length === 1 || (ranked.length > 1 && ranked[0][1] > ranked[1][1]) ? ranked[0][0] : null;
+      if (fixed) { out.fin_pruefung = { status: 'korrigiert', hinweis: `FIN anhand der Prüfziffer korrigiert (gelesen: ${fin}).`, gelesen: fin }; out.fin.value = fixed; out.fin.confidence = 0.8; }
+      else { out.fin_pruefung = { status: 'abweichend', hinweis: `FIN passt nicht zur Prüfziffer (Feld 3) – bitte Zeichen für Zeichen mit dem Schein vergleichen.${cands.length > 1 && cands.length <= 3 ? ' Möglich wäre: ' + cands.join(' oder ') + '.' : ''}`, kandidaten: cands.slice(0, 3) }; out.fin.confidence = Math.min(out.fin.confidence, 0.3); }
+    }
+  }
   return out;
 }
 
