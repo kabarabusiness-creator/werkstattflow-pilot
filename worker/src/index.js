@@ -1491,7 +1491,7 @@ const EXPORT_ENTITIES = ['Workshop', 'WorkshopProfile', 'Employee', 'Order', 'Or
   'InventoryItem', 'PartOrder', 'OrderMessage', 'ChatSession', 'ChatMessage', 'AlexKnowledge',
   // Stammdaten, Planung und Buchhaltung (fehlten bis 1.12.2 in der Sicherung)
   'Customer', 'Vehicle', 'ImportRun', 'WorkAssignment', 'EmployeeAbsence',
-  'Supplier', 'ExpenseReceipt', 'Subscription', 'BankAccount', 'BankTransaction', 'CashEntry', 'JournalEntry', 'ReminderLog'];
+  'Supplier', 'ExpenseReceipt', 'Subscription', 'BankAccount', 'BankTransaction', 'CashEntry', 'JournalEntry', 'ReminderLog', 'IntakeProtocol'];
 
 /* Nächtliche Prüfung auf untergeschobene Datensätze: Ein Datensatz, den ein normaler Nutzer einer
  * anderen Werkstatt angelegt hat, gehört nicht in diese Werkstatt. Seit 1.12.2 verhindert eine Feldregel
