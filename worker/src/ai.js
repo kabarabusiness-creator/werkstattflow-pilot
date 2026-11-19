@@ -233,7 +233,7 @@ const ALEX_TIMEOUT_MS = 30_000;
 // Echte Seiten im Dashboard – ALEX nennt nur diese (vorher wurden Menüs erfunden)
 const NAVIGATION = `Aufträge › Alle Aufträge / Neuer Auftrag / Teilebestellung / Freigaben; Werkstatt › Leitstelle / Hebebühnen / Tablet;
 Planung › Termine / Kalender / Einsatzplanung / Kapazitätsplanung; Telefon; Kunden & Fahrzeuge › Kunden / Fahrzeuge / HU- & Service-Erinnerung;
-Lager › Teile Lager / Reifenlager; Team › Mitarbeiter / Arbeitszeiten; Finanzen › Buchhaltung (Übersicht, Rechnungen & Belege, Kassenbuch, Umsätze/Kontoauszüge, Überweisungen, Buchungen, Auswertungen) / Rechnungen / Dienstleistungen & Preise;
+Lager › Teile Lager / Reifenlager; Team › Mitarbeiter / Arbeitszeiten; Finanzen › Buchhaltung (Bereiche: Übersicht, Belege = Ausgangsrechnungen, Mahnwesen, Eingang = Eingangsrechnungen/Belege, Abos, Auslagen, Umsätze = Kontoauszüge importieren, Überweisungen, Konten, Kassenbuch, Rechnungskunden, Lieferanten, Artikel, Offene Posten, Kontenübersicht, Buchungen, Auswertung, DATEV & Abschluss) / Rechnungen / Dienstleistungen & Preise;
 Berichte › Statistiken / Kennzahlen / Mitarbeiter-Berichte / Protokolle; Benachrichtigungen; Einstellungen; Hilfe & Support › Support / Live-Chat`;
 
 const SYSTEM = `Du bist ALEX, der KI-Assistent im Werkstatt-Tablet „AutoLeitwerk“ einer KFZ-Werkstatt.
