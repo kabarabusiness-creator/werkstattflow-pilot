@@ -8,6 +8,7 @@
  */
 import { recordAi } from './usage.js';
 import KB_BUNDLED from '../../docs/alex_kb.json' with { type: 'json' };
+import { findCodes, describeCode } from './dtc.js';
 
 export const TEXT_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
 // Nur für Vergleichstests in der Demo-Werkstatt (AL-DEMO) per model_test wählbar
@@ -24,7 +25,8 @@ export class AiError extends Error {
 /* ---------- Hilfen ---------- */
 const norm = s => String(s || '').toLowerCase().normalize('NFC').replace(/\s+/g, ' ').trim();
 const plateKey = s => String(s || '').toUpperCase().replace(/[^A-Z0-9ÄÖÜ]/g, '');
-const STOP = new Set(['der', 'die', 'das', 'und', 'oder', 'ist', 'sind', 'ein', 'eine', 'einen', 'mit', 'bei', 'für', 'fuer', 'wie', 'was', 'wann', 'wo', 'wir', 'ich', 'du', 'auf', 'aus', 'von', 'zum', 'zur', 'den', 'dem', 'des', 'noch', 'auch', 'kann', 'muss', 'soll', 'haben', 'hat', 'gibt', 'nicht', 'mal', 'bitte', 'heute', 'alex']);
+const STOP = new Set(['der', 'die', 'das', 'und', 'oder', 'ist', 'sind', 'ein', 'eine', 'einen', 'mit', 'bei', 'für', 'fuer', 'wie', 'was', 'wann', 'wo', 'wir', 'ich', 'du', 'auf', 'aus', 'von', 'zum', 'zur', 'den', 'dem', 'des', 'noch', 'auch', 'kann', 'muss', 'soll', 'haben', 'hat', 'gibt', 'nicht', 'mal', 'bitte', 'heute', 'alex',
+  'beim', 'vom', 'im', 'am', 'um', 'ins', 'ans', 'worauf', 'achten', 'welche', 'welcher', 'welches', 'wieviel', 'wie viel', 'viel', 'diesen', 'dieser', 'dieses', 'unser', 'unsere', 'meine', 'mein', 'sie', 'man', 'sagt', 'gemacht', 'machen', 'genau', 'immer', 'schon', 'jetzt', 'dann', 'wenn', 'aber', 'denn', 'weil', 'ungefähr', 'ungefaehr', 'ca', 'etwa', 'brauch', 'braucht', 'brauche', 'bekomme', 'ohne', 'nach', 'vor', 'über', 'ueber', 'unter', 'zwischen']);
 const tokens = s => norm(s).replace(/[^a-z0-9äöüß ]/g, ' ').split(' ').filter(w => w.length > 2 && !STOP.has(w));
 const DE_DAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 const STATUS_DE = {
@@ -96,26 +98,49 @@ const fold = s => norm(s).replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/
 const ftokens = s => fold(s).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter(w => w.length > 2 && !STOP.has(w));
 // gleicher Wortstamm: identisch oder gleiche ersten 5 Buchstaben (bremse/bremsen/bremsbelaege)
 const sameStem = (a, b) => a === b || (a.length >= 5 && b.length >= 5 && a.slice(0, 5) === b.slice(0, 5));
-export function searchKb(kb, question, vehicle) {
+// Suche mit Gewichtung nach Seltenheit: Wörter, die in vielen Einträgen vorkommen (prüfen, motor, wechseln),
+// zählen wenig – seltene Fachbegriffe (bremsbelag, ladedruck, p0299) viel. Treffer unter der Hälfte des besten fallen weg.
+const idfCache = new WeakMap();
+function kbIndex(kb) {
+  let ix = idfCache.get(kb);
+  if (ix) return ix;
+  const docs = kb.map(k => {
+    const kws = String(k.keywords || '').split(',').map(x => fold(x)).filter(w => w.length > 2);
+    return { k, kws, head: [...new Set([...kws.flatMap(x => x.split(' ')), ...ftokens(k.title)])].filter(w => w.length > 2), body: ftokens(k.content), all: fold(k.title + ' ' + k.keywords + ' ' + k.content) };
+  });
+  const df = new Map();
+  docs.forEach(d => new Set([...d.head, ...d.body].map(w => w.slice(0, 5))).forEach(st => df.set(st, (df.get(st) || 0) + 1)));
+  const N = Math.max(2, docs.length);
+  ix = { docs, idf: w => Math.log((N + 1) / ((df.get(w.slice(0, 5)) || 0) + 1)) / Math.log(N + 1) };
+  idfCache.set(kb, ix);
+  return ix;
+}
+// Wortstamm für die Suche: gemeinsamer Anfang von mind. 5 Zeichen bzw. Länge des kürzeren Worts minus 2
+// (ruckelt/ruckeln, bremse/bremsbelaege – aber nicht ueberfaellig/uebersicht oder steuerkette/steuergeraet)
+const kbStem = (a, b) => { if (a === b) return true; const n = Math.max(5, Math.min(a.length, b.length) - 2); return a.length >= 5 && b.length >= 5 && a.slice(0, n) === b.slice(0, n); };
+export function searchKb(kb, question, vehicle, debug) {
+  if (!kb || !kb.length) return [];
+  const { docs, idf } = kbIndex(kb);
   const qt = [...new Set(ftokens(question + ' ' + (vehicle || '')))];
   const qf = fold(question + ' ' + (vehicle || ''));
-  const codes = (qf.match(/\b[pcbu][0-9a-f]{4}\b/g) || []);
-  const has = (list, w) => list.some(x => sameStem(x, w));
-  return kb.map(k => {
-    let score = 0;
-    const kws = String(k.keywords || '').split(',').map(x => fold(x)).filter(w => w.length > 2);
-    const kwTok = kws.flatMap(x => x.split(' '));
-    const titleTok = ftokens(k.title); const contentTok = ftokens(k.content);
+  const codes = (qf.match(/\b[pcbu][0-9][0-9a-f]{3}\b/g) || []);
+  const has = (list, w) => list.some(x => kbStem(x, w));
+  const scored = docs.map(d => {
+    let score = 0; let strong = false; const why = [];
     qt.forEach(w => {
-      if (has(kwTok, w) || has(titleTok, w)) score += 3;
-      else if (w.length > 4 && has(contentTok, w)) score += 0.5;
+      const wi = idf(w);
+      if (has(d.head, w)) { score += 1 + 3 * wi; if (wi >= 0.3) strong = true; if (debug) why.push(w + ':' + wi.toFixed(2)); }
+      else if (w.length > 4 && has(d.body, w)) score += 0.6 * wi;
     });
-    kws.forEach(x => { if (x.length >= 3 && !kwTok.some(t => qt.some(w => sameStem(t, w))) && qf.includes(x)) score += 2; });
-    const all = fold(k.title + ' ' + k.keywords + ' ' + k.content);
-    codes.forEach(c => { if (all.includes(c)) score += 8; });
-    if (k.brand && qf.includes(fold(k.brand))) score += 2;
-    return { k, score };
-  }).filter(x => x.score >= 3).sort((a, b) => b.score - a.score).slice(0, 4).map(x => x.k);
+    // mehrteilige Schlagwörter („ladedruck zu niedrig“) als Ganzes
+    d.kws.forEach(x => { if (x.includes(' ') && qf.includes(x)) { score += 3; strong = true; } });
+    codes.forEach(c => { if (d.all.includes(c)) { score += 8; strong = true; } });
+    if (d.k.brand && qf.includes(fold(d.k.brand))) score += 1.5;
+    return { k: d.k, score, strong, why };
+  }).filter(x => x.strong && x.score >= 2.2).sort((a, b) => b.score - a.score);
+  const best = scored.length ? scored[0].score : 0;
+  if (debug) return scored.slice(0, 6).map(x => [x.k.title, x.score.toFixed(1), x.why.join(' ')]);
+  return scored.filter(x => x.score >= best * 0.5).slice(0, 4).map(x => x.k);
 }
 
 /* ---------- Werkstattdaten → Fakten + Karten ---------- */
@@ -193,23 +218,100 @@ function recommendations(data) {
 }
 
 /* ---------- ALEX ---------- */
-const SYSTEM = `Du bist ALEX, der KI-Assistent im Werkstatt-Tablet „AutoLeitwerk“ einer freien KFZ-Werkstatt.
+export const ALEX_MODEL = '@cf/openai/gpt-oss-120b';
+const ALEX_TIMEOUT_MS = 30_000;
+
+// Echte Seiten im Dashboard – ALEX nennt nur diese (vorher wurden Menüs erfunden)
+const NAVIGATION = `Aufträge › Alle Aufträge / Neuer Auftrag / Teilebestellung / Freigaben; Werkstatt › Leitstelle / Hebebühnen / Tablet;
+Planung › Termine / Kalender / Einsatzplanung / Kapazitätsplanung; Telefon; Kunden & Fahrzeuge › Kunden / Fahrzeuge / HU- & Service-Erinnerung;
+Lager › Teile Lager / Reifenlager; Team › Mitarbeiter / Arbeitszeiten; Finanzen › Buchhaltung (Übersicht, Rechnungen & Belege, Kassenbuch, Umsätze/Kontoauszüge, Überweisungen, Buchungen, Auswertungen) / Rechnungen / Dienstleistungen & Preise;
+Berichte › Statistiken / Kennzahlen / Mitarbeiter-Berichte / Protokolle; Benachrichtigungen; Einstellungen; Hilfe & Support › Support / Live-Chat`;
+
+const SYSTEM = `Du bist ALEX, der KI-Assistent im Werkstatt-Tablet „AutoLeitwerk“ einer KFZ-Werkstatt.
 Regeln:
-- Antworte immer auf Deutsch, kurz und praxisnah für Mechaniker und Serviceberater (höchstens ca. 150 Wörter).
-- Arbeitsschritte als nummerierte Liste, wichtige Werte **fett**. Keine Einleitungsfloskeln.
-- Nutze zuerst die WERKSTATTDATEN und die WISSENSEINTRÄGE. Wenn du einen Wissenseintrag verwendest, schreibe dahinter [Eintrag N].
-- Erfinde niemals Drehmomente, Füllmengen, Teilenummern, Preise, Termine oder Bestände. Steht etwas nicht in den Daten, sage das und verweise auf Herstellerdaten bzw. das Dashboard.
-- Bei Bremsen, Lenkung, Airbag und Hochvolt immer auf die Herstellervorgaben hinweisen.
-- Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sag, dass das im Dashboard geht.
-- Aufzählungen von Aufträgen kurz halten (höchstens 5, die wichtigsten zuerst) – die Details zeigt das Tablet als Karten.`;
+- Antworte immer auf Deutsch in der Sie-Form, kurz und praxisnah für Mechaniker und Serviceberater (höchstens ca. 150 Wörter). Fachbegriffe auf Deutsch (Ladedruck, nicht Boost; Abgaskrümmer nur, wenn gemeint).
+- Arbeitsschritte als nummerierte Liste, wichtige Werte **fett**. Keine Einleitungsfloskeln, keine Wiederholung der Frage.
+- Nutze zuerst FEHLERCODES, WERKSTATTDATEN und WISSENSEINTRÄGE. Wenn du einen Wissenseintrag verwendest, schreibe dahinter [Eintrag N]. Wissenseinträge, die nicht zur Frage passen, ignorierst du.
+- Fehlercodes: Die Bedeutung steht unter FEHLERCODES – übernimm sie genau so. Steht ein Code dort als herstellerspezifisch oder nicht hinterlegt, rate die Bedeutung NICHT, sondern sage das und empfehle Diagnosetester/Herstellerdaten.
+- Allgemeines Werkstattwissen (Diagnose-Vorgehen, typische Ursachen, Prüfreihenfolge) darfst du verwenden. Erfinde aber niemals Drehmomente, Füllmengen, Einstell- und Prüfwerte, Teilenummern, Preise, Termine oder Bestände – steht so ein Wert nicht in den Daten, sage „laut Herstellerdaten“ und nenne keine Zahl. Arbeitszeiten nur als grober Erfahrungswert und ausdrücklich so gekennzeichnet (Herstellerarbeitswerte prüfen).
+- Sicherheit: Bei Bremsen, Lenkung, Airbag, Hochvolt, Fahrwerk und Rädern immer auf die Herstellervorgaben hinweisen. Blinkende Motorkontrollleuchte bedeutet starke Zündaussetzer (Katalysator gefährdet) – das immer zuerst nennen.
+- Zahlen zu Aufträgen, Terminen, Lager, Umsatz und Rechnungen nur aus den WERKSTATTDATEN. Fehlen sie dort, sage das – schätze nie.
+- Seiten im Dashboard nur so nennen, wie sie in der NAVIGATION stehen. Andere Menüs gibt es nicht.
+- Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sagen, dass das im Dashboard über ALEX oder „Neuer Auftrag“ geht.
+- Aufzählungen von Aufträgen kurz halten (höchstens 5, die wichtigsten zuerst) – die Details zeigt das Tablet als Karten.
+- Wenn die Frage unklar ist (z. B. welches Fahrzeug), stelle genau eine kurze Rückfrage.
+
+NAVIGATION: ${NAVIGATION}`;
 
 // Dashboard: Text wird ohne Markdown angezeigt; Entwürfe legt ALEX dort selbst an (nach Bestätigung)
 const SYSTEM_DASHBOARD = SYSTEM
   .replace('im Werkstatt-Tablet „AutoLeitwerk“', 'im Dashboard von „AutoLeitwerk“')
-  .replace('Arbeitsschritte als nummerierte Liste, wichtige Werte **fett**.', 'Arbeitsschritte als nummerierte Liste (1., 2., …). Kein Markdown, keine Sternchen.')
-  .replace('- Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sag, dass das im Dashboard geht.',
+  .replace('Arbeitsschritte als nummerierte Liste, wichtige Werte **fett**.', 'Arbeitsschritte als nummerierte Liste (1., 2., …). Kein Markdown, keine Sternchen, keine Tabellen.')
+  .replace('- Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sagen, dass das im Dashboard über ALEX oder „Neuer Auftrag“ geht.',
     '- Aufträge, Termine und Teilebestellungen legst du nur als Entwurf an, wenn der Nutzer es ausdrücklich verlangt (z. B. „Neuer Auftrag für AB-CD 123, Ölwechsel“). Sonst nur antworten.')
   .replace('die Details zeigt das Tablet als Karten', 'die Details zeigt das Dashboard als Karten');
+
+// Hinweise, die unabhängig von der KI immer stimmen müssen
+function safetyFacts(qn) {
+  const out = [];
+  if (/(motor)?kontroll(leuchte|lampe)|mkl|motorleuchte|check.?engine/.test(qn) && /blink/.test(qn))
+    out.push('Blinkende Motorkontrollleuchte = starke Zündaussetzer, unverbrannter Kraftstoff gelangt in den Katalysator (Überhitzung/Schaden). Fahrzeug nicht unter Last weiterfahren, Fehlerspeicher auslesen (P0300–P0312).');
+  if (/öldruck|oeldruck|öllampe|oellampe|ölkontroll|oelkontroll/.test(qn))
+    out.push('Rote Öldruckleuchte während der Fahrt: Motor sofort abstellen, nicht weiterfahren – erst Ölstand und Öldruck (mechanisch messen) prüfen.');
+  if (/temperatur.*(rot|hoch|überhitz|ueberhitz)|überhitz|ueberhitz|kocht/.test(qn))
+    out.push('Überhitzung: Kühlsystem nicht im heißen Zustand öffnen (Verbrühungsgefahr); Motor nicht weiter belasten (Zylinderkopfdichtung).');
+  if (/hochvolt|hv-|hybrid|elektroauto|e-auto|\bev\b/.test(qn))
+    out.push('Hochvolt: Arbeiten nur durch Personal mit HV-Qualifikation nach Herstellervorgabe (Freischalten, gegen Wiedereinschalten sichern, Spannungsfreiheit feststellen).');
+  if (/airbag|gurtstraffer/.test(qn))
+    out.push('Airbag/Gurtstraffer: vor Arbeiten Batterie abklemmen und Wartezeit nach Herstellerangabe einhalten; Bauteile nie mit Messgerät durchmessen.');
+  return out;
+}
+
+// Rechnungen/Umsatz aus den Aufträgen (nur Dashboard – im Tablet sehen Mechaniker keine Zahlen)
+const eur = n => (Math.round(Number(n || 0) * 100) / 100).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+export function financeFacts(orders, receipts, today) {
+  const month = today.slice(0, 7);
+  const prev = (() => { const [y, m] = month.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; })();
+  const inv = orders.filter(o => o.invoice_number && o.invoice_date && Number(o.total_amount) > 0);
+  const sum = list => list.reduce((s, o) => s + Number(o.total_amount || 0), 0);
+  const inMonth = (m) => inv.filter(o => String(o.invoice_date).slice(0, 7) === m);
+  const year = inv.filter(o => String(o.invoice_date).slice(0, 4) === today.slice(0, 4));
+  const open = inv.filter(o => (o.payment_status || 'offen') !== 'bezahlt');
+  const overdue = open.filter(o => o.payment_due_date && String(o.payment_due_date).slice(0, 10) < today);
+  const lines = [
+    `Rechnungen diesen Monat (${month}): ${inMonth(month).length} Stück, ${eur(sum(inMonth(month)))} brutto`,
+    `Rechnungen Vormonat (${prev}): ${inMonth(prev).length} Stück, ${eur(sum(inMonth(prev)))} brutto`,
+    `Rechnungen ${today.slice(0, 4)} bisher: ${year.length} Stück, ${eur(sum(year))} brutto`,
+    `Offene (unbezahlte) Rechnungen: ${open.length} Stück, ${eur(sum(open))}` + (overdue.length ? `; davon überfällig: ${overdue.length} (${eur(sum(overdue))}) – ${overdue.slice(0, 5).map(o => `${o.invoice_number} ${o.customer_name || ''} ${eur(o.total_amount)} fällig ${deDate(o.payment_due_date)}`).join('; ')}` : '; keine überfällig'),
+  ];
+  if (receipts) {
+    const r = receipts.filter(x => String(x.receipt_date || '').slice(0, 7) === month && x.kind !== 'gutschrift');
+    const ro = receipts.filter(x => (x.payment_status || 'offen') !== 'bezahlt');
+    lines.push(`Ausgaben/Belege diesen Monat: ${r.length} Stück, ${eur(r.reduce((s, x) => s + Number(x.gross || 0), 0))} brutto; unbezahlte Belege: ${ro.length} (${eur(ro.reduce((s, x) => s + Number(x.gross || 0), 0))})`);
+  }
+  lines.push('Hinweis: Umsatz = Summe der ausgestellten Rechnungen (brutto) laut Aufträgen; stornierte Rechnungen sind nicht enthalten. Details: Finanzen › Buchhaltung.');
+  return 'FINANZEN:\n' + lines.join('\n');
+}
+
+function todayFacts(data, today) {
+  const open = data.orders.filter(OPEN);
+  const late = o => o.status !== 'abholbereit' && o.planned_completion && String(o.planned_completion).slice(0, 10) < today;
+  const waiting = ['freigabe_erforderlich', 'ersatzteile_bestellt', 'warte_auf_ersatzteile', 'kostenvoranschlag'];
+  const grp = (title, list) => `${title} (${list.length}):\n` + (list.slice(0, 8).map(o => '- ' + orderLine(o) + (late(o) ? ' – ÜBERFÄLLIG' : '')).join('\n') || '- keine');
+  const appts = data.appointments.filter(a => a.appointment_date === today && a.status !== 'storniert').sort((a, b) => String(a.time_slot).localeCompare(String(b.time_slot)));
+  return [
+    grp('ÜBERFÄLLIG (geplantes Fertigdatum vorbei)', open.filter(late)),
+    grp('IN ARBEIT', open.filter(o => !waiting.includes(o.status) && o.status !== 'abholbereit' && !late(o))),
+    grp('WARTET (Freigabe, Teile, Kostenvoranschlag)', open.filter(o => waiting.includes(o.status) && !late(o))),
+    grp('ABHOLBEREIT (Arbeit fertig – Kunde holt ab, keine Werkstattaufgabe)', open.filter(o => o.status === 'abholbereit')),
+    `TERMINE HEUTE (${appts.length}):\n` + (appts.map(a => `- ${a.time_slot || ''} Uhr ${a.service_name || a.appointment_type || 'Termin'} – ${[a.customer_name, a.vehicle_brand, a.license_plate].filter(Boolean).join(', ')}`).join('\n') || '- keine'),
+  ].join('\n\n');
+}
+
+function withTimeout(promise, ms) {
+  let t; const timer = new Promise((_, rej) => { t = setTimeout(() => rej(new AiError(504, 'ai_error', 'Die KI hat zu lange gebraucht.')), ms); });
+  return Promise.race([promise, timer]).finally(() => clearTimeout(t));
+}
 
 export async function alexAsk(db, sess, body, env, data) {
   limitPerHour('ask:' + sess.employee_id, ASK_PER_HOUR);
@@ -221,10 +323,14 @@ export async function alexAsk(db, sess, body, env, data) {
   if (!last) throw new AiError(400, 'params', 'Keine Frage übermittelt.');
   const q = last.content;
   const qn = norm(q);
+  // Rückfrage („Und wenn …?“): vorherige Nutzerfrage für Suche und Fehlercodes mitnehmen
+  const prevUser = msgs.filter(m => m.role === 'user').slice(-2, -1).map(m => m.content).join(' ');
+  const followUp = prevUser && (q.length < 80 || /^(und|aber|was ist|wenn|dann|ok|gut|ja|nein)\b/i.test(q.trim()));
+  const searchText = followUp ? prevUser + ' ' + q : q;
 
   const order = body.order_id ? data.orders.find(o => o.id === body.order_id) : null;
   const vehicle = order ? [order.vehicle_brand, order.vehicle_model].filter(Boolean).join(' ') : '';
-  const kb = searchKb(await loadKb(db, sess.workshop_code), q, vehicle);
+  const kb = searchKb(await loadKb(db, sess.workshop_code), searchText, vehicle);
 
   const cards = []; const facts = [];
   const today = berlinDate(0);
@@ -235,14 +341,17 @@ export async function alexAsk(db, sess, body, env, data) {
       + `\nFahrzeugdaten: ${[order.vin && 'FIN ' + order.vin, order.hsn && 'HSN ' + order.hsn, order.tsn && 'TSN ' + order.tsn, order.first_registration && 'EZ ' + deDate(order.first_registration), order.fuel_type, order.power_kw && order.power_kw + ' kW', order.displacement_ccm && order.displacement_ccm + ' ccm', order.mileage && order.mileage + ' km'].filter(Boolean).join(', ') || 'keine'}`
       + (tasks.length ? `\nAufgaben: ${tasks.map(t => `${t.title} (${t.status})`).join('; ')}` : ''));
   }
-  const wantsToday = /heute|steht.*an|was (soll|muss|ist)|zu tun|priorit|empfehl|überfällig|ueberfaellig|dringend|eilig|tagesplan/.test(qn);
+  const codes = findCodes(searchText + ' ' + (order ? order.description || '' : ''));
+  const codeFacts = codes.map(describeCode);
+  const safety = safetyFacts(norm(searchText));
+  const wantsToday = /heute|steht.*an|was (soll|muss|ist) .*(tun|machen|an)|zu tun|priorit|empfehl|überfällig|ueberfaellig|dringend|eilig|tagesplan|offene auftr|welche auftr/.test(qn);
   const wantsCap = /voll|kapazit|auslast|frei|platz|termin|woche|morgen|montag|dienstag|mittwoch|donnerstag|freitag|samstag/.test(qn);
   const wantsParts = /lager|bestand|vorrätig|vorraetig|teil|haben wir|da\?|nachbestell/.test(qn);
+  const wantsMoney = /umsatz|rechnung|einnahm|verdien|ausgab|kosten wir|gewinn|bezahlt|zahlung|offene posten|mahnung|forderung|beleg|geld|€|euro/.test(qn);
   if (wantsToday) {
     const rec = recommendations(data);
     if (rec.length) cards.push({ type: 'empfehlungen', items: rec });
-    facts.push('OFFENE AUFTRÄGE:\n' + (data.orders.filter(OPEN).slice(0, 15).map(orderLine).join('\n') || 'keine'));
-    facts.push('EMPFEHLUNGEN (berechnet):\n' + (rec.map(r => `- ${r.title}: ${r.detail}`).join('\n') || 'keine'));
+    facts.push(todayFacts(data, today));
   }
   if (wantsCap) {
     const cap = capacityDays(data.appointments, data.employees);
@@ -259,22 +368,38 @@ export async function alexAsk(db, sess, body, env, data) {
     cards.push(...parts);
     facts.push('LAGER (Treffer):\n' + (parts.map(p => `${p.title} ${p.subtitle}: ${p.lines.join(', ')}`).join('\n') || (data.inventory.length ? 'kein passender Artikel im Lager gefunden' : 'Lagerbestand ist im System nicht gepflegt')));
   }
+  if (wantsMoney) {
+    if (body.channel === 'dashboard') {
+      let receipts = null;
+      try { receipts = data.loadReceipts ? await data.loadReceipts() : null; } catch { receipts = null; }
+      facts.push(financeFacts(data.orders, receipts, today));
+    } else facts.push('FINANZEN: Umsatz- und Rechnungszahlen gibt es am Tablet nicht – nur im Dashboard unter Finanzen › Buchhaltung.');
+  }
 
-  const context = `WERKSTATTDATEN:\n${facts.join('\n\n')}\n\nWISSENSEINTRÄGE:\n` +
-    (kb.length ? kb.map((k, i) => `[Eintrag ${i + 1}] ${k.title}${k.brand ? ' (' + k.brand + ')' : ''}\n${String(k.content).slice(0, 1400)}`).join('\n\n') : 'keine passenden Einträge');
-  const model = sess.workshop_code === 'AL-DEMO' && ALEX_TEST_MODELS.includes(body.model_test) ? body.model_test : TEXT_MODEL;
-  const r = await runAi(env, model, {
-    messages: [{ role: 'system', content: (body.channel === 'dashboard' ? SYSTEM_DASHBOARD : SYSTEM) + '\n\n' + context }, ...msgs],
-    max_tokens: model === TEXT_MODEL ? 700 : 2500, temperature: 0.3,
-  });
-  const answer = textOf(r).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  if (model !== TEXT_MODEL) console.log('alex_test', model, JSON.stringify(r && r.usage || {}));
+  const context = (codeFacts.length ? 'FEHLERCODES (verbindliche Bedeutung):\n' + codeFacts.map(c => `${c.code}: ${c.text}${c.hint ? '\nTypische Prüfschritte: ' + c.hint : ''}`).join('\n') + '\n\n' : '')
+    + (safety.length ? 'SICHERHEIT (immer zuerst nennen):\n' + safety.map(x => '- ' + x).join('\n') + '\n\n' : '')
+    + `WERKSTATTDATEN:\n${facts.join('\n\n')}\n\nWISSENSEINTRÄGE:\n`
+    + (kb.length ? kb.map((k, i) => `[Eintrag ${i + 1}] ${k.title}${k.brand ? ' (' + k.brand + ')' : ''}\n${String(k.content).slice(0, 1400)}`).join('\n\n') : 'keine passenden Einträge');
+  const system = (body.channel === 'dashboard' ? SYSTEM_DASHBOARD : SYSTEM) + '\n\n' + context;
+  const test = sess.workshop_code === 'AL-DEMO' && ALEX_TEST_MODELS.includes(body.model_test) ? body.model_test : null;
+  const call = (model) => withTimeout(runAi(env, model, { messages: [{ role: 'system', content: system }, ...msgs], max_tokens: model === TEXT_MODEL ? 700 : 2500, temperature: 0.3 }), ALEX_TIMEOUT_MS);
+  let model = test || ALEX_MODEL; let r;
+  try { r = await call(model); }
+  catch (e) {
+    // Hauptmodell gestört (nicht Kontingent): einmal mit dem bisherigen Modell versuchen
+    if (test || !e || e.code !== 'ai_error' || model === TEXT_MODEL) throw e;
+    console.log('alex_fallback', String(e.extra && e.extra.message || e.code));
+    model = TEXT_MODEL; r = await call(model);
+  }
+  let answer = textOf(r).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  if (!answer && model !== TEXT_MODEL && !test) { model = TEXT_MODEL; r = await call(model); answer = textOf(r).trim(); }
   if (!answer) throw new AiError(502, 'ai_error', 'Die KI hat keine Antwort geliefert.');
   return {
     ok: true, answer, cards,
     sources: kb.map(k => ({ title: k.title })),
-    used_general_knowledge: !kb.length && !cards.length && !order,
-    model: 'workers-ai', ...(model !== TEXT_MODEL ? { test_model: model, usage: r && r.usage } : {}),
+    codes: codeFacts.map(c => ({ code: c.code, text: c.text, known: c.known })),
+    used_general_knowledge: !kb.length && !cards.length && !order && !codeFacts.length,
+    model: 'workers-ai', ...(test ? { test_model: model, usage: r && r.usage } : {}),
   };
 }
 
@@ -778,18 +903,22 @@ export async function alexDashboard(db, sess, body, env, data) {
     const r = await alexAsk(db, sess, { ...body, channel: 'dashboard' }, env, data);
     return { ...r, answer: String(r.answer).replace(/\*\*/g, '').replace(/^#+\s*/gm, ''), sources: (r.sources || []).map((s, i) => ({ id: 's' + i, ...s })) };
   } catch (e) {
-    // KI nicht verfügbar (Tageskontingent leer, nicht eingerichtet): trotzdem helfen – Karten + Wissenseintrag
+    // KI nicht verfügbar (Tageskontingent leer, gestört, nicht eingerichtet): trotzdem helfen – Fehlercodes, Karten, Wissenseintrag
     if (!e || !['ai_quota', 'not_available', 'ai_error'].includes(e.code)) throw e;
+    const why = e.code === 'ai_quota' ? 'Das KI-Tageskontingent ist gerade aufgebraucht – ab 2 Uhr nachts antworte ich wieder ausführlich.' : 'Die KI ist gerade nicht erreichbar – bitte gleich noch einmal fragen.';
     const kb = searchKb(await loadKb(db, sess.workshop_code), q, '');
     const qn = norm(q); const cards = [];
     if (/heute|steht.*an|zu tun|priorit|empfehl|überfällig|dringend/.test(qn)) { const rec = recommendations(data); if (rec.length) cards.push({ type: 'empfehlungen', items: rec }); }
     if (/voll|kapazit|auslast|frei|termin|woche|morgen/.test(qn)) cards.push(...capacityDays(data.appointments, data.employees));
     cards.push(...findCustomers(q, data));
     if (/lager|bestand|vorrätig|vorraetig|teil|haben wir/.test(qn)) cards.push(...findParts(q, data.inventory || []));
-    const answer = kb.length
-      ? `${kb[0].title}\n\n${String(kb[0].content).replace(/\*\*/g, '').slice(0, 900)}\n\n(Das KI-Tageskontingent ist gerade aufgebraucht – Antwort aus der Wissensdatenbank.)`
-      : cards.length ? 'Hier die passenden Daten aus der Werkstatt. (Das KI-Tageskontingent ist gerade aufgebraucht – ab 2 Uhr nachts antworte ich wieder ausführlich.)'
-      : 'Das KI-Tageskontingent ist für heute aufgebraucht – ab 2 Uhr nachts bin ich wieder voll da. Fragen zu Aufträgen, Terminen, Kunden und Lager beantworte ich trotzdem mit den Werkstattdaten.';
+    const codeText = findCodes(q).map(describeCode).map(c => `${c.code}: ${c.text}${c.hint ? '\n' + c.hint : ''}`).join('\n\n');
+    const safety = safetyFacts(qn).join('\n');
+    const answer = [safety, codeText].filter(Boolean).join('\n\n') + (safety || codeText ? '\n\n' : '')
+      + (kb.length ? `${kb[0].title}\n\n${String(kb[0].content).replace(/\*\*/g, '').slice(0, 900)}\n\n(${why} Antwort aus der Wissensdatenbank.)`
+        : cards.length ? `Hier die passenden Daten aus der Werkstatt. (${why})`
+        : safety || codeText ? `(${why})`
+        : `${why} Fragen zu Aufträgen, Terminen, Kunden und Lager beantworte ich trotzdem mit den Werkstattdaten.`);
     return { ok: true, answer, cards, sources: kb.slice(0, 1).map((k, i) => ({ id: 's' + i, title: k.title })), used_general_knowledge: false, fallback: true };
   }
 }

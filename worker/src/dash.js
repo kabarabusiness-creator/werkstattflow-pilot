@@ -311,7 +311,7 @@ export async function handleFunction(name, body, c) {
       db.list('Service', null, { limit: 500 }).catch(() => [])]);
     const res = await alexDashboard(db, { employee_id: 'u:' + user.id, workshop_code: code },
       { messages: body.messages, order_id: body.order_id && data.orders.some(o => o.id === body.order_id) ? body.order_id : undefined, model_test: code === 'AL-DEMO' ? body.model_test : undefined }, env,
-      { ...data, inventory, services: services.filter(x => !x.workshop_code || x.workshop_code === code) });
+      { ...data, inventory, services: services.filter(x => !x.workshop_code || x.workshop_code === code), loadReceipts: () => db.list('ExpenseReceipt', { workshop_code: code }, { limit: 2000 }) });
     countUsage('alex', 1, code);
     return res;
   }

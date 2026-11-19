@@ -219,6 +219,37 @@ await t('ALEX: Wissen + Werkstattdaten im Prompt, Karten für Kunde/Auslastung/L
   assert.equal(r.data.cards.find(c => c.type === 'kunde').customer.tires.length, 1);
   assert.equal(r.data.cards.find(c => c.type === 'teil').level, 'gelb');
 });
+await t('ALEX: Fehlercode-Bedeutung fest im Prompt, Sicherheitshinweis, Ausweichmodell bei Störung', async () => {
+  const seen = [];
+  env.AI = { async run(model, input) { seen.push({ model, input }); if (model.includes('gpt-oss')) throw new Error('upstream 500'); return { response: 'Ladedruck prüfen.' }; } };
+  const r = await call('/tabletAction', { action: 'alex_ask', messages: [{ role: 'user', content: 'P0299 und P1234, MKL blinkt – was tun?' }] }, token);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(seen.map(x => x.model), ['@cf/openai/gpt-oss-120b', '@cf/mistralai/mistral-small-3.1-24b-instruct']);
+  const sys = seen[1].input.messages[0].content;
+  assert.match(sys, /P0299: Turbolader\/Kompressor – Unterladung \(Ladedruck zu niedrig\)/);
+  assert.match(sys, /P1234: Antrieb – herstellerspezifisch/);
+  assert.match(sys, /Blinkende Motorkontrollleuchte = starke Zündaussetzer/);
+  assert.match(sys, /NAVIGATION: Aufträge › Alle Aufträge/);
+  assert.ok(!/FINANZEN: Rechnungen/.test(sys));
+  assert.equal(r.data.codes.find(c => c.code === 'P0299').known, true);
+});
+await t('ALEX: Finanzen nur im Dashboard, Werte aus Rechnungen', async () => {
+  const { financeFacts } = await import('../src/ai.js');
+  const f = financeFacts([
+    { invoice_number: 'R-1', invoice_date: '2026-11-03', total_amount: 119, payment_status: 'bezahlt' },
+    { invoice_number: 'R-2', invoice_date: '2026-11-10', total_amount: 238, payment_due_date: '2026-11-15', customer_name: 'Meier' },
+    { invoice_number: 'R-0', invoice_date: '2026-10-20', total_amount: 50, payment_status: 'bezahlt' },
+    { status: 'abgeschlossen', total_amount: 999 },
+  ], [{ receipt_date: '2026-11-02', gross: 80, payment_status: 'bezahlt' }, { receipt_date: '2026-11-05', gross: 20 }], '2026-11-19');
+  assert.match(f, /diesen Monat \(2026-11\): 2 Stück, 357,00 € brutto/);
+  assert.match(f, /Vormonat \(2026-10\): 1 Stück, 50,00 €/);
+  assert.match(f, /überfällig: 1 \(238,00 €\) – R-2 Meier/);
+  assert.match(f, /Belege diesen Monat: 2 Stück, 100,00 € brutto; unbezahlte Belege: 1 \(20,00 €\)/);
+  const { searchKb } = await import('../src/ai.js');
+  const kb = [{ title: 'Ruckeln beim Beschleunigen', keywords: 'ruckeln, beschleunigen', content: 'Zündung prüfen' }, { title: 'BMW E30 Schaltplan-Übersicht', keywords: 'e30, schaltplan', content: 'Übersicht der Stromlaufpläne' }, { title: 'Bremsflüssigkeit wechseln', keywords: 'bremsflüssigkeit, dot', content: 'alle 2 Jahre' }];
+  assert.deepEqual(searchKb(kb, 'Welche Aufträge sind überfällig?', ''), []);
+  assert.equal(searchKb(kb, 'Motor ruckelt beim Gasgeben', '')[0].title, 'Ruckeln beim Beschleunigen');
+});
 await t('ALEX: Tageskontingent leer → ai_quota', async () => {
   env.AI = { async run() { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); } };
   const r = await call('/tabletAction', { action: 'alex_ask', messages: [{ role: 'user', content: 'Was steht heute an?' }] }, token);
