@@ -517,6 +517,18 @@ export function normalizeRegistration(raw) {
   return out;
 }
 
+// Wie vollständig ist ein Scan? complete = alles Wichtige für den Auftrag sicher gelesen
+export function registrationScore(r) {
+  const ok = (k, min = 0.7) => r && r[k] && r[k].value !== '' && r[k].value !== 0 && Number(r[k].confidence) >= min;
+  const finOk = ok('fin') && /^[A-HJ-NPR-Z0-9]{17}$/.test(String(r.fin.value)) && (!r.fin_pruefung || r.fin_pruefung.status !== 'abweichend');
+  const hsnOk = ok('hsn') && /^\d{4}$/.test(String(r.hsn.value));
+  const tsnOk = ok('tsn') && /^[A-Z0-9]{3}$/.test(String(r.tsn.value));
+  let score = (finOk ? 4 : 0) + (hsnOk ? 3 : 0) + (tsnOk ? 3 : 0);
+  for (const k of ['kennzeichen', 'erstzulassung', 'marke', 'leistung_kw', 'hubraum_ccm', 'kraftstoff', 'modell_handelsbezeichnung']) if (ok(k)) score += 1;
+  if (r && r.fin_pruefung && r.fin_pruefung.status === 'ok') score += 2;
+  return { score, complete: finOk && hsnOk && tsnOk && ok('kennzeichen', 0.5) };
+}
+
 export async function registrationScan(key, images, env) {
   limitPerHour('reg:' + key, SCAN_PER_HOUR);
   if (!images.length) throw new AiError(400, 'params', 'Kein Foto übermittelt.');

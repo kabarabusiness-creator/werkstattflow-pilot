@@ -1378,5 +1378,38 @@ await t('Fahrzeugschein: Abschrift schlägt falsche KI-Zuordnung (HSN nicht aus 
   assert.equal(p.hsn, '0005'); assert.equal(p.pruefziffer, 'X'); assert.equal(p.hubraum_ccm, 1596);
   assert.deepEqual(parseRegistrationLines(null), {});
 });
+await t('Fahrzeugschein Live-Scan am Handy: sofort auswerten, nichts speichern, bestes Ergebnis an den Bildschirm', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const U = { Authorization: 'Bearer USER-AL-T1-xxxxxxxxxxxxxxxx' };
+  const fn = (name, body, headers) => worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(headers || {}) }, body: JSON.stringify(body) }), env, ctx).then(async r => ({ status: r.status, data: await r.json() }));
+  const tk = await fn('createRegistrationScanToken', {}, U);
+  const fin = 'WVWZZZ1KZAW123456'; const pz = finCheckDigit(fin);
+  const answers = [
+    { kennzeichen: { value: 'AB-C 1', confidence: 0.9 }, hsn: { value: '0603', confidence: 0.9 } }, // unvollständig
+    { kennzeichen: { value: 'AB-C 1', confidence: 0.9 }, fin: { value: fin, confidence: 0.9 }, pruefziffer: { value: pz, confidence: 0.9 }, zeilen: ['01.03.2015 | 0603 | BJM00012 3', `${fin} | ${pz}`] },
+  ];
+  let call = 0;
+  env.AI = { async run() { return { response: JSON.stringify(answers[Math.min(call++, answers.length - 1)]) }; } };
+  const before = [...kv.keys()].length;
+  let r = await fn('registrationScanPublic', { token: tk.data.token, action: 'scan', data_url: png });
+  assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.complete, false); assert.equal(r.data.attempts, 1);
+  let st = await fn('registrationScanPublic', { token: tk.data.token, action: 'status' });
+  assert.equal(st.data.has_photo, true); assert.equal(st.data.ready, false); assert.equal(st.data.live, true);
+  r = await fn('registrationScanPublic', { token: tk.data.token, action: 'scan', data_url: png });
+  assert.equal(r.data.complete, true); assert.equal(r.data.result.hsn.value, '0603'); assert.equal(r.data.result.tsn.value, 'BJM'); assert.equal(r.data.result.fin_pruefung.status, 'ok');
+  st = await fn('registrationScanPublic', { token: tk.data.token, action: 'status' });
+  assert.equal(st.data.ready, true, 'vollständig → automatisch fertig');
+  assert.equal([...kv.keys()].filter(k => k.startsWith('regtmp/')).length, 0, 'kein Foto gespeichert');
+  assert.equal([...kv.keys()].length, before + 1, 'nur das Ergebnis liegt kurz bereit');
+  const d = await fn('scanRegistration', { token: tk.data.token }, U);
+  assert.equal(d.status, 200, JSON.stringify(d.data)); assert.equal(d.data.result.tsn.value, 'BJM');
+  assert.equal([...kv.keys()].length, before, 'Ergebnis nach Abholung gelöscht');
+  assert.equal(call, 2, 'Bildschirm wertet nicht erneut aus');
+  // nach 8 Versuchen ist Schluss
+  const tk2 = await fn('createRegistrationScanToken', {}, U);
+  for (let i = 0; i < 8; i++) assert.equal((await fn('registrationScanPublic', { token: tk2.data.token, action: 'scan', data_url: png })).status, 200);
+  assert.equal((await fn('registrationScanPublic', { token: tk2.data.token, action: 'scan', data_url: png })).status, 429);
+  delete env.AI;
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);

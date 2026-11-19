@@ -13,7 +13,7 @@
  */
 import { count as countUsage } from './usage.js';
 import { handleInvoice, INVOICE_FUNCTIONS } from './invoices.js';
-import { tireScanImages, registrationScan, receiptScan, capacityDays, alexDashboard } from './ai.js';
+import { tireScanImages, registrationScan, registrationScore, receiptScan, capacityDays, alexDashboard } from './ai.js';
 import { handleMail, MAIL_FUNCTIONS } from './mail.js';
 import { handleInvite, INVITE_FUNCTIONS } from './invites.js';
 
@@ -521,6 +521,15 @@ export async function handleFunction(name, body, c) {
       const tok = await resolveToken('RegistrationScanToken', body.token);
       sameWorkshop(tok, user.workshop_code);
       const photo = readJson(tok.photo, null);
+      if (photo && photo.res) {
+        // Live-Scan am Handy: Ergebnis liegt schon vor (kein Foto gespeichert) – einmal abholen, dann löschen
+        needKv();
+        const stored = await env.PHOTOS.get(photo.res, { type: 'json' });
+        await env.PHOTOS.delete(photo.res).catch(() => {});
+        await db.update('RegistrationScanToken', tok.id, { photo: '' });
+        if (!stored) throw new HttpError(410, 'expired', { message: 'Das Scan-Ergebnis ist abgelaufen. Bitte noch einmal scannen.' });
+        return { ok: true, result: stored };
+      }
       if (!photo || !photo.kv) throw new HttpError(400, 'no_photo');
       needKv();
       const obj = await env.PHOTOS.getWithMetadata(photo.kv, { type: 'arrayBuffer' });
@@ -669,10 +678,29 @@ export async function handleFunction(name, body, c) {
     const tok = await resolveToken('RegistrationScanToken', body.token);
     const photo = readJson(tok.photo, null);
     if (body.action === 'context') return { label: tok.context_label || 'Fahrzeugschein scannen' };
-    if (body.action === 'status') return { has_photo: !!photo, ready: !!tok.ready };
+    if (body.action === 'status') return { has_photo: !!(photo && (photo.kv || photo.res)), ready: !!tok.ready, live: !!(photo && photo.res) };
     if (body.action === 'finish') { await db.update('RegistrationScanToken', tok.id, { ready: true }); return { ok: true }; }
     if (!body.data_url) throw new HttpError(400, 'params');
     needKv();
+    if (body.action === 'scan') {
+      // Live-Scan: sofort auswerten, Foto nie speichern; das beste Ergebnis bleibt 30 Min. für den Bildschirm liegen
+      const attempts = (photo && Number(photo.attempts)) || 0;
+      if (attempts >= 8) throw new HttpError(429, 'too_many', { message: 'Zu viele Versuche mit diesem Code. Bitte am Bildschirm einen neuen Code erzeugen.' });
+      rateLimit('regw:' + tok.workshop_code, 80, 3600_000);
+      decodeDataUrl(body.data_url);
+      const result = await registrationScan('t:' + tok.id, [body.data_url], env);
+      countUsage('scans', 1, tok.workshop_code || undefined);
+      const { score, complete } = registrationScore(result);
+      let key = photo && photo.res; let best = (photo && Number(photo.score)) || -1;
+      if (score > best) {
+        if (!key) key = `regres/${randomHex(16)}`;
+        await env.PHOTOS.put(key, JSON.stringify(result), { expirationTtl: TOKEN_TTL_MIN * 60 });
+        best = score;
+      }
+      if (photo && photo.kv) await env.PHOTOS.delete(photo.kv).catch(() => {});
+      await db.update('RegistrationScanToken', tok.id, { photo: JSON.stringify({ res: key, score: best, attempts: attempts + 1 }), ...(complete ? { ready: true } : {}) });
+      return { ok: true, result, complete, attempts: attempts + 1 };
+    }
     const { bytes, contentType } = decodeDataUrl(body.data_url);
     if (photo && photo.kv) await env.PHOTOS.delete(photo.kv).catch(() => {});
     const key = `regtmp/${randomHex(16)}`; // nie über /photo/ abrufbar, verfällt nach 30 Min.
