@@ -10,6 +10,9 @@ import { recordAi } from './usage.js';
 import KB_BUNDLED from '../../docs/alex_kb.json' with { type: 'json' };
 
 export const TEXT_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
+// Nur für Vergleichstests in der Demo-Werkstatt (AL-DEMO) per model_test wählbar
+const ALEX_TEST_MODELS = ['@cf/mistralai/mistral-small-3.1-24b-instruct', '@cf/openai/gpt-oss-120b', '@cf/openai/gpt-oss-20b', '@cf/google/gemma-4-26b-a4b-it',
+  '@cf/qwen/qwen3-30b-a3b-fp8', '@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-4-scout-17b-16e-instruct', '@cf/nvidia/nemotron-3-120b-a12b', '@cf/moonshotai/kimi-k2.5'];
 export const VISION_MODELS = ['@cf/mistralai/mistral-small-3.1-24b-instruct', '@cf/google/gemma-3-12b-it'];
 const ASK_PER_HOUR = 40;
 const SCAN_PER_HOUR = 15;
@@ -259,17 +262,19 @@ export async function alexAsk(db, sess, body, env, data) {
 
   const context = `WERKSTATTDATEN:\n${facts.join('\n\n')}\n\nWISSENSEINTRÄGE:\n` +
     (kb.length ? kb.map((k, i) => `[Eintrag ${i + 1}] ${k.title}${k.brand ? ' (' + k.brand + ')' : ''}\n${String(k.content).slice(0, 1400)}`).join('\n\n') : 'keine passenden Einträge');
-  const r = await runAi(env, TEXT_MODEL, {
+  const model = sess.workshop_code === 'AL-DEMO' && ALEX_TEST_MODELS.includes(body.model_test) ? body.model_test : TEXT_MODEL;
+  const r = await runAi(env, model, {
     messages: [{ role: 'system', content: (body.channel === 'dashboard' ? SYSTEM_DASHBOARD : SYSTEM) + '\n\n' + context }, ...msgs],
-    max_tokens: 700, temperature: 0.3,
+    max_tokens: model === TEXT_MODEL ? 700 : 2500, temperature: 0.3,
   });
-  const answer = textOf(r).trim();
+  const answer = textOf(r).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  if (model !== TEXT_MODEL) console.log('alex_test', model, JSON.stringify(r && r.usage || {}));
   if (!answer) throw new AiError(502, 'ai_error', 'Die KI hat keine Antwort geliefert.');
   return {
     ok: true, answer, cards,
     sources: kb.map(k => ({ title: k.title })),
     used_general_knowledge: !kb.length && !cards.length && !order,
-    model: 'workers-ai',
+    model: 'workers-ai', ...(model !== TEXT_MODEL ? { test_model: model, usage: r && r.usage } : {}),
   };
 }
 

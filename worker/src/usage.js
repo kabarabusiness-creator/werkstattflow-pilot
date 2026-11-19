@@ -25,6 +25,14 @@ export const LIMITS = {
 const NEURON_RATES = {
   '@cf/mistralai/mistral-small-3.1-24b-instruct': [31_876, 50_488],
   '@cf/google/gemma-3-12b-it': [31_371, 50_560],
+  '@cf/openai/gpt-oss-120b': [31_818, 68_182],
+  '@cf/openai/gpt-oss-20b': [18_182, 27_273],
+  '@cf/google/gemma-4-26b-a4b-it': [9_091, 27_273],
+  '@cf/qwen/qwen3-30b-a3b-fp8': [4_625, 30_475],
+  '@cf/zai-org/glm-4.7-flash': [5_500, 36_400],
+  '@cf/meta/llama-4-scout-17b-16e-instruct': [24_545, 77_273],
+  '@cf/nvidia/nemotron-3-120b-a12b': [45_455, 136_364],
+  '@cf/moonshotai/kimi-k2.5': [54_545, 272_727],
 };
 const FALLBACK_NEURONS = { text: 150, vision: 450 };
 

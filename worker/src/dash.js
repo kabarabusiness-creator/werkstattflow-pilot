@@ -310,7 +310,7 @@ export async function handleFunction(name, body, c) {
     const [data, inventory, services] = await Promise.all([h.getData(code), db.list('InventoryItem', { workshop_code: code }).catch(() => []),
       db.list('Service', null, { limit: 500 }).catch(() => [])]);
     const res = await alexDashboard(db, { employee_id: 'u:' + user.id, workshop_code: code },
-      { messages: body.messages, order_id: body.order_id && data.orders.some(o => o.id === body.order_id) ? body.order_id : undefined }, env,
+      { messages: body.messages, order_id: body.order_id && data.orders.some(o => o.id === body.order_id) ? body.order_id : undefined, model_test: code === 'AL-DEMO' ? body.model_test : undefined }, env,
       { ...data, inventory, services: services.filter(x => !x.workshop_code || x.workshop_code === code) });
     countUsage('alex', 1, code);
     return res;
