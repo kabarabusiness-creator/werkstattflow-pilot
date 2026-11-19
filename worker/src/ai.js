@@ -26,7 +26,7 @@ export class AiError extends Error {
 const norm = s => String(s || '').toLowerCase().normalize('NFC').replace(/\s+/g, ' ').trim();
 const plateKey = s => String(s || '').toUpperCase().replace(/[^A-Z0-9ÄÖÜ]/g, '');
 const STOP = new Set(['der', 'die', 'das', 'und', 'oder', 'ist', 'sind', 'ein', 'eine', 'einen', 'mit', 'bei', 'für', 'fuer', 'wie', 'was', 'wann', 'wo', 'wir', 'ich', 'du', 'auf', 'aus', 'von', 'zum', 'zur', 'den', 'dem', 'des', 'noch', 'auch', 'kann', 'muss', 'soll', 'haben', 'hat', 'gibt', 'nicht', 'mal', 'bitte', 'heute', 'alex',
-  'beim', 'vom', 'im', 'am', 'um', 'ins', 'ans', 'worauf', 'achten', 'welche', 'welcher', 'welches', 'wieviel', 'wie viel', 'viel', 'diesen', 'dieser', 'dieses', 'unser', 'unsere', 'meine', 'mein', 'sie', 'man', 'sagt', 'gemacht', 'machen', 'genau', 'immer', 'schon', 'jetzt', 'dann', 'wenn', 'aber', 'denn', 'weil', 'ungefähr', 'ungefaehr', 'ca', 'etwa', 'brauch', 'braucht', 'brauche', 'bekomme', 'ohne', 'nach', 'vor', 'über', 'ueber', 'unter', 'zwischen']);
+  'beim', 'vom', 'im', 'am', 'um', 'ins', 'ans', 'worauf', 'achten', 'welche', 'welcher', 'welches', 'wieviel', 'wie viel', 'viel', 'diesen', 'dieser', 'dieses', 'unser', 'unsere', 'meine', 'mein', 'sie', 'man', 'sagt', 'gemacht', 'machen', 'genau', 'immer', 'schon', 'jetzt', 'dann', 'wenn', 'aber', 'denn', 'weil', 'ungefähr', 'ungefaehr', 'ca', 'etwa', 'brauch', 'braucht', 'brauche', 'bekomme', 'ohne', 'nach', 'vor', 'über', 'ueber', 'unter', 'zwischen', 'finde', 'finden', 'zeige', 'zeigen', 'heißt', 'heisst', 'bedeutet', 'bedeutung']);
 const tokens = s => norm(s).replace(/[^a-z0-9äöüß ]/g, ' ').split(' ').filter(w => w.length > 2 && !STOP.has(w));
 const DE_DAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 const STATUS_DE = {
@@ -243,7 +243,7 @@ Regeln:
 - Nutze zuerst FEHLERCODES, WERKSTATTDATEN und WISSENSEINTRÄGE. Wenn du einen Wissenseintrag verwendest, schreibe dahinter [Eintrag N]. Wissenseinträge, die nicht zur Frage passen, ignorierst du.
 - Fehlercodes: Die Bedeutung steht unter FEHLERCODES – übernimm sie genau so. Steht ein Code dort als herstellerspezifisch oder nicht hinterlegt, rate die Bedeutung NICHT, sondern sage das und empfehle Diagnosetester/Herstellerdaten.
 - Allgemeines Werkstattwissen (Diagnose-Vorgehen, typische Ursachen, Prüfreihenfolge) darfst du verwenden. Erfinde aber niemals Drehmomente, Füllmengen, Einstell- und Prüfwerte, Teilenummern, Preise, Termine oder Bestände – steht so ein Wert nicht in den Daten, sage „laut Herstellerdaten“ und nenne keine Zahl. Arbeitszeiten nur als grober Erfahrungswert und ausdrücklich so gekennzeichnet (Herstellerarbeitswerte prüfen).
-- Sicherheit: Bei Bremsen, Lenkung, Airbag, Hochvolt, Fahrwerk und Rädern immer auf die Herstellervorgaben hinweisen. Blinkende Motorkontrollleuchte bedeutet starke Zündaussetzer (Katalysator gefährdet) – das immer zuerst nennen.
+- Sicherheit: Bei Bremsen, Lenkung, Airbag, Hochvolt, Fahrwerk und Rädern auf die Herstellervorgaben hinweisen. Steht unten ein Abschnitt SICHERHEIT, nenne diesen Hinweis zuerst – sonst keine Warnungen erfinden, die nichts mit der Frage zu tun haben.
 - Zahlen zu Aufträgen, Terminen, Lager, Umsatz und Rechnungen nur aus den WERKSTATTDATEN. Fehlen sie dort, sage das – schätze nie.
 - Seiten im Dashboard nur so nennen, wie sie in der NAVIGATION stehen. Andere Menüs gibt es nicht.
 - Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sagen, dass das im Dashboard über ALEX oder „Neuer Auftrag“ geht.
