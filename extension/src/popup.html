@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>AutoLeitwerk Teile-Import</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="top">
+    <img src="icons/icon-32.png" alt="" width="22" height="22">
+    <div class="top-txt"><b>Teile-Import</b><span id="who"></span></div>
+  </header>
+
+  <!-- Nicht verbunden -->
+  <section id="connect" class="card" hidden>
+    <h2>Mit AutoLeitwerk verbinden</h2>
+    <p>Einmalig: Dashboard öffnen, anmelden und auf <b>„Erweiterung verbinden“</b> tippen. Danach bleibt die Erweiterung verbunden.</p>
+    <button id="btnConnect" class="primary">Dashboard öffnen und verbinden</button>
+    <p class="hint">Getrennt wird jederzeit im Dashboard unter Einstellungen › Browser-Erweiterung.</p>
+  </section>
+
+  <main id="app" hidden>
+    <!-- Fahrzeug für die Katalogsuche -->
+    <section id="vehicle" class="card slim" hidden>
+      <div class="row-between"><span class="label">Fahrzeug aus AutoLeitwerk</span><button class="link" id="ctxClear" title="Fahrzeug vergessen">✕</button></div>
+      <div class="veh" id="vehTxt"></div>
+      <div class="chips" id="vehBtns"></div>
+    </section>
+
+    <!-- Erkannte Positionen -->
+    <section class="card">
+      <div class="row-between">
+        <span class="label" id="srcTxt">Warenkorb wird gelesen …</span>
+        <button class="link" id="btnReread">Neu lesen</button>
+      </div>
+      <div id="rows"></div>
+      <details id="pasteBox">
+        <summary>Nichts erkannt? Text einfügen</summary>
+        <textarea id="pasteTxt" rows="4" placeholder="Warenkorb im Shop markieren, kopieren (Strg+C) und hier einfügen (Strg+V)"></textarea>
+        <button id="btnPaste" class="secondary">Zeilen erkennen</button>
+      </details>
+    </section>
+
+    <!-- Ziel -->
+    <section class="card" id="targetCard">
+      <div class="seg" role="tablist">
+        <button class="on" data-target="auftrag" role="tab">In den Auftrag</button>
+        <button data-target="lager" role="tab">Ins Lager (Wareneingang)</button>
+      </div>
+      <div id="orderPick">
+        <input id="orderSearch" type="search" placeholder="Auftrag suchen: Kennzeichen, Nummer, Kunde, Fahrzeug" autocomplete="off">
+        <div id="orderList" class="olist"></div>
+        <label class="chk"><input type="checkbox" id="toInvoice" checked> Mit Verkaufspreis direkt auf die Rechnung</label>
+      </div>
+      <p id="lagerInfo" class="hint" hidden>Bestand wird bei gleicher Teilenummer erhöht, sonst als neuer Artikel angelegt.</p>
+      <div class="row-between sup"><span class="label">Lieferant</span><select id="supplier"></select></div>
+    </section>
+
+    <button id="btnImport" class="primary big" disabled>Positionen übernehmen</button>
+    <p id="msg" class="msg" hidden></p>
+  </main>
+
+  <footer class="foot"><span id="ver"></span><button class="link" id="btnOpenDash">Dashboard öffnen</button></footer>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

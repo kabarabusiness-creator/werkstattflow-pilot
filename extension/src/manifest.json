@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "AutoLeitwerk Teile-Import",
+  "short_name": "AutoLeitwerk",
+  "version": "1.0.0",
+  "description": "Warenkorb aus STAkis, WM, Coparts, Autodoc & Co. mit einem Klick in den Auftrag oder ins Lager von AutoLeitwerk übernehmen. FIN und HSN/TSN direkt in die Katalogsuche einsetzen.",
+  "minimum_chrome_version": "110",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://werkstattflow-pilot.werkstattflow.workers.dev/*"],
+  "action": {
+    "default_title": "AutoLeitwerk – Warenkorb übernehmen",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+  },
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "content_scripts": [
+    {
+      "matches": ["https://login.autoleitwerk.de/*", "https://autoleitwerk.base44.app/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

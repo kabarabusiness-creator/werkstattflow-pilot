@@ -484,6 +484,120 @@ export async function handleFunction(name, body, c) {
     throw new HttpError(400, 'params');
   }
 
+  /* ---- Browser-Erweiterung „AutoLeitwerk Teile-Import“ ----
+   * Verbinden: Das Dashboard (angemeldet) holt per extConnect einen eigenen Schlüssel für die Erweiterung und reicht ihn
+   * an die Erweiterung weiter. Der Schlüssel liegt nur als Prüfwert im Speicher, darf nur Aufträge lesen und Teile anlegen
+   * und kann im Dashboard jederzeit getrennt werden. Teile landen als Teilebestellung am Auftrag (wie „Warenkorb einfügen“)
+   * oder als Wareneingang im Lager. */
+  if (name === 'extConnect' || name === 'extList' || name === 'extRevoke') {
+    const user = await authUser();
+    needKv();
+    let code = user.workshop_code;
+    if (!code) { const ws = await db.list('Workshop', { owner_user_id: user.id }, { limit: 1 }); code = ws[0] ? ws[0].code : ''; }
+    if (!code) throw new HttpError(403, 'no_workshop');
+    if (name === 'extList') {
+      const l = await env.PHOTOS.list({ prefix: `extidx/${code}/` });
+      const rows = (await Promise.all(l.keys.map(k => env.PHOTOS.get(k.name, { type: 'json' })))).filter(Boolean);
+      return { ok: true, devices: rows.map(r => ({ id: r.id, name: r.name, user: r.user_name, created_at: r.created_at, last_used: r.last_used || null })).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))) };
+    }
+    if (name === 'extRevoke') {
+      const id = String(body.id || '');
+      if (!/^[a-f0-9]{12}$/.test(id)) throw new HttpError(400, 'params');
+      const idx = await env.PHOTOS.get(`extidx/${code}/${id}`, { type: 'json' });
+      if (idx) { await env.PHOTOS.delete('exttok/' + idx.hash); await env.PHOTOS.delete(`extidx/${code}/${id}`); }
+      return { ok: true };
+    }
+    rateLimit('extc:' + user.id, 10, 3600_000);
+    const token = 'alx_' + randomHex(24); const hash = await sha256Hex(token); const id = randomHex(6);
+    const ua = String(request.headers.get('User-Agent') || '');
+    const devName = String(body.device || '').slice(0, 60) || (/Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : 'Browser') + (/Windows/.test(ua) ? ' · Windows' : /Mac OS/.test(ua) ? ' · Mac' : '');
+    const rec = { id, hash, workshop_code: code, user_id: user.id, user_name: user.name || user.email, email: user.email, name: devName, created_at: new Date().toISOString() };
+    await env.PHOTOS.put('exttok/' + hash, JSON.stringify(rec));
+    await env.PHOTOS.put(`extidx/${code}/${id}`, JSON.stringify(rec));
+    const ws = (await db.list('Workshop', { code }, { limit: 1 }).catch(() => []))[0];
+    return { ok: true, token, workshop_code: code, workshop_name: ws ? ws.name : code, user_name: rec.user_name };
+  }
+  if (name === 'extMe' || name === 'extOrders' || name === 'extImport') {
+    needKv();
+    const auth = request.headers.get('Authorization') || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!/^alx_[a-f0-9]{48}$/.test(token)) throw new HttpError(401, 'unauthorized');
+    rateLimit('ext:' + token.slice(4, 16), 120, 60_000);
+    const hash = await sha256Hex(token);
+    const ext = await env.PHOTOS.get('exttok/' + hash, { type: 'json' });
+    if (!ext) throw new HttpError(401, 'unauthorized', { message: 'Die Erweiterung ist nicht mehr verbunden. Bitte im Dashboard neu verbinden.' });
+    const code = ext.workshop_code;
+    await h.gate(code);
+    // „zuletzt benutzt“ höchstens alle 10 Minuten schreiben
+    if (!ext.last_used || Date.now() - new Date(ext.last_used).getTime() > 600_000) {
+      const upd = { ...ext, last_used: new Date().toISOString() };
+      bg(Promise.all([env.PHOTOS.put('exttok/' + hash, JSON.stringify(upd)), env.PHOTOS.put(`extidx/${code}/${ext.id}`, JSON.stringify(upd))]));
+    }
+    const prof = (await db.list('WorkshopProfile', { workshop_code: code }, { limit: 1 }).catch(() => []))[0] || null;
+    const markup = Number(prof && prof.parts_markup_percent) || 0;
+    if (name === 'extMe') {
+      const ws = (await db.list('Workshop', { code }, { limit: 1 }).catch(() => []))[0];
+      return { ok: true, workshop_code: code, workshop_name: ws ? ws.name : code, user_name: ext.user_name, markup_percent: markup };
+    }
+    const DONE = ['abgeschlossen', 'abgeholt', 'storniert', 'erledigt'];
+    if (name === 'extOrders') {
+      const orders = await db.list('Order', { workshop_code: code }, { limit: 500 });
+      const open = orders.filter(o => !DONE.includes(o.status)).sort((a, b) => String(b.updated_date || b.created_date).localeCompare(String(a.updated_date || a.created_date)));
+      return { ok: true, orders: open.slice(0, 150).map(o => ({
+        id: o.id, number: o.order_number || '', plate: o.license_plate || '', vehicle: [o.vehicle_brand, o.vehicle_model].filter(Boolean).join(' '),
+        customer: o.customer_name || '', status: o.status, vin: o.vin || '', hsn: o.hsn || '', tsn: o.tsn || '', locked: !!o.invoice_locked,
+      })) };
+    }
+    // extImport: Positionen übernehmen
+    const str = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, n);
+    const money = v => { if (v == null || v === '') return null; const n = typeof v === 'number' ? v : Number(String(v).replace(/[€\s]|EUR/gi, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')); return Number.isFinite(n) && n >= 0 && n < 1e6 ? Math.round(n * 100) / 100 : null; };
+    const items = (Array.isArray(body.items) ? body.items : []).slice(0, 100).map(it => ({
+      part_name: str(it.part_name, 160), part_number: str(it.part_number, 60), quantity: Math.min(999, Math.max(1, Math.round(Number(String(it.quantity || 1).replace(',', '.')) || 1))),
+      unit_price: money(it.unit_price), sale_price: money(it.sale_price),
+    })).filter(it => it.part_name || it.part_number);
+    if (!items.length) throw new HttpError(400, 'params', { message: 'Keine Positionen zum Übernehmen.' });
+    const SUP = { stakis: 'Stahlgruber STAkis', wm: 'WM SE / Trost', coparts: 'PV Automotive / Coparts', autodoc: 'Autodoc', kfzteile24: 'kfzteile24' };
+    const supplierKey = SUP[body.supplier_key] ? body.supplier_key : 'sonstige';
+    const supplierName = SUP[supplierKey] || str(body.supplier_name, 120) || 'Sonstiger Lieferant';
+    const actor = `${ext.user_name || 'Browser-Erweiterung'} (Erweiterung)`;
+    if (body.target === 'lager') {
+      // Wareneingang: Bestand erhöhen (gleiche Teilenummer), sonst neuen Artikel anlegen
+      const inv = await db.list('InventoryItem', { workshop_code: code }, { limit: 2000 });
+      const key = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      let created = 0, updated = 0;
+      for (const it of items) {
+        const hit = it.part_number ? inv.find(x => key(x.part_number) && key(x.part_number) === key(it.part_number)) : inv.find(x => String(x.name || '').toLowerCase() === it.part_name.toLowerCase());
+        if (hit) {
+          const qty = (Number(hit.stock_quantity) || 0) + it.quantity;
+          await db.update('InventoryItem', hit.id, { stock_quantity: qty, ...(it.unit_price != null ? { price_per_unit: it.unit_price } : {}), ...(hit.supplier_name ? {} : { supplier_name: supplierName }) });
+          hit.stock_quantity = qty; updated++;
+        } else {
+          const rec = await db.create('InventoryItem', Object.fromEntries(Object.entries({ workshop_code: code, name: it.part_name || it.part_number, part_number: it.part_number || undefined, stock_quantity: it.quantity, min_stock: 0, unit: 'Stück', supplier_name: supplierName, price_per_unit: it.unit_price ?? undefined, category: 'sonstiges' }).filter(([, v]) => v !== undefined)));
+          inv.push(rec); created++;
+        }
+      }
+      return { ok: true, target: 'lager', created, updated };
+    }
+    const order = await getRec('Order', String(body.order_id || ''));
+    if (!order || order.workshop_code !== code) throw new HttpError(404, 'not_found', { message: 'Auftrag nicht gefunden.' });
+    const toInvoice = !!body.to_invoice && !order.invoice_locked;
+    let parts = 0, invoiced = 0;
+    for (const it of items) {
+      const vk = it.sale_price != null ? it.sale_price : (it.unit_price != null && markup ? Math.round(it.unit_price * (1 + markup / 100) * 100) / 100 : null);
+      const po = await db.create('PartOrder', Object.fromEntries(Object.entries({
+        workshop_code: code, related_order_id: order.id, status: 'offen', part_name: it.part_name || it.part_number, part_number: it.part_number || undefined,
+        quantity: it.quantity, unit_price: it.unit_price ?? undefined, sale_price: vk ?? undefined, total_cost: it.unit_price != null ? Math.round(it.unit_price * it.quantity * 100) / 100 : undefined,
+        supplier_key: supplierKey, supplier_name: supplierName, ordered_by: actor,
+      }).filter(([, v]) => v !== undefined)));
+      parts++;
+      if (toInvoice && vk) {
+        const ii = await db.create('InvoiceItem', { order_id: order.id, description: [po.part_name, po.part_number ? `(${po.part_number})` : ''].filter(Boolean).join(' '), item_type: 'ersatzteil', quantity: it.quantity, unit_price: vk, total: Math.round(vk * it.quantity * 100) / 100, ...(it.unit_price != null ? { cost_price: it.unit_price } : {}), workshop_code: code });
+        await db.update('PartOrder', po.id, { invoice_item_id: ii.id }); invoiced++;
+      }
+    }
+    return { ok: true, target: 'auftrag', order_id: order.id, order_number: order.order_number || '', parts, invoiced, invoice_locked: !!order.invoice_locked && !!body.to_invoice };
+  }
+
   if (name === 'alexRecommendations') {
     const user = await authUser();
     let code = user.workshop_code;

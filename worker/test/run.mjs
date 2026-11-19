@@ -1442,5 +1442,40 @@ await t('Fahrzeugschein Live-Scan am Handy: sofort auswerten, nichts speichern, 
   assert.equal((await fn('registrationScanPublic', { token: tk2.data.token, action: 'scan', data_url: png })).status, 429);
   delete env.AI;
 });
+await t('Browser-Erweiterung: verbinden, Aufträge, Teile an Auftrag und ins Lager, trennen', async () => {
+  const U = 'USER-AL-T1-xxxxxxxxxxxxxxxx';
+  const fn = (name, body, tok) => worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 Chrome/130', Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { status: r.status, data: await r.json() }; });
+  db.PartOrder = db.PartOrder || []; db.InvoiceItem = db.InvoiceItem || [];
+  db.WorkshopProfile[0].parts_markup_percent = 30;
+  db.Order.push({ id: 'oz9', order_number: '2009', workshop_code: 'AL-T1', customer_name: 'Kunde Z', license_plate: 'AB-Z 9', vehicle_brand: 'Audi', vehicle_model: 'R8', status: 'abgeschlossen' });
+  const c = await fn('extConnect', { device: 'Chrome · Test' }, U);
+  assert.equal(c.status, 200, JSON.stringify(c.data)); assert.match(c.data.token, /^alx_[a-f0-9]{48}$/);
+  const T = c.data.token;
+  assert.ok(![...kv.values()].some(v => String(v.v || v.value || v).includes(T)), 'Schlüssel nur als Prüfwert gespeichert');
+  assert.equal((await fn('extMe', {}, 'alx_' + 'a'.repeat(48))).status, 401);
+  assert.equal((await fn('extMe', {}, U)).status, 401, 'Dashboard-Login gilt nicht als Erweiterungs-Schlüssel');
+  const me = await fn('extMe', {}, T); assert.equal(me.data.workshop_code, 'AL-T1'); assert.equal(me.data.markup_percent, 30);
+  const ol = await fn('extOrders', {}, T);
+  const ids = ol.data.orders.map(o => o.id);
+  assert.ok(ids.includes('o1') && !ids.includes('o2') && !ids.includes('oz9'), 'nur offene Aufträge der eigenen Werkstatt: ' + ids);
+  assert.equal((await fn('extImport', { order_id: 'o2', items: [{ part_name: 'X' }] }, T)).status, 404, 'fremder Auftrag');
+  const before = db.PartOrder.length;
+  const im = await fn('extImport', { order_id: 'o1', supplier_key: 'stakis', to_invoice: true, items: [
+    { part_name: 'Bremsbelagsatz vorne', part_number: '0 986 494 812', quantity: 1, unit_price: '42,90' },
+    { part_name: 'Bremsscheibe', part_number: '09.C394.13', quantity: 2, unit_price: 31.5, sale_price: 49 },
+    { part_name: '' } ] }, T);
+  assert.equal(im.status, 200, JSON.stringify(im.data)); assert.equal(im.data.parts, 2); assert.equal(im.data.invoiced, 2);
+  const np = db.PartOrder.slice(before);
+  assert.equal(np[0].sale_price, 55.77, 'VK = EK + 30 % Aufschlag'); assert.equal(np[0].supplier_name, 'Stahlgruber STAkis'); assert.equal(np[0].related_order_id, 'o1');
+  assert.equal(np[1].sale_price, 49); assert.equal(np[1].total_cost, 63);
+  assert.ok(np.every(p => p.invoice_item_id));
+  db.InventoryItem.push({ id: 'i1', workshop_code: 'AL-T1', name: 'Ölfilter', part_number: 'HU 719/7 x', stock_quantity: 2, min_stock: 4 });
+  const lg = await fn('extImport', { target: 'lager', supplier_key: 'wm', items: [{ part_name: 'Ölfilter', part_number: 'HU719/7X', quantity: 5, unit_price: 6.2 }, { part_name: 'Zündkerze', part_number: 'FR7DCX', quantity: 4 }] }, T);
+  assert.equal(lg.data.updated, 1); assert.equal(lg.data.created, 1);
+  assert.equal(db.InventoryItem.find(i => i.id === 'i1').stock_quantity, 7);
+  const dev = await fn('extList', {}, U); assert.equal(dev.data.devices.length, 1); assert.equal(dev.data.devices[0].name, 'Chrome · Test');
+  await fn('extRevoke', { id: dev.data.devices[0].id }, U);
+  assert.equal((await fn('extOrders', {}, T)).status, 401, 'nach dem Trennen gesperrt');
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
