@@ -106,18 +106,24 @@ function kbIndex(kb) {
   if (ix) return ix;
   const docs = kb.map(k => {
     const kws = String(k.keywords || '').split(',').map(x => fold(x)).filter(w => w.length > 2);
-    return { k, kws, head: [...new Set([...kws.flatMap(x => x.split(' ')), ...ftokens(k.title)])].filter(w => w.length > 2), body: ftokens(k.content), all: fold(k.title + ' ' + k.keywords + ' ' + k.content) };
+    const pre = fold(String(k.title).split(/ [–-] /)[0]);
+    // Modellcodes im Titel (E30, F31, N47, W205 …) – sonst nur die Marke
+    const models = [...new Set(pre.match(/\b([ef]\d{2}|g\d{2}|[nmb]\d{2}[a-z]{0,2}|w\d{3}|b\d|mk\d|8[a-z]|[0-9][a-z]\d?)\b/g) || [])];
+    const spec = models.length ? models : k.brand ? [fold(k.brand)] : [];
+    return { k, kws, spec, head: [...new Set([...kws.flatMap(x => x.split(' ')), ...ftokens(k.title)])].filter(w => w.length > 2), body: ftokens(k.content), all: fold(k.title + ' ' + k.keywords + ' ' + k.content) };
   });
   const df = new Map();
-  docs.forEach(d => new Set([...d.head, ...d.body].map(w => w.slice(0, 5))).forEach(st => df.set(st, (df.get(st) || 0) + 1)));
+  docs.forEach(d => new Set([...d.head, ...d.body].map(w => w.slice(0, 7))).forEach(st => df.set(st, (df.get(st) || 0) + 1)));
   const N = Math.max(2, docs.length);
-  ix = { docs, idf: w => Math.log((N + 1) / ((df.get(w.slice(0, 5)) || 0) + 1)) / Math.log(N + 1) };
+  ix = { docs, idf: w => Math.log((N + 1) / ((df.get(w.slice(0, 7)) || 0) + 1)) / Math.log(N + 1) };
   idfCache.set(kb, ix);
   return ix;
 }
 // Wortstamm für die Suche: gemeinsamer Anfang von mind. 5 Zeichen bzw. Länge des kürzeren Worts minus 2
 // (ruckelt/ruckeln, bremse/bremsbelaege – aber nicht ueberfaellig/uebersicht oder steuerkette/steuergeraet)
 const kbStem = (a, b) => { if (a === b) return true; const n = Math.max(5, Math.min(a.length, b.length) - 2); return a.length >= 5 && b.length >= 5 && a.slice(0, n) === b.slice(0, n); };
+// Allerweltswörter: zählen kaum und machen allein keinen Treffer
+const KB_GENERIC = new Set(['wechseln', 'wechsel', 'tauschen', 'fehler', 'motor', 'pruefen', 'pruefung', 'defekt', 'problem', 'kaputt', 'auto', 'fahrzeug', 'wagen', 'geht', 'funktioniert', 'richtig', 'zuerst', 'vorne', 'hinten', 'links', 'rechts', 'intervall', 'kosten', 'dauer', 'dauert', 'lange']);
 export function searchKb(kb, question, vehicle, debug) {
   if (!kb || !kb.length) return [];
   const { docs, idf } = kbIndex(kb);
@@ -126,8 +132,11 @@ export function searchKb(kb, question, vehicle, debug) {
   const codes = (qf.match(/\b[pcbu][0-9][0-9a-f]{3}\b/g) || []);
   const has = (list, w) => list.some(x => kbStem(x, w));
   const scored = docs.map(d => {
+    // Modell-/Motor-spezifische Einträge („BMW E30 – …“, Marke gesetzt) nur, wenn Frage oder Fahrzeug dazu passen
+    if (d.spec.length && !d.spec.some(t => qf.includes(t))) return { k: d.k, score: 0, strong: false, why: [] };
     let score = 0; let strong = false; const why = [];
     qt.forEach(w => {
+      if (KB_GENERIC.has(w)) { if (has(d.head, w)) score += 0.5; return; }
       const wi = idf(w);
       if (has(d.head, w)) { score += 1 + 3 * wi; if (wi >= 0.3) strong = true; if (debug) why.push(w + ':' + wi.toFixed(2)); }
       else if (w.length > 4 && has(d.body, w)) score += 0.6 * wi;
@@ -239,6 +248,9 @@ Regeln:
 - Seiten im Dashboard nur so nennen, wie sie in der NAVIGATION stehen. Andere Menüs gibt es nicht.
 - Du kannst selbst nichts anlegen oder ändern. Nur wenn ausdrücklich etwas angelegt werden soll: sagen, dass das im Dashboard über ALEX oder „Neuer Auftrag“ geht.
 - Aufzählungen von Aufträgen kurz halten (höchstens 5, die wichtigsten zuerst) – die Details zeigt das Tablet als Karten.
+- Beantworte genau die gestellte Frage (fragt jemand nach der Dauer, nenne die Dauer – keine Arbeitsanleitung).
+- Werte aus Wissenseinträgen nur für genau das Bauteil verwenden, für das sie dort stehen (z. B. Radschrauben-Drehmoment nie für Bremssattelschrauben).
+- Wissenseinträge zu einem bestimmten Modell/Motor (z. B. „BMW E30 – …“) nur verwenden, wenn es um genau dieses Fahrzeug geht.
 - Wenn die Frage unklar ist (z. B. welches Fahrzeug), stelle genau eine kurze Rückfrage.
 
 NAVIGATION: ${NAVIGATION}`;
@@ -382,7 +394,9 @@ export async function alexAsk(db, sess, body, env, data) {
     + (kb.length ? kb.map((k, i) => `[Eintrag ${i + 1}] ${k.title}${k.brand ? ' (' + k.brand + ')' : ''}\n${String(k.content).slice(0, 1400)}`).join('\n\n') : 'keine passenden Einträge');
   const system = (body.channel === 'dashboard' ? SYSTEM_DASHBOARD : SYSTEM) + '\n\n' + context;
   const test = sess.workshop_code === 'AL-DEMO' && ALEX_TEST_MODELS.includes(body.model_test) ? body.model_test : null;
-  const call = (model) => withTimeout(runAi(env, model, { messages: [{ role: 'system', content: system }, ...msgs], max_tokens: model === TEXT_MODEL ? 700 : 2500, temperature: 0.3 }), ALEX_TIMEOUT_MS);
+  const effort = test && ['low', 'medium', 'high'].includes(body.effort_test) ? body.effort_test : null;
+  const call = (model) => withTimeout(runAi(env, model, { messages: [{ role: 'system', content: system }, ...msgs], max_tokens: model === TEXT_MODEL ? 700 : 2500, temperature: 0.3,
+    ...(effort ? { reasoning: { effort } } : {}) }), ALEX_TIMEOUT_MS);
   let model = test || ALEX_MODEL; let r;
   try { r = await call(model); }
   catch (e) {
