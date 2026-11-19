@@ -1074,7 +1074,7 @@ async function setVehiclePhoto(o, file){
 const HELP_TEXTS = {
   berichtsheft:{ t:'Dein Berichtsheft.', d:'Hier öffnest du dein Online-Berichtsheft und findest alle Aufgaben, die du diese Woche erledigt hast – als Vorlage zum Eintragen.', li:['„Meine Tätigkeiten“ zeigt deine erledigten Aufgaben pro Tag.','„Woche kopieren“ und in der Lernwelt einfügen.','Berichtsheft regelmäßig führen – dein Ausbilder zeichnet es ab.'] },
   dashboard:{ t:'Dein Tag auf einen Blick.', d:'Erledigte Aufgaben, deine Arbeitszeit und die nächsten Termine.', li:['Die Zahlen aktualisieren sich automatisch alle 30 Sekunden.','Tippe auf einen Termin, um den Auftrag zu öffnen.'] },
-  auftraege:{ t:'Deine Aufträge.', d:'Links die Aufträge nach Status, rechts alle Details zum ausgewählten Fahrzeug.', li:['Aufgabe antippen und „Start“ drücken – die Zeit läuft bis „Fertig“ oder „Pause“.','Fotos und Sprachbericht hängst du direkt an die Aufgabe.','Sprachsteuerung: Mikrofon unten rechts antippen und z. B. „Ölwechsel abgehakt“ sagen – oder in den Einstellungen „Freihändig“ einschalten und „Alex, …“ sagen.','„Auftrag abschließen“ geht erst, wenn die Checkliste komplett ist – danach wird der Kunde automatisch informiert.'], tip:'Tipp: Unten rechts findest du Schnellnotizen und ALEX für Technikfragen.' },
+  auftraege:{ t:'Deine Aufträge.', d:'Links die Aufträge nach Status, rechts alle Details zum ausgewählten Fahrzeug.', li:['Aufgabe antippen und „Start“ drücken – die Zeit läuft bis „Fertig“ oder „Pause“.','Fotos und Sprachbericht hängst du direkt an die Aufgabe.','Sprachsteuerung: Mikrofon unten rechts antippen und z. B. „Ölwechsel abgehakt“ oder „Audi R8 fertig“ sagen – oder in den Einstellungen „Freihändig“ einschalten und „Hey Alex, …“ sagen.','„Auftrag abschließen“ geht erst, wenn die Checkliste komplett ist – danach wird der Kunde automatisch informiert.'], tip:'Tipp: Unten rechts findest du Schnellnotizen und ALEX für Technikfragen.' },
   alle:{ t:'Alle Aufträge der Werkstatt.', d:'Status und Fortschritt jedes Fahrzeugs, das gerade in der Werkstatt ist.', li:['Tippe auf eine Zeile, um den Auftrag zu öffnen.'] },
   hebebuehnen:{ t:'Hebebühnen.', d:'Welche Bühne belegt, frei oder außer Betrieb ist.', li:['Die Belegung wird im AutoLeitwerk-Dashboard zugewiesen.','Tippe auf eine belegte Bühne, um den Auftrag zu öffnen.'] },
   termine:{ t:'Termine.', d:'Fahrzeugannahmen und Übergaben für heute und morgen.', li:['Online-Buchungen der Kunden erscheinen hier automatisch.'] },
@@ -6502,17 +6502,25 @@ document.addEventListener('click', e=>{
    Frage an ALEX. Spracherkennung: die des Browsers (Safari/Chrome) – es wird kein Ton gespeichert. */
 
 /* VOICE-PARSER-START */
+// Weckwort: „Hey Alex“, „Hallo Alex“, „Okay Alex“ oder nur „Alex“ – auch in typischen Fehl-Schreibweisen der Erkennung
+const VC_WAKE_SRC = '(?:(?:hey|hei|hej|hay|he|hi|ey|hallo|ok|okay|okey)\\s*,?\\s*)?(?:alex|alecs|aleks|alec|alexa|alix)\\b';
+const VC_WAKE_START = new RegExp('^\\s*' + VC_WAKE_SRC + '[\\s,.:!?-]*', 'i');
+const VC_WAKE_ANY = new RegExp('(?:^|[^a-z0-9äöüß])' + VC_WAKE_SRC + '[\\s,.:!?-]*', 'i');
+const vcStripWake = s => String(s||'').replace(VC_WAKE_START, '').trim();
+// Ab dem Weckwort: „… und dann hey Alex Ölwechsel abgehakt“ → „Ölwechsel abgehakt“ (null = kein Weckwort)
+function vcAfterWake(s){ const m = String(s||'').match(VC_WAKE_ANY); return m ? String(s).slice(m.index + m[0].length).trim() : null; }
 const VC_FOLD = s => String(s||'').toLowerCase().replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss')
   .replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
 const VC_NUM = { eins:1, ein:1, erste:1, ersten:1, erster:1, erstes:1, zwei:2, zweite:2, zweiten:2, drei:3, dritte:3, dritten:3, vier:4, vierte:4, vierten:4,
   fuenf:5, fuenfte:5, fuenften:5, sechs:6, sechste:6, sechsten:6, sieben:7, siebte:7, siebten:7, acht:8, achte:8, achten:8, neun:9, neunte:9, zehn:10, zehnte:10 };
 const VC_FILLER = new Set(['die','der','das','den','dem','des','ein','eine','einen','aufgabe','aufgaben','punkt','checkliste','bei','beim','am','im','an','von','vom','fuer','mit',
-  'ist','sind','wurde','wurden','bitte','mal','jetzt','schon','auch','und','noch','so','ja','danke','okay','zeit','zeiterfassung','arbeit','als','nun','hab','habe','ich','wir','alles','alle']);
+  'ist','sind','wurde','wurden','bitte','mal','jetzt','schon','auch','und','noch','so','ja','danke','okay','zeit','zeiterfassung','arbeit','als','nun','hab','habe','ich','wir','alles','alle','frau','herr','herrn','ihr','ihre','ihren','sein','seine','seinen','kunde','kunden','kundin']);
 const VC_HEADS = ['wechsel','wechseln','pruefung','pruefen','tausch','tauschen','ersatz','erneuern','service','kontrolle','check','reinigung','reinigen','einstellung','einstellen','messung','messen','filter','belaege','scheiben','stand'];
 // Wortteile: „oelwechsel“ → oel + wechsel, damit es auch zu „Motoröl und Filter wechseln“ passt
+const VC_DIG = { null:0, eins:1, zwei:2, drei:3, vier:4, fuenf:5, sechs:6, sieben:7, acht:8, neun:9 };
 function vcTokens(s){
   const out = [];
-  VC_FOLD(s).split(' ').forEach(w=>{
+  VC_FOLD(s).replace(/\b([a-z]) (\d{1,3}|null|eins|zwei|drei|vier|fuenf|sechs|sieben|acht|neun)\b/g, (x,l,d)=>l + (d in VC_DIG ? VC_DIG[d] : d)).split(' ').forEach(w=>{
     if(!w || VC_FILLER.has(w)) return;
     out.push(w);
     for(const h of VC_HEADS){ if(w.length > h.length+1 && w.endsWith(h)){ out.push(w.slice(0, w.length-h.length)); out.push(h); break; } }
@@ -6554,9 +6562,17 @@ function vcOrdinal(text){
   return 0;
 }
 const VC_DONE_WORDS = 'abgehakt|abhaken|erledigt|fertig|gemacht|abgeschlossen|durch|geprueft|ok|okay|in ordnung|erledigen|check|gecheckt|erledigt markieren';
+// „alle Aufgaben“, „alles“, „der ganze Auftrag“ → ganzer Auftrag; Rest des Satzes = welches Fahrzeug
+const VC_ALL_RE = /\b(alle|alles|saemtliche|komplett|komplette|kompletten|ganze|ganzen|gesamte|gesamten|auftrag|auto|wagen|fahrzeug|karre)\b/;
+function vcDoneCmd(target){
+  const t = String(target||'').trim();
+  if(VC_ALL_RE.test(t)) return { intent:'done', all:true, target: t.replace(/\b(alle|alles|saemtliche|komplett|komplette|kompletten|ganze|ganzen|gesamte|gesamten|auftrag|auto|wagen|fahrzeug|karre|aufgaben|aufgabe|arbeiten|der|die|das|den|am|beim|bei|vom|von|im|fuer|ist|sind)\b/g,' ').replace(/\s+/g,' ').trim() };
+  return { intent:'done', target: t };
+}
 // Gesprochenen Satz in einen Befehl übersetzen
 function vcParse(raw){
-  let f = VC_FOLD(raw).replace(/^(hey |hallo |ok |okay )?(alex|alecs|aleks|alexa)\b ?/, '').replace(/ (bitte|danke)$/,'').trim();
+  raw = vcStripWake(raw);
+  let f = VC_FOLD(raw).replace(/ (bitte|danke)$/,'').trim();
   if(!f) return { intent:'wake' };
   if(/^(rueckgaengig|mach das rueckgaengig|rueckgaengig machen|das war falsch|falsch|widerruf\w*|undo)$/.test(f)) return { intent:'undo' };
   if(/(was kann ich sagen|welche befehle|was kannst du|^hilfe$)/.test(f)) return { intent:'help' };
@@ -6564,10 +6580,14 @@ function vcParse(raw){
   if(new RegExp('^(?:ist )?(?:' + VC_DONE_WORDS + ')$').test(f)) return { intent:'done', target:'' };
   // Fragen („Ist der Ölwechsel fertig?“, „Wie lange dauert …“) nie als Befehl ausführen
   if(/\?\s*$/.test(String(raw||'')) || /^(ist|sind|wann|wie|was|wer|wo|welche\w*|kann|koennen|hat|haben|hast|soll|sollen|muss|muessen|gibt|warum|wieso|weshalb|darf|brauche|braucht)\b/.test(f))
-    return { intent:'ask', text: String(raw||'').replace(/^\s*(?:hey |hallo |ok |okay )?(?:alex|alecs|aleks|alexa)\b[\s,.:!]*/i,'').trim() };
+    return { intent:'ask', text: String(raw||'').trim() };
+  // Auftrag abschließen (öffnet nur das Abschluss-Fenster – bestätigt wird per Tipp, weil der Kunde informiert wird)
+  let mm;
+  if((mm = f.match(/^(?:schliesse|schliess|schliesst) (?:den |das )?(?:auftrag )?(.*?) ?ab$/)) || (mm = f.match(/^(?:den |das )?(.*?) ?(?:auftrag )?(?:abschliessen)$/)))
+    return { intent:'closeorder', target: mm[1].replace(/\b(auftrag|den|das|vom|von|fuer)\b/g,'').trim() };
   let m;
   if((m = f.match(/^(?:notiz|notiere|notier|schreib auf|schreibe auf|vermerk|vermerke|bericht|befund)\b[ :]*(.+)$/))){
-    const orig = String(raw||'').replace(/^\s*(?:hey |hallo |ok |okay )?(?:alex|alecs|aleks|alexa)\b[\s,.:!]*/i,'')
+    const orig = String(raw||'')
       .replace(/^(?:notiz|notiere|notier|schreib(?:e)? auf|vermerk(?:e)?|bericht|befund)\b[\s,.:!-]*/i,'').trim();
     return { intent:'note', text: orig || m[1] };
   }
@@ -6575,14 +6595,14 @@ function vcParse(raw){
   if((m = f.match(/^(?:weiter|weitermachen|fortsetzen|fortfahren|zeit weiter)(?: (?:mit )?(.+))?$/))) return { intent:'resume', target: m[1]||'' };
   if((m = f.match(/^(.+?) (?:wieder oeffnen|wieder auf|nicht erledigt|doch nicht erledigt|zuruecksetzen|wieder offen)$/))) return { intent:'reopen', target: m[1] };
   if((m = f.match(new RegExp('^(?:ist )?(?:' + VC_DONE_WORDS + ')$')))) return { intent:'done', target:'' };
-  if((m = f.match(/^(?:hake|haken|hak|erledige|markiere|schliesse|schliess|abhaken)\s+(.+?)(?:\s+(?:ab|als erledigt|als fertig|fertig))?$/))) return { intent:'done', target: m[1] };
-  if((m = f.match(new RegExp('^(?:fertig|erledigt|abgehakt)(?: mit)? (.+)$')))) return { intent:'done', target: m[1] };
-  if((m = f.match(new RegExp('^(.+?) (?:ist |sind |wurde |wurden |hab ich |habe ich )?(?:' + VC_DONE_WORDS + ')$')))) return { intent:'done', target: m[1] };
+  if((m = f.match(/^(?:hake|haken|hak|erledige|markiere|abhaken)\s+(.+?)(?:\s+(?:ab|als erledigt|als fertig|fertig))?$/))) return vcDoneCmd(m[1]);
+  if((m = f.match(new RegExp('^(?:fertig|erledigt|abgehakt)(?: mit)? (.+)$')))) return vcDoneCmd(m[1]);
+  if((m = f.match(new RegExp('^(.+?) (?:ist |sind |wurde |wurden |hab ich |habe ich )?(?:' + VC_DONE_WORDS + ')$')))) return vcDoneCmd(m[1]);
   if((m = f.match(/^(?:starte|start|beginne|beginn|fange an mit|fang an mit|anfangen mit|los mit|zeit starten fuer|zeit fuer|zeit starten)\s+(.+)$/))) return { intent:'start', target: m[1] };
   if((m = f.match(/^(.+?) (?:starten|beginnen|anfangen|start|los)$/))) return { intent:'start', target: m[1] };
   if(/^(start|starten|los|los gehts|los geht s|zeit starten|anfangen)$/.test(f)) return { intent:'start', target:'' };
   if((m = f.match(/^(?:oeffne|oeffnen|zeig|zeige|zeig mir|gehe zu|geh zu|wechsel zu|wechsle zu|wechseln zu)\s+(?:den |das |die )?(?:auftrag |fahrzeug |wagen |auto )?(?:von |vom |fuer )?(.+)$/))) return { intent:'open', target: m[1] };
-  return { intent:'ask', text: String(raw||'').replace(/^\s*(?:hey |hallo |ok |okay )?(?:alex|alecs|aleks|alexa)\b[\s,.:!]*/i,'').trim() };
+  return { intent:'ask', text: String(raw||'').trim() };
 }
 // Ziel (Aufgabe oder Checklistenpunkt) finden. ctx: { orders, order (aktuell), task (aktuell), qc: true }
 function vcFindTarget(targetText, ctx){
@@ -6610,18 +6630,31 @@ function vcFindTarget(targetText, ctx){
   return cands[0];
 }
 function vcFindOrder(text, list){
-  const f = VC_FOLD(text); const compact = f.replace(/ /g,'');
-  let best = null;
+  const c = vcFindOrders(text, list);
+  if(!c.length || c[0].score < 0.6) return null;
+  return c[0].order;
+}
+function vcFindOrders(text, list){
+  const f = VC_FOLD(text); const compact = vcTokens(text).join('');
+  const out = [];
   (list||[]).forEach(o=>{
     let s = 0;
-    const plate = VC_FOLD(o.plate).replace(/ /g,'');
+    const plate = vcTokens(o.plate).join('');
     if(plate.length>=4 && (compact.includes(plate) || (plate.length>=5 && compact.endsWith(plate.slice(-4))))) s = Math.max(s, 1);
     const num = String(o.orderNumber||'').replace(/\D/g,'');
     if(num && new RegExp('\\b'+num+'\\b').test(f)) s = Math.max(s, 0.95);
-    s = Math.max(s, vcScore(text, o.customer)*0.9, vcScore(text, o.vehicle)*0.85);
-    if(!best || s > best.score) best = { order:o, score:s };
+    s = Math.max(s, vcScore(text, o.customer)*0.9, vcScore(text, o.vehicle)*0.85, vcScore(text, o.vehicle + ' ' + o.plate)*0.85);
+    if(s > 0) out.push({ order:o, score:s - (o.status==='erledigt' ? 0.1 : 0) });
   });
-  return best && best.score >= 0.6 ? best.order : null;
+  return out.sort((a,b)=>b.score-a.score);
+}
+// Ganzer Auftrag gemeint? („Audi R8 fertig“) – nur, wenn das Fahrzeug klar besser passt als eine Aufgabe
+function vcOrderTarget(text, list, taskScore){
+  if(!vcTokens(text).length) return null;
+  const c = vcFindOrders(text, list).filter(x=>x.score >= 0.6);
+  if(!c.length || c[0].score < (taskScore ? Math.max(0.75, taskScore + 0.05) : 0.6)) return null;
+  const close = c.filter(x=>x.score >= c[0].score - 0.06);
+  return close.length > 1 ? { ambiguous: close.slice(0,4).map(x=>({ kind:'order', order:x.order, score:x.score })) } : { kind:'order', order:c[0].order, score:c[0].score };
 }
 /* VOICE-PARSER-END */
 
@@ -6710,16 +6743,38 @@ function vcDone(hit){
   vcSay('ok', `<b>${escHtml(t.title)}</b> abgehakt · #${escHtml(o.orderNumber||o.id)} ${escHtml(o.plate)}${left ? ` · noch ${left} offen` : ' · alle Aufgaben erledigt'}`,
     `${t.title} abgehakt.${left ? '' : ' Alle Aufgaben erledigt.'}`, { undo:true });
 }
+// Ganzer Auftrag fertig: alle offenen Aufgaben abhaken (laufende Zeiten werden beendet), Abschluss anbieten
+function vcBulkDone(o){
+  const open = o.tasks.filter(t=>t.status!=='done');
+  vcShow(o, open[0] || o.tasks[0]);
+  const name = `${escHtml(o.vehicle)} ${escHtml(o.plate)}`;
+  const qcOpen = (o.qc||[]).filter(q=>!q.checked).length;
+  const closeBtn = o.status!=='erledigt' ? `<div class="vc-picks"><button class="vc-pick" data-vc-closeorder="${escHtml(o.id)}">Auftrag abschließen …<small>${qcOpen ? `Checkliste: noch ${qcOpen} Punkt${qcOpen>1?'e':''} offen` : 'Checkliste komplett'}</small></button></div>` : '';
+  if(!open.length){ vcToast('ok', `Am <b>${name}</b> ist schon alles erledigt.${closeBtn}`, { ms:12000 }); vcSpeak(`Am ${o.vehicle} ist schon alles erledigt.`); return; }
+  const items = open.map(t=>({ t, prev:{ status:t.status, statusLabel:t.statusLabel, progress:t.progress } }));
+  open.forEach(t=>{ if(t.timeStatus==='running' || t.timeStatus==='paused') finishTimer(o, t); else completeTask(o, t); });
+  vc.undo = { kind:'bulk', o, items };
+  vcToast('ok', `<b>${name}</b>: ${open.length===1 ? '1 Aufgabe' : `alle ${open.length} offenen Aufgaben`} abgehakt (${open.map(t=>escHtml(t.title)).join(', ')})${closeBtn}`, { undo:true, ms:15000 });
+  vcSpeak(`${o.vehicle}: ${open.length===1 ? 'Aufgabe' : 'alle ' + open.length + ' Aufgaben'} abgehakt.${o.status!=='erledigt' ? (qcOpen ? ` Checkliste noch ${qcOpen} offen.` : ' Zum Abschließen bitte tippen.') : ''}`);
+}
+function vcCloseOrder(o){
+  vcShow(o);
+  vcHideToast();
+  openCloseOrderModal(o); // Abschließen bestätigt der Mechaniker per Tipp – der Kunde wird dabei benachrichtigt
+  const qcOpen = (o.qc||[]).filter(q=>!q.checked).length;
+  vcSpeak(qcOpen ? `Die Checkliste hat noch ${qcOpen} offene Punkte.` : 'Bitte zum Abschließen tippen.');
+}
 function vcUndo(){
   const u = vc.undo; vc.undo = null;
   if(!u){ vcSay('warn', 'Nichts zum Rückgängigmachen.', 'Nichts zum Rückgängigmachen.'); return; }
   if(u.kind==='qc'){ const q = u.o.qc[u.i]; q.checked = false; q.by = ''; vcShow(u.o, null, 'checkliste'); saveQC(u.o); renderTabPanel(); vcSay('ok', `„${escHtml(q.label)}“ wieder offen.`, 'Rückgängig gemacht.'); return; }
   if(u.kind==='task'){ Object.assign(u.t, u.prev); recalcProgress(u.o); saveTaskStatus(u.t); vcShow(u.o, u.t); vcSay('ok', `<b>${escHtml(u.t.title)}</b> wieder offen.`, 'Rückgängig gemacht.'); return; }
+  if(u.kind==='bulk'){ u.items.forEach(x=>Object.assign(x.t, x.prev)); recalcProgress(u.o); u.items.forEach(x=>saveTaskStatus(x.t)); vcShow(u.o, u.items[0].t); vcSay('ok', `${u.items.length} Aufgabe${u.items.length>1?'n':''} am <b>${escHtml(u.o.vehicle)}</b> wieder offen.`, 'Rückgängig gemacht.'); return; }
   if(u.kind==='start'){ vcShow(u.o, u.t); pauseTimer(u.t); vcSay('ok', `Zeit für <b>${escHtml(u.t.title)}</b> angehalten.`, 'Zeit angehalten.'); }
 }
 function vcAmbiguous(list, intent){
   vc.pick = { list, intent };
-  const items = list.map((c,i)=>`<button class="vc-pick" data-vc-pick="${i}">${escHtml(c.kind==='qc' ? 'Checkliste: '+c.label : c.task.title)}<small>#${escHtml(c.order.orderNumber||c.order.id)} ${escHtml(c.order.plate)}</small></button>`).join('');
+  const items = list.map((c,i)=>`<button class="vc-pick" data-vc-pick="${i}">${escHtml(c.kind==='order' ? c.order.vehicle + ' · ' + (c.order.customer||'') : c.kind==='qc' ? 'Checkliste: '+c.label : c.task.title)}<small>#${escHtml(c.order.orderNumber||c.order.id)} ${escHtml(c.order.plate)}</small></button>`).join('');
   vcToast('warn', `Welche meinen Sie?<div class="vc-picks">${items}</div>`, { ms:15000 });
   vcSpeak('Welche meinen Sie? Bitte antippen.');
 }
@@ -6741,7 +6796,29 @@ function vcRun(cmd, heard){
     case 'undo': vcUndo(); return;
     case 'help': vcHelp(); return;
     case 'sleep': vcSetHands(false); vcSay('ok', 'Freihändig ausgeschaltet. Zum Sprechen das Mikrofon antippen.', 'Okay, ich höre nicht mehr zu.'); return;
+    case 'closeorder': {
+      let h = cmd.hit;
+      if(!h){ h = cmd.target ? vcOrderTarget(cmd.target, orders, 0) : (vcCtx().order ? { kind:'order', order:vcCtx().order } : null); }
+      if(!h){ vcSay('warn', cmd.target ? `Keinen Auftrag zu „${escHtml(cmd.target)}“ gefunden.` : 'Welcher Auftrag? Zum Beispiel: „Alex, Audi R8 abschließen“.', 'Welcher Auftrag?'); return; }
+      if(h.ambiguous){ vcAmbiguous(h.ambiguous, 'closeorder'); return; }
+      vcCloseOrder(h.order); return;
+    }
     case 'done': case 'reopen': {
+      if(cmd.intent==='done'){
+        // ganzer Auftrag: „alle Aufgaben fertig“, „Audi R8 fertig“
+        let oh = cmd.hit && cmd.hit.kind==='order' ? cmd.hit : null;
+        if(!oh && !cmd.hit && cmd.all){
+          oh = cmd.target ? vcOrderTarget(cmd.target, orders, 0) : (vcCtx().order ? { kind:'order', order:vcCtx().order } : null);
+          if(!oh){ vcSay('warn', cmd.target ? `Keinen Auftrag zu „${escHtml(cmd.target)}“ gefunden.` : 'Welches Fahrzeug? Zum Beispiel: „Alex, Audi R8 fertig“.', 'Welches Fahrzeug?', { ms:8000 }); return; }
+        }
+        if(!oh && !cmd.hit && cmd.target){
+          const th = vcFindTarget(cmd.target, Object.assign(vcCtx(), { intent:'done' }));
+          const ts = th && !th.ambiguous ? th.score : th && th.ambiguous ? th.ambiguous[0].score : 0;
+          const o2 = vcOrderTarget(cmd.target, orders, ts);
+          if(o2) oh = o2;
+        }
+        if(oh){ if(oh.ambiguous){ vcAmbiguous(oh.ambiguous, 'done'); return; } vcBulkDone(oh.order); return; }
+      }
       const hit = vcResolve(cmd.target, cmd.intent, cmd.hit); if(!hit) return;
       if(cmd.intent==='done') vcDone(hit);
       else if(hit.kind==='task'){ const t = hit.task; const prev = { status:t.status, statusLabel:t.statusLabel, progress:t.progress }; t.status='open'; t.statusLabel='Ausstehend'; t.progress=0; recalcProgress(hit.order); saveTaskStatus(t); vcShow(hit.order, t); vc.undo = { kind:'task', o:hit.order, t, prev }; vcSay('ok', `<b>${escHtml(t.title)}</b> wieder offen.`, `${t.title} wieder offen.`, { undo:true }); }
@@ -6815,7 +6892,8 @@ function vcHelp(){
     <li>„Alex, Ölwechsel abgehakt“ · „Alex, Aufgabe 2 erledigt“</li>
     <li>„Alex, starte Bremsen vorne“ · „Alex, Pause“ · „Alex, weiter“</li>
     <li>„Alex, Probefahrt abgehakt“ (Checkliste)</li>
-    <li>„Alex, öffne AB-CD 123“ · „Alex, Notiz: Scheiben hinten riefig“</li>
+    <li>„Hey Alex, Audi R8 fertig“ · „Alex, alle Aufgaben fertig“ (ganzer Auftrag)</li>
+    <li>„Alex, Auftrag abschließen“ · „Alex, öffne AB-CD 123“ · „Alex, Notiz: Scheiben hinten riefig“</li>
     <li>„Alex, rückgängig“ · Frage: „Alex, was heißt P0420?“</li></ul>`, { ms:20000 });
 }
 // Mehrere Erkennungs-Varianten: die erste nehmen, die einen klaren Befehl mit gefundenem Ziel ergibt
@@ -6825,7 +6903,10 @@ function vcHandle(alts){
   let chosen = null;
   for(const a of alts){
     const cmd = vcParse(a);
-    if(['done','reopen','start'].includes(cmd.intent)){ const hit = vcFindTarget(cmd.target, Object.assign(vcCtx(), { intent: cmd.intent })); if(hit && !hit.ambiguous){ chosen = { a, cmd }; break; } }
+    if(['done','reopen','start'].includes(cmd.intent)){
+      if(cmd.all){ chosen = { a, cmd }; break; }
+      const hit = vcFindTarget(cmd.target, Object.assign(vcCtx(), { intent: cmd.intent }));
+      if((hit && !hit.ambiguous) || (cmd.intent==='done' && vcOrderTarget(cmd.target, orders, 0))){ chosen = { a, cmd }; break; } }
     else if(cmd.intent!=='ask'){ chosen = { a, cmd }; break; }
   }
   if(!chosen) chosen = { a: alts[0], cmd: vcParse(alts[0]) };
@@ -6867,14 +6948,13 @@ function vcStartHands(){
     for(let i=ev.resultIndex;i<ev.results.length;i++){
       const res = ev.results[i];
       const txt = res[0].transcript || '';
-      const f = VC_FOLD(txt);
-      const wake = /\b(alex|alecs|aleks)\b/.test(f);
+      const wake = vcAfterWake(txt) !== null;
       if(!res.isFinal){ if(wake || vc.awaiting > Date.now()) vcToast('listen', `${escHtml(txt)} …`, { ms:3000 }); continue; }
       const alts = Array.from(res).map(x=>x.transcript);
       if(vc.awaiting > Date.now()){ vc.awaiting = 0; vcRenderFab(); vcHandle(alts); continue; }
       if(!wake) continue; // ohne „Alex“ wird nichts ausgeführt
       // Nur den Teil ab „Alex“ nehmen
-      vcHandle(alts.map(a=>{ const m = String(a).match(/\b(alex|alecs|aleks)\b[\s,.:!]*(.*)$/i); return m ? 'alex ' + m[2] : ''; }));
+      vcHandle(alts.map(a=>{ const rest = vcAfterWake(a); return rest === null ? '' : 'alex ' + rest; }));
     }
   };
   r.onerror = (ev)=>{ const e = ev && ev.error; if(e==='not-allowed' || e==='service-not-allowed'){ vcSetHands(false); vcSay('warn', 'Mikrofon nicht erlaubt – Freihändig ausgeschaltet.', null, { ms:9000 }); } };
@@ -6903,7 +6983,7 @@ function vcSettingsHtml(){
     <div class="set-card">
       ${vcSupported() ? '' : `<div class="set-row"><div><div class="set-row-label">In diesem Browser nicht verfügbar</div><div class="set-row-sub">Safari oder Chrome mit Internet verwenden. Auf dem iPad: Einstellungen › Allgemein › Tastatur › Diktierfunktion einschalten.</div></div></div>`}
       <div class="set-row">
-        <div><div class="set-row-label">Freihändig – „Alex, …“</div><div class="set-row-sub">ALEX hört dauerhaft zu und reagiert nur auf Sätze, die mit „Alex“ beginnen, z. B. „Alex, Ölwechsel abgehakt“. Ohne: Mikrofon-Knopf antippen und sprechen.</div></div>
+        <div><div class="set-row-label">Freihändig – „Hey Alex, …“</div><div class="set-row-sub">ALEX hört dauerhaft zu und reagiert nur auf Sätze mit „Hey Alex“ oder „Alex“, z. B. „Hey Alex, Ölwechsel abgehakt“ oder „Hey Alex, Audi R8 fertig“. Ohne: Mikrofon-Knopf antippen und sprechen.</div></div>
         <div class="toggle ${vc.hands?'on':''}" data-vc-toggle="hands" role="switch" aria-checked="${vc.hands}"></div>
       </div>
       <div class="set-row">
@@ -6926,6 +7006,8 @@ document.addEventListener('click', e=>{
   const pk = t.closest('[data-vc-pick]');
   if(pk && vc.pick){ const c = vc.pick.list[+pk.dataset.vcPick]; const intent = vc.pick.intent; vc.pick = null; if(!c) return;
     vcRun({ intent, hit: c }, ''); return; }
+  const co = t.closest('[data-vc-closeorder]');
+  if(co){ const o = orders.find(x=>x.id===co.dataset.vcCloseorder); if(o) vcCloseOrder(o); return; }
   const tg = t.closest('[data-vc-toggle]');
   if(tg){ if(tg.dataset.vcToggle==='hands') vcSetHands(!vc.hands); else vcSetTts(!vc.tts); return; }
   if(t.closest('[data-vc-help]')){ vcHelp(); return; }
