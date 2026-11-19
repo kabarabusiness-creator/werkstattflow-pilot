@@ -1074,7 +1074,7 @@ async function setVehiclePhoto(o, file){
 const HELP_TEXTS = {
   berichtsheft:{ t:'Dein Berichtsheft.', d:'Hier öffnest du dein Online-Berichtsheft und findest alle Aufgaben, die du diese Woche erledigt hast – als Vorlage zum Eintragen.', li:['„Meine Tätigkeiten“ zeigt deine erledigten Aufgaben pro Tag.','„Woche kopieren“ und in der Lernwelt einfügen.','Berichtsheft regelmäßig führen – dein Ausbilder zeichnet es ab.'] },
   dashboard:{ t:'Dein Tag auf einen Blick.', d:'Erledigte Aufgaben, deine Arbeitszeit und die nächsten Termine.', li:['Die Zahlen aktualisieren sich automatisch alle 30 Sekunden.','Tippe auf einen Termin, um den Auftrag zu öffnen.'] },
-  auftraege:{ t:'Deine Aufträge.', d:'Links die Aufträge nach Status, rechts alle Details zum ausgewählten Fahrzeug.', li:['Aufgabe antippen und „Start“ drücken – die Zeit läuft bis „Fertig“ oder „Pause“.','Fotos und Sprachbericht hängst du direkt an die Aufgabe.','„Auftrag abschließen“ geht erst, wenn die Checkliste komplett ist – danach wird der Kunde automatisch informiert.'], tip:'Tipp: Unten rechts findest du Schnellnotizen und ALEX für Technikfragen.' },
+  auftraege:{ t:'Deine Aufträge.', d:'Links die Aufträge nach Status, rechts alle Details zum ausgewählten Fahrzeug.', li:['Aufgabe antippen und „Start“ drücken – die Zeit läuft bis „Fertig“ oder „Pause“.','Fotos und Sprachbericht hängst du direkt an die Aufgabe.','Sprachsteuerung: Mikrofon unten rechts antippen und z. B. „Ölwechsel abgehakt“ sagen – oder in den Einstellungen „Freihändig“ einschalten und „Alex, …“ sagen.','„Auftrag abschließen“ geht erst, wenn die Checkliste komplett ist – danach wird der Kunde automatisch informiert.'], tip:'Tipp: Unten rechts findest du Schnellnotizen und ALEX für Technikfragen.' },
   alle:{ t:'Alle Aufträge der Werkstatt.', d:'Status und Fortschritt jedes Fahrzeugs, das gerade in der Werkstatt ist.', li:['Tippe auf eine Zeile, um den Auftrag zu öffnen.'] },
   hebebuehnen:{ t:'Hebebühnen.', d:'Welche Bühne belegt, frei oder außer Betrieb ist.', li:['Die Belegung wird im AutoLeitwerk-Dashboard zugewiesen.','Tippe auf eine belegte Bühne, um den Auftrag zu öffnen.'] },
   termine:{ t:'Termine.', d:'Fahrzeugannahmen und Übergaben für heute und morgen.', li:['Online-Buchungen der Kunden erscheinen hier automatisch.'] },
@@ -2279,6 +2279,7 @@ function renderEinstellungenView(ov){
       </div>
     </div>
 `}
+    ${vcSettingsHtml()}
     <div class="set-section-title">App</div>
     <div class="set-card"><a class="set-row" href="impressum.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;"><div><div class="set-row-label">Impressum</div></div></a><a class="set-row" href="datenschutz.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;"><div><div class="set-row-label">Datenschutzerklärung</div></div></a></div>
     <div class="set-card"><div class="set-row" id="resetHelpBtn" style="cursor:pointer;"><div><div class="set-row-label">Erklärungen wieder anzeigen</div><div class="set-row-sub">Blendet die Hilfe-Boxen in allen Bereichen erneut ein</div></div></div></div>
@@ -2988,6 +2989,7 @@ function toggleVoiceRecording(o,t){
   if(state.voiceTimeout){ clearTimeout(state.voiceTimeout); state.voiceTimeout = null; }
 
   // ERSTER KLICK: Aufnahme starten - läuft durchgehend weiter, bis erneut getippt wird
+  vcSuspend(); // Sprachsteuerung gibt das Mikrofon frei
   const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
   const rec = new Rec();
   rec.lang='de-DE';
@@ -3004,6 +3006,7 @@ function toggleVoiceRecording(o,t){
     if(state.voiceTimeout){ clearTimeout(state.voiceTimeout); state.voiceTimeout = null; }
     state.recognition = null;
     t.voiceRecording = false;
+    vcResume();
     const fullText = (t._voiceParts||[]).join(' ').trim();
     delete t._voiceParts;
     if(fullText){
@@ -6492,6 +6495,446 @@ document.addEventListener('click', e=>{
   if(e.target.closest && e.target.closest('#themeQuickBtn')){ if(window.alTheme) window.alTheme.set(themeCurrent()==='light' ? 'dark' : 'light'); }
 });
 
+/* ---------- Sprachsteuerung („Alex, Ölwechsel abgehakt“) ----------
+   Mikrofon-Knopf neben ALEX: antippen und sprechen. Optional „Freihändig“: ALEX hört dauerhaft zu und reagiert,
+   sobald ein Satz mit „Alex“ beginnt. Befehle werden direkt am Tablet ausgeführt (ohne KI, sofort):
+   abhaken, Zeit starten/pausieren/fortsetzen, Checkliste, Auftrag öffnen, Notiz, rückgängig. Alles andere geht als
+   Frage an ALEX. Spracherkennung: die des Browsers (Safari/Chrome) – es wird kein Ton gespeichert. */
+
+/* VOICE-PARSER-START */
+const VC_FOLD = s => String(s||'').toLowerCase().replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss')
+  .replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+const VC_NUM = { eins:1, ein:1, erste:1, ersten:1, erster:1, erstes:1, zwei:2, zweite:2, zweiten:2, drei:3, dritte:3, dritten:3, vier:4, vierte:4, vierten:4,
+  fuenf:5, fuenfte:5, fuenften:5, sechs:6, sechste:6, sechsten:6, sieben:7, siebte:7, siebten:7, acht:8, achte:8, achten:8, neun:9, neunte:9, zehn:10, zehnte:10 };
+const VC_FILLER = new Set(['die','der','das','den','dem','des','ein','eine','einen','aufgabe','aufgaben','punkt','checkliste','bei','beim','am','im','an','von','vom','fuer','mit',
+  'ist','sind','wurde','wurden','bitte','mal','jetzt','schon','auch','und','noch','so','ja','danke','okay','zeit','zeiterfassung','arbeit','als','nun','hab','habe','ich','wir','alles','alle']);
+const VC_HEADS = ['wechsel','wechseln','pruefung','pruefen','tausch','tauschen','ersatz','erneuern','service','kontrolle','check','reinigung','reinigen','einstellung','einstellen','messung','messen','filter','belaege','scheiben','stand'];
+// Wortteile: „oelwechsel“ → oel + wechsel, damit es auch zu „Motoröl und Filter wechseln“ passt
+function vcTokens(s){
+  const out = [];
+  VC_FOLD(s).split(' ').forEach(w=>{
+    if(!w || VC_FILLER.has(w)) return;
+    out.push(w);
+    for(const h of VC_HEADS){ if(w.length > h.length+1 && w.endsWith(h)){ out.push(w.slice(0, w.length-h.length)); out.push(h); break; } }
+  });
+  return out;
+}
+function vcLev(a,b){
+  if(a===b) return 0; const m=a.length, n=b.length; if(!m||!n) return Math.max(m,n);
+  let prev = Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){ const cur=[i]; for(let j=1;j<=n;j++) cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1)); prev=cur; }
+  return prev[n];
+}
+function vcTokScore(q,t){
+  if(q===t) return 1;
+  const mn = Math.min(q.length,t.length);
+  if(mn>=3 && (t.startsWith(q)||q.startsWith(t))) return 0.9;
+  if(q.length>=3 && t.endsWith(q)) return 0.85;
+  if((q.length>=4 && t.includes(q)) || (t.length>=4 && q.includes(t))) return 0.8;
+  if(mn>=4 && 1 - vcLev(q,t)/Math.max(q.length,t.length) >= 0.75) return 0.7;
+  return 0;
+}
+// Ähnlichkeit gesprochener Text ↔ Aufgabentitel (0…1)
+function vcScore(query, title){
+  const q = vcTokens(query), t = vcTokens(title);
+  if(!q.length || !t.length) return 0;
+  const qs = q.map(x=>Math.max(...t.map(y=>vcTokScore(x,y))));
+  const cover = t.filter(y=>q.some(x=>vcTokScore(x,y)>=0.7)).length / t.length;
+  const joined = VC_FOLD(title).replace(/ /g,'');
+  const whole = VC_FOLD(query).replace(/ /g,'');
+  const bonus = whole.length>=4 && joined.includes(whole) ? 0.1 : 0;
+  return Math.min(1, 0.75*(qs.reduce((a,b)=>a+b,0)/qs.length) + 0.25*cover + bonus);
+}
+function vcOrdinal(text){
+  const f = VC_FOLD(text);
+  let m = f.match(/\b(?:aufgabe|nummer|punkt|nr)\s+(\d{1,2})\b/); if(m) return +m[1];
+  m = f.match(/\b(\d{1,2})\s*(?:te|ste)?\s+aufgabe\b/); if(m) return +m[1];
+  for(const w of f.split(' ')){ if(VC_NUM[w] && /aufgabe|punkt|nummer/.test(f)) return VC_NUM[w]; }
+  if(/\bletzte\b/.test(f) && /aufgabe|punkt/.test(f)) return -1;
+  return 0;
+}
+const VC_DONE_WORDS = 'abgehakt|abhaken|erledigt|fertig|gemacht|abgeschlossen|durch|geprueft|ok|okay|in ordnung|erledigen|check|gecheckt|erledigt markieren';
+// Gesprochenen Satz in einen Befehl übersetzen
+function vcParse(raw){
+  let f = VC_FOLD(raw).replace(/^(hey |hallo |ok |okay )?(alex|alecs|aleks|alexa)\b ?/, '').replace(/ (bitte|danke)$/,'').trim();
+  if(!f) return { intent:'wake' };
+  if(/^(rueckgaengig|mach das rueckgaengig|rueckgaengig machen|das war falsch|falsch|widerruf\w*|undo)$/.test(f)) return { intent:'undo' };
+  if(/(was kann ich sagen|welche befehle|was kannst du|^hilfe$)/.test(f)) return { intent:'help' };
+  if(/^(stopp|stop|ruhe|nicht mehr zuhoeren|hoer auf|hoer auf zuzuhoeren|aufhoeren|mikrofon aus)$/.test(f)) return { intent:'sleep' };
+  if(new RegExp('^(?:ist )?(?:' + VC_DONE_WORDS + ')$').test(f)) return { intent:'done', target:'' };
+  // Fragen („Ist der Ölwechsel fertig?“, „Wie lange dauert …“) nie als Befehl ausführen
+  if(/\?\s*$/.test(String(raw||'')) || /^(ist|sind|wann|wie|was|wer|wo|welche\w*|kann|koennen|hat|haben|hast|soll|sollen|muss|muessen|gibt|warum|wieso|weshalb|darf|brauche|braucht)\b/.test(f))
+    return { intent:'ask', text: String(raw||'').replace(/^\s*(?:hey |hallo |ok |okay )?(?:alex|alecs|aleks|alexa)\b[\s,.:!]*/i,'').trim() };
+  let m;
+  if((m = f.match(/^(?:notiz|notiere|notier|schreib auf|schreibe auf|vermerk|vermerke|bericht|befund)\b[ :]*(.+)$/))){
+    const orig = String(raw||'').replace(/^\s*(?:hey |hallo |ok |okay )?(?:alex|alecs|aleks|alexa)\b[\s,.:!]*/i,'')
+      .replace(/^(?:notiz|notiere|notier|schreib(?:e)? auf|vermerk(?:e)?|bericht|befund)\b[\s,.:!-]*/i,'').trim();
+    return { intent:'note', text: orig || m[1] };
+  }
+  if((m = f.match(/^(?:pause|pausier\w*|unterbrech\w*|mach pause|kurz pause|kurze pause|zeit anhalten|zeit stoppen|anhalten)(?: (.+))?$/))) return { intent:'pause', target: m[1]||'' };
+  if((m = f.match(/^(?:weiter|weitermachen|fortsetzen|fortfahren|zeit weiter)(?: (?:mit )?(.+))?$/))) return { intent:'resume', target: m[1]||'' };
+  if((m = f.match(/^(.+?) (?:wieder oeffnen|wieder auf|nicht erledigt|doch nicht erledigt|zuruecksetzen|wieder offen)$/))) return { intent:'reopen', target: m[1] };
+  if((m = f.match(new RegExp('^(?:ist )?(?:' + VC_DONE_WORDS + ')$')))) return { intent:'done', target:'' };
+  if((m = f.match(/^(?:hake|haken|hak|erledige|markiere|schliesse|schliess|abhaken)\s+(.+?)(?:\s+(?:ab|als erledigt|als fertig|fertig))?$/))) return { intent:'done', target: m[1] };
+  if((m = f.match(new RegExp('^(?:fertig|erledigt|abgehakt)(?: mit)? (.+)$')))) return { intent:'done', target: m[1] };
+  if((m = f.match(new RegExp('^(.+?) (?:ist |sind |wurde |wurden |hab ich |habe ich )?(?:' + VC_DONE_WORDS + ')$')))) return { intent:'done', target: m[1] };
+  if((m = f.match(/^(?:starte|start|beginne|beginn|fange an mit|fang an mit|anfangen mit|los mit|zeit starten fuer|zeit fuer|zeit starten)\s+(.+)$/))) return { intent:'start', target: m[1] };
+  if((m = f.match(/^(.+?) (?:starten|beginnen|anfangen|start|los)$/))) return { intent:'start', target: m[1] };
+  if(/^(start|starten|los|los gehts|los geht s|zeit starten|anfangen)$/.test(f)) return { intent:'start', target:'' };
+  if((m = f.match(/^(?:oeffne|oeffnen|zeig|zeige|zeig mir|gehe zu|geh zu|wechsel zu|wechsle zu|wechseln zu)\s+(?:den |das |die )?(?:auftrag |fahrzeug |wagen |auto )?(?:von |vom |fuer )?(.+)$/))) return { intent:'open', target: m[1] };
+  return { intent:'ask', text: String(raw||'').replace(/^\s*(?:hey |hallo |ok |okay )?(?:alex|alecs|aleks|alexa)\b[\s,.:!]*/i,'').trim() };
+}
+// Ziel (Aufgabe oder Checklistenpunkt) finden. ctx: { orders, order (aktuell), task (aktuell), qc: true }
+function vcFindTarget(targetText, ctx){
+  const order = ctx.order;
+  const f = VC_FOLD(targetText);
+  const n = vcOrdinal(targetText);
+  if(order && n){ const list = order.tasks||[]; const t = n===-1 ? list[list.length-1] : list[n-1]; return t ? { kind:'task', order, task:t, score:1 } : null; }
+  if(!vcTokens(targetText).length || /^(die |diese |aktuelle |laufende )?(aufgabe|die|diese|das)?$/.test(f)) return ctx.task && order ? { kind:'task', order, task:ctx.task, score:1 } : null;
+  const cands = [];
+  (ctx.orders||[]).forEach(o=>{
+    const own = order && o.id===order.id;
+    if(!own && o.status==='erledigt') return;
+    (o.tasks||[]).forEach(t=>{ const s = vcScore(targetText, t.title); if(s>0) cands.push({ kind:'task', order:o, task:t, score: Math.min(1, s + (own?0.12:0)) - (ctx.intent && ctx.intent!=='reopen' && t.status==='done' ? 0.15 : 0) }); });
+    if(own && ctx.qc!==false) (o.qc||[]).forEach((q,i)=>{ const s = vcScore(targetText, q.label); if(s>0) cands.push({ kind:'qc', order:o, qcIndex:i, label:q.label, score: Math.min(1, s + 0.08) - (ctx.intent==='done' && q.checked ? 0.15 : 0) }); });
+  });
+  cands.sort((a,b)=>b.score-a.score);
+  if(!cands.length || cands[0].score < 0.6) return null;
+  const close = cands.filter(c=>c.score >= cands[0].score - 0.06);
+  if(close.length > 1){
+    // gleiche Aufgabe in mehreren Aufträgen → aktueller Auftrag gewinnt; sonst nachfragen
+    const inOwn = close.filter(c=>order && c.order.id===order.id);
+    if(inOwn.length===1) return inOwn[0];
+    return { ambiguous: close.slice(0,4) };
+  }
+  return cands[0];
+}
+function vcFindOrder(text, list){
+  const f = VC_FOLD(text); const compact = f.replace(/ /g,'');
+  let best = null;
+  (list||[]).forEach(o=>{
+    let s = 0;
+    const plate = VC_FOLD(o.plate).replace(/ /g,'');
+    if(plate.length>=4 && (compact.includes(plate) || (plate.length>=5 && compact.endsWith(plate.slice(-4))))) s = Math.max(s, 1);
+    const num = String(o.orderNumber||'').replace(/\D/g,'');
+    if(num && new RegExp('\\b'+num+'\\b').test(f)) s = Math.max(s, 0.95);
+    s = Math.max(s, vcScore(text, o.customer)*0.9, vcScore(text, o.vehicle)*0.85);
+    if(!best || s > best.score) best = { order:o, score:s };
+  });
+  return best && best.score >= 0.6 ? best.order : null;
+}
+/* VOICE-PARSER-END */
+
+const VC_LS = { hands:'al_voice_handsfree', tts:'al_voice_tts' };
+const vc = {
+  rec:null, mode:null, // 'once' | 'hands'
+  hands:false, tts:true, awaiting:0, suspended:false, speaking:false, fails:[], undo:null, pick:null, hideTimer:null, onceTimer:null,
+};
+try{ vc.hands = localStorage.getItem(VC_LS.hands)==='1'; vc.tts = localStorage.getItem(VC_LS.tts)!=='0'; }catch(_){}
+const vcSupported = () => !!(window.SpeechRecognition || window.webkitSpeechRecognition) && (location.protocol==='https:' || location.hostname==='localhost');
+
+function vcToast(kind, html, opts){
+  const el = document.getElementById('vcToast'); if(!el) return;
+  opts = opts || {};
+  el.className = 'vc-toast ' + kind;
+  el.innerHTML = `<span class="vc-toast-ic">${kind==='ok'?iconCheck:kind==='warn'?iconWarn:iconMic}</span><div class="vc-toast-txt">${html}</div>`
+    + (opts.undo ? `<button class="vc-toast-btn" data-vc-undo="1">Rückgängig</button>` : '')
+    + `<button class="vc-toast-x" data-vc-close="1" aria-label="Schließen">${iconClose}</button>`;
+  el.style.display = 'flex';
+  clearTimeout(vc.hideTimer);
+  if(opts.ms !== 0) vc.hideTimer = setTimeout(()=>{ el.style.display='none'; }, opts.ms || 6000);
+}
+function vcHideToast(){ const el = document.getElementById('vcToast'); if(el) el.style.display='none'; }
+function vcRenderFab(){
+  const b = document.getElementById('vcFabBtn'); if(!b) return;
+  b.style.display = state.currentUser ? '' : 'none';
+  b.classList.toggle('listening', vc.mode==='once' || vc.awaiting > Date.now());
+  b.classList.toggle('hands', vc.hands && vc.mode==='hands');
+  b.classList.toggle('off', !vcSupported());
+  b.title = !vcSupported() ? 'Sprachsteuerung in diesem Browser nicht verfügbar' : vc.hands ? 'ALEX hört zu – „Alex, …“ sagen oder antippen' : 'Sprachbefehl – antippen und sprechen';
+  b.setAttribute('aria-label', b.title);
+}
+function vcSpeak(text){
+  if(!vc.tts || !window.speechSynthesis || !text) return;
+  try{
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(text).slice(0, 320));
+    u.lang = 'de-DE'; u.rate = 1.05;
+    const v = (window.speechSynthesis.getVoices()||[]).find(x=>/^de/i.test(x.lang)); if(v) u.voice = v;
+    // Während ALEX spricht, nicht zuhören – sonst hört es sich selbst
+    vc.speaking = true; if(vc.mode==='hands') vcStopRec();
+    const done = ()=>{ if(!vc.speaking) return; vc.speaking = false; clearTimeout(vc.speakTimer); if(vc.hands && !vc.suspended) setTimeout(vcStartHands, 250); };
+    u.onend = u.onerror = done;
+    // Manche Geräte melden das Ende der Sprachausgabe nie – dann trotzdem wieder zuhören
+    clearTimeout(vc.speakTimer); vc.speakTimer = setTimeout(done, Math.min(12000, 1500 + String(text).length * 75));
+    window.speechSynthesis.speak(u);
+  }catch(_){ vc.speaking = false; }
+}
+function vcSay(kind, html, spoken, opts){ vcToast(kind, html, opts); if(spoken) vcSpeak(spoken); }
+
+/* --- Ausführen --- */
+function vcCtx(){
+  const o = state.mainView==='auftraege' ? getSelectedOrder() : null;
+  const running = vcRunning();
+  const sel = o && o.tasks ? o.tasks.find(t=>t.id===state.selectedTaskId) : null;
+  return { orders, order: o || (running && running.o) || null, task: (running && (!o || running.o.id===o.id) ? running.t : sel) || null, qc:true };
+}
+function vcRunning(){
+  for(const o of orders) for(const t of (o.tasks||[])) if(t.timeStatus==='running') return { o, t };
+  return null;
+}
+function vcShow(o, t, tab){
+  if(state.mainView!=='auftraege') setMainView('auftraege');
+  state.worklistTab = o.status; state.selectedOrderId = o.id; state.detailTab = tab || 'aufgaben';
+  if(t) state.selectedTaskId = t.id;
+  renderWorklistTabs(); renderOrderList(); renderDetail();
+}
+function vcDone(hit){
+  const o = hit.order;
+  if(hit.kind==='qc'){
+    const q = o.qc[hit.qcIndex];
+    if(q.checked){ vcSay('ok', `„${escHtml(q.label)}“ ist schon abgehakt.`, `${q.label} ist schon abgehakt.`); return; }
+    q.checked = true; q.by = state.currentUser ? state.currentUser.name : '';
+    vcShow(o, null, 'checkliste'); saveQC(o); renderTabPanel();
+    vc.undo = { kind:'qc', o, i:hit.qcIndex };
+    vcSay('ok', `Checkliste: <b>${escHtml(q.label)}</b> abgehakt`, `${q.label} abgehakt.`, { undo:true });
+    return;
+  }
+  const t = hit.task;
+  if(t.status==='done'){ vcShow(o, t); vcSay('ok', `<b>${escHtml(t.title)}</b> ist schon erledigt.`, `${t.title} ist schon erledigt.`); return; }
+  const prev = { status:t.status, statusLabel:t.statusLabel, progress:t.progress };
+  vcShow(o, t);
+  if(t.timeStatus==='running' || t.timeStatus==='paused') finishTimer(o, t); else completeTask(o, t);
+  vc.undo = { kind:'task', o, t, prev };
+  const left = o.tasks.filter(x=>x.status!=='done').length;
+  vcSay('ok', `<b>${escHtml(t.title)}</b> abgehakt · #${escHtml(o.orderNumber||o.id)} ${escHtml(o.plate)}${left ? ` · noch ${left} offen` : ' · alle Aufgaben erledigt'}`,
+    `${t.title} abgehakt.${left ? '' : ' Alle Aufgaben erledigt.'}`, { undo:true });
+}
+function vcUndo(){
+  const u = vc.undo; vc.undo = null;
+  if(!u){ vcSay('warn', 'Nichts zum Rückgängigmachen.', 'Nichts zum Rückgängigmachen.'); return; }
+  if(u.kind==='qc'){ const q = u.o.qc[u.i]; q.checked = false; q.by = ''; vcShow(u.o, null, 'checkliste'); saveQC(u.o); renderTabPanel(); vcSay('ok', `„${escHtml(q.label)}“ wieder offen.`, 'Rückgängig gemacht.'); return; }
+  if(u.kind==='task'){ Object.assign(u.t, u.prev); recalcProgress(u.o); saveTaskStatus(u.t); vcShow(u.o, u.t); vcSay('ok', `<b>${escHtml(u.t.title)}</b> wieder offen.`, 'Rückgängig gemacht.'); return; }
+  if(u.kind==='start'){ vcShow(u.o, u.t); pauseTimer(u.t); vcSay('ok', `Zeit für <b>${escHtml(u.t.title)}</b> angehalten.`, 'Zeit angehalten.'); }
+}
+function vcAmbiguous(list, intent){
+  vc.pick = { list, intent };
+  const items = list.map((c,i)=>`<button class="vc-pick" data-vc-pick="${i}">${escHtml(c.kind==='qc' ? 'Checkliste: '+c.label : c.task.title)}<small>#${escHtml(c.order.orderNumber||c.order.id)} ${escHtml(c.order.plate)}</small></button>`).join('');
+  vcToast('warn', `Welche meinen Sie?<div class="vc-picks">${items}</div>`, { ms:15000 });
+  vcSpeak('Welche meinen Sie? Bitte antippen.');
+}
+function vcResolve(target, intent, pre){
+  if(pre) return pre;
+  const hit = vcFindTarget(target, Object.assign(vcCtx(), { intent }));
+  if(!hit){
+    const what = target ? `„${escHtml(target)}“` : 'die Aufgabe';
+    vcSay('warn', `${what} habe ich in den offenen Aufträgen nicht gefunden.${state.mainView!=='auftraege' || !getSelectedOrder() ? ' Tipp: erst den Auftrag öffnen („Alex, öffne AB-CD 123“).' : ''}`, 'Das habe ich nicht gefunden.', { ms:8000 });
+    return null;
+  }
+  if(hit.ambiguous){ vcAmbiguous(hit.ambiguous, intent); return null; }
+  return hit;
+}
+function vcRun(cmd, heard){
+  vc.pick = null;
+  switch(cmd.intent){
+    case 'wake': vc.awaiting = Date.now() + 7000; vcToast('listen', 'Ja? Ich höre …', { ms:7000 }); vcRenderFab(); return;
+    case 'undo': vcUndo(); return;
+    case 'help': vcHelp(); return;
+    case 'sleep': vcSetHands(false); vcSay('ok', 'Freihändig ausgeschaltet. Zum Sprechen das Mikrofon antippen.', 'Okay, ich höre nicht mehr zu.'); return;
+    case 'done': case 'reopen': {
+      const hit = vcResolve(cmd.target, cmd.intent, cmd.hit); if(!hit) return;
+      if(cmd.intent==='done') vcDone(hit);
+      else if(hit.kind==='task'){ const t = hit.task; const prev = { status:t.status, statusLabel:t.statusLabel, progress:t.progress }; t.status='open'; t.statusLabel='Ausstehend'; t.progress=0; recalcProgress(hit.order); saveTaskStatus(t); vcShow(hit.order, t); vc.undo = { kind:'task', o:hit.order, t, prev }; vcSay('ok', `<b>${escHtml(t.title)}</b> wieder offen.`, `${t.title} wieder offen.`, { undo:true }); }
+      else { const q = hit.order.qc[hit.qcIndex]; q.checked=false; q.by=''; vcShow(hit.order, null, 'checkliste'); saveQC(hit.order); renderTabPanel(); vcSay('ok', `„${escHtml(q.label)}“ wieder offen.`, 'Wieder offen.'); }
+      return;
+    }
+    case 'start': {
+      const hit = vcResolve(cmd.target, 'start', cmd.hit); if(!hit) return;
+      if(hit.kind!=='task'){ vcSay('warn', 'Zeit lässt sich nur für Aufgaben starten.', null); return; }
+      const { order:o, task:t } = hit;
+      if(t.status==='done'){ vcShow(o, t); vcSay('warn', `<b>${escHtml(t.title)}</b> ist schon erledigt.`, `${t.title} ist schon erledigt.`); return; }
+      const run = vcRunning();
+      if(run && run.t!==t){ pauseTimer(run.t); }
+      vcShow(o, t);
+      if(t.timeStatus==='paused') resumeTimer(t); else startTimer(t);
+      vc.undo = { kind:'start', o, t };
+      vcSay('ok', `Zeit läuft: <b>${escHtml(t.title)}</b>${run && run.t!==t ? ` · „${escHtml(run.t.title)}“ pausiert` : ''}`, `Zeit für ${t.title} läuft.`, { undo:true });
+      return;
+    }
+    case 'pause': {
+      const run = vcRunning();
+      if(!run){ vcSay('warn', 'Gerade läuft keine Zeit.', 'Gerade läuft keine Zeit.'); return; }
+      vcShow(run.o, run.t); pauseTimer(run.t);
+      vcSay('ok', `Pause: <b>${escHtml(run.t.title)}</b> angehalten`, `${run.t.title} pausiert.`);
+      return;
+    }
+    case 'resume': {
+      let hit = null;
+      if(cmd.target || cmd.hit){ hit = vcResolve(cmd.target, 'resume', cmd.hit); if(!hit) return; }
+      else { for(const o of orders) for(const t of (o.tasks||[])) if(!hit && t.timeStatus==='paused') hit = { kind:'task', order:o, task:t }; }
+      if(!hit || hit.kind!=='task'){ vcSay('warn', 'Keine pausierte Aufgabe gefunden.', 'Keine pausierte Aufgabe gefunden.'); return; }
+      vcShow(hit.order, hit.task); if(hit.task.timeStatus==='paused') resumeTimer(hit.task); else startTimer(hit.task);
+      vcSay('ok', `Weiter: <b>${escHtml(hit.task.title)}</b>`, `Weiter mit ${hit.task.title}.`);
+      return;
+    }
+    case 'open': {
+      const o = vcFindOrder(cmd.target, orders);
+      if(!o){ vcSay('warn', `Keinen Auftrag zu „${escHtml(cmd.target)}“ gefunden.`, 'Den Auftrag habe ich nicht gefunden.'); return; }
+      jumpToOrder(o.id);
+      vcSay('ok', `Auftrag #${escHtml(o.orderNumber||o.id)} · ${escHtml(o.vehicle)} · ${escHtml(o.plate)}`, `${o.vehicle} geöffnet.`);
+      return;
+    }
+    case 'note': {
+      const o = vcCtx().order;
+      if(!cmd.text){ vcSay('warn', 'Was soll ich notieren? Zum Beispiel: „Alex, Notiz: Bremsscheiben hinten riefig“.', 'Was soll ich notieren?'); return; }
+      if(o){ tabletAction('note_add', { order_id:o.id, content: cmd.text }); vcSay('ok', `Notiz an #${escHtml(o.orderNumber||o.id)}: „${escHtml(cmd.text)}“`, 'Notiert.'); }
+      else {
+        const now = new Date();
+        quickNotes.push({ id:'n'+Date.now(), text: cmd.text, time: now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0') });
+        persistQuickNotes(); updateNoteBadge();
+        vcSay('ok', `Schnellnotiz gespeichert: „${escHtml(cmd.text)}“`, 'Notiert.');
+      }
+      return;
+    }
+    default: {
+      // Alles andere: Frage an ALEX (Antwort im ALEX-Fenster, kurz vorgelesen)
+      const q = cmd.text || heard;
+      if(!q){ return; }
+      vcHideToast();
+      const ctx = vcCtx().order;
+      openAlexPanel(ctx ? ctx.id : null);
+      aiAsk(q).then(()=>{
+        const last = aiChat[aiChat.length-1];
+        if(last && last.from==='bot' && last.plain) vcSpeak(String(last.plain).replace(/\*\*/g,'').replace(/\[Eintrag \d+\]/g,'').split(/\n/).filter(Boolean).slice(0,3).join('. '));
+      });
+    }
+  }
+}
+function vcHelp(){
+  vcToast('listen', `<b>So steuern Sie per Sprache</b><ul class="vc-help">
+    <li>„Alex, Ölwechsel abgehakt“ · „Alex, Aufgabe 2 erledigt“</li>
+    <li>„Alex, starte Bremsen vorne“ · „Alex, Pause“ · „Alex, weiter“</li>
+    <li>„Alex, Probefahrt abgehakt“ (Checkliste)</li>
+    <li>„Alex, öffne AB-CD 123“ · „Alex, Notiz: Scheiben hinten riefig“</li>
+    <li>„Alex, rückgängig“ · Frage: „Alex, was heißt P0420?“</li></ul>`, { ms:20000 });
+}
+// Mehrere Erkennungs-Varianten: die erste nehmen, die einen klaren Befehl mit gefundenem Ziel ergibt
+function vcHandle(alts){
+  alts = alts.filter(Boolean).map(s=>String(s).trim()).filter(Boolean);
+  if(!alts.length) return;
+  let chosen = null;
+  for(const a of alts){
+    const cmd = vcParse(a);
+    if(['done','reopen','start'].includes(cmd.intent)){ const hit = vcFindTarget(cmd.target, Object.assign(vcCtx(), { intent: cmd.intent })); if(hit && !hit.ambiguous){ chosen = { a, cmd }; break; } }
+    else if(cmd.intent!=='ask'){ chosen = { a, cmd }; break; }
+  }
+  if(!chosen) chosen = { a: alts[0], cmd: vcParse(alts[0]) };
+  vcRun(chosen.cmd, chosen.a);
+}
+
+/* --- Spracherkennung --- */
+function vcNewRec(continuous){
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const r = new Rec(); r.lang = 'de-DE'; r.continuous = continuous; r.interimResults = true; r.maxAlternatives = 3;
+  return r;
+}
+function vcStopRec(){ const r = vc.rec; vc.rec = null; if(r){ r.onend = null; r.onresult = null; r.onerror = null; try{ r.abort(); }catch(_){} } if(vc.mode==='once') vc.mode = null; vcRenderFab(); }
+function vcListenOnce(){
+  if(!vcSupported()){ vcSay('warn', 'Sprachsteuerung braucht Safari oder Chrome mit Internet (und auf dem iPad die eingeschaltete Diktierfunktion).', null, { ms:9000 }); return; }
+  if(state.recognition){ vcSay('warn', 'Gerade läuft eine Sprachnotiz – bitte erst beenden.', null); return; }
+  vcStopRec(); if(window.speechSynthesis) try{ window.speechSynthesis.cancel(); }catch(_){}
+  const r = vcNewRec(false); vc.rec = r; vc.mode = 'once';
+  let done = false;
+  r.onresult = (ev)=>{
+    let interim = '';
+    for(let i=ev.resultIndex;i<ev.results.length;i++){
+      const res = ev.results[i];
+      if(res.isFinal){ done = true; const alts = Array.from(res).map(x=>x.transcript); vcStopRec(); clearTimeout(vc.onceTimer); vcToast('listen', `„${escHtml(alts[0])}“`, { ms:2500 }); vcHandle(alts); return; }
+      interim += res[0].transcript;
+    }
+    if(interim) vcToast('listen', `${escHtml(interim)} …`, { ms:0 });
+  };
+  r.onerror = (ev)=>{ const e = ev && ev.error; vcStopRec(); if(e==='not-allowed' || e==='service-not-allowed') vcSay('warn', 'Mikrofon nicht erlaubt – bitte in den Einstellungen des Browsers freigeben.', null, { ms:9000 }); else if(e==='no-speech') vcSay('warn', 'Nichts gehört – bitte noch einmal antippen und sprechen.', null); else if(e!=='aborted') vcSay('warn', 'Spracherkennung gerade nicht erreichbar.', null); };
+  r.onend = ()=>{ if(vc.rec===r) vcStopRec(); if(!done && document.getElementById('vcToast').classList.contains('listen')) vcHideToast(); };
+  vcToast('listen', 'Ich höre … z. B. „Ölwechsel abgehakt“', { ms:0 });
+  clearTimeout(vc.onceTimer); vc.onceTimer = setTimeout(()=>{ if(vc.rec===r){ try{ r.stop(); }catch(_){} } }, 9000);
+  try{ r.start(); vcRenderFab(); }catch(_){ vcStopRec(); vcSay('warn', 'Mikrofon konnte nicht gestartet werden.', null); }
+}
+function vcStartHands(){
+  if(!vc.hands || vc.suspended || vc.speaking || !state.currentUser || state.recognition || vc.rec || !vcSupported()) return;
+  const r = vcNewRec(true); vc.rec = r; vc.mode = 'hands';
+  r.onresult = (ev)=>{
+    for(let i=ev.resultIndex;i<ev.results.length;i++){
+      const res = ev.results[i];
+      const txt = res[0].transcript || '';
+      const f = VC_FOLD(txt);
+      const wake = /\b(alex|alecs|aleks)\b/.test(f);
+      if(!res.isFinal){ if(wake || vc.awaiting > Date.now()) vcToast('listen', `${escHtml(txt)} …`, { ms:3000 }); continue; }
+      const alts = Array.from(res).map(x=>x.transcript);
+      if(vc.awaiting > Date.now()){ vc.awaiting = 0; vcRenderFab(); vcHandle(alts); continue; }
+      if(!wake) continue; // ohne „Alex“ wird nichts ausgeführt
+      // Nur den Teil ab „Alex“ nehmen
+      vcHandle(alts.map(a=>{ const m = String(a).match(/\b(alex|alecs|aleks)\b[\s,.:!]*(.*)$/i); return m ? 'alex ' + m[2] : ''; }));
+    }
+  };
+  r.onerror = (ev)=>{ const e = ev && ev.error; if(e==='not-allowed' || e==='service-not-allowed'){ vcSetHands(false); vcSay('warn', 'Mikrofon nicht erlaubt – Freihändig ausgeschaltet.', null, { ms:9000 }); } };
+  r.onend = ()=>{
+    if(vc.rec!==r) return; vc.rec = null; vc.mode = null; vcRenderFab();
+    if(!vc.hands || vc.suspended || vc.speaking) return;
+    const now = Date.now(); vc.fails = vc.fails.filter(t=>now-t < 30000); vc.fails.push(now);
+    if(vc.fails.length > 6){ vcToast('warn', 'Freihändig pausiert – zum Weiterhören das Mikrofon antippen.', { ms:0 }); return; }
+    setTimeout(vcStartHands, 300); // Safari beendet nach einer Sprechpause – sofort wieder zuhören
+  };
+  try{ r.start(); vcRenderFab(); }catch(_){ vc.rec = null; vc.mode = null; vcRenderFab(); }
+}
+function vcSetHands(on){
+  vc.hands = !!on; try{ localStorage.setItem(VC_LS.hands, on?'1':'0'); }catch(_){}
+  vc.fails = [];
+  if(on) vcStartHands(); else vcStopRec();
+  vcRenderFab();
+  if(state.mainView==='einstellungen') renderOtherView('einstellungen');
+}
+function vcSetTts(on){ vc.tts = !!on; try{ localStorage.setItem(VC_LS.tts, on?'1':'0'); }catch(_){} if(!on && window.speechSynthesis) try{ window.speechSynthesis.cancel(); }catch(_){} if(state.mainView==='einstellungen') renderOtherView('einstellungen'); }
+// Sprachnotiz am Tablet braucht das Mikrofon allein
+function vcSuspend(){ vc.suspended = true; vcStopRec(); }
+function vcResume(){ vc.suspended = false; if(vc.hands) setTimeout(vcStartHands, 400); }
+function vcSettingsHtml(){
+  return `<div class="set-section-title">Sprachsteuerung</div>
+    <div class="set-card">
+      ${vcSupported() ? '' : `<div class="set-row"><div><div class="set-row-label">In diesem Browser nicht verfügbar</div><div class="set-row-sub">Safari oder Chrome mit Internet verwenden. Auf dem iPad: Einstellungen › Allgemein › Tastatur › Diktierfunktion einschalten.</div></div></div>`}
+      <div class="set-row">
+        <div><div class="set-row-label">Freihändig – „Alex, …“</div><div class="set-row-sub">ALEX hört dauerhaft zu und reagiert nur auf Sätze, die mit „Alex“ beginnen, z. B. „Alex, Ölwechsel abgehakt“. Ohne: Mikrofon-Knopf antippen und sprechen.</div></div>
+        <div class="toggle ${vc.hands?'on':''}" data-vc-toggle="hands" role="switch" aria-checked="${vc.hands}"></div>
+      </div>
+      <div class="set-row">
+        <div><div class="set-row-label">Antworten vorlesen</div><div class="set-row-sub">ALEX bestätigt kurz per Sprache („Ölwechsel abgehakt“).</div></div>
+        <div class="toggle ${vc.tts?'on':''}" data-vc-toggle="tts" role="switch" aria-checked="${vc.tts}"></div>
+      </div>
+      <div class="set-row" data-vc-help="1" style="cursor:pointer;"><div><div class="set-row-label">Was kann ich sagen?</div><div class="set-row-sub">Alle Sprachbefehle anzeigen</div></div></div>
+    </div>`;
+}
+document.addEventListener('click', e=>{
+  const t = e.target;
+  if(!t || !t.closest) return;
+  if(t.closest('#vcFabBtn')){
+    if(vc.mode==='once'){ vcStopRec(); vcHideToast(); return; }
+    if(vc.hands && vc.mode==='hands'){ vc.awaiting = Date.now() + 7000; vcToast('listen', 'Ja? Ich höre …', { ms:7000 }); vcRenderFab(); return; }
+    vcListenOnce(); return;
+  }
+  if(t.closest('[data-vc-undo]')){ vcUndo(); return; }
+  if(t.closest('[data-vc-close]')){ vcHideToast(); return; }
+  const pk = t.closest('[data-vc-pick]');
+  if(pk && vc.pick){ const c = vc.pick.list[+pk.dataset.vcPick]; const intent = vc.pick.intent; vc.pick = null; if(!c) return;
+    vcRun({ intent, hit: c }, ''); return; }
+  const tg = t.closest('[data-vc-toggle]');
+  if(tg){ if(tg.dataset.vcToggle==='hands') vcSetHands(!vc.hands); else vcSetTts(!vc.tts); return; }
+  if(t.closest('[data-vc-help]')){ vcHelp(); return; }
+});
+// Tablet gesperrt/abgemeldet oder im Hintergrund: Mikrofon aus; danach wieder an
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) vcStopRec(); else if(vc.hands) setTimeout(vcStartHands, 500); });
+setInterval(()=>{ vcRenderFab(); if(vc.hands && !vc.rec && state.currentUser && !vc.suspended && !vc.speaking && !document.hidden && vc.fails.length <= 6) vcStartHands(); if(!state.currentUser && vc.rec) vcStopRec(); }, 3000);
+
+
 /* ---------- init ---------- */
 document.getElementById('logoImgSidebar').src = LOGO_ICON_SRC;
 document.getElementById('logoImgBig').src = LOGO_WORDMARK_SRC;
@@ -6500,6 +6943,7 @@ document.getElementById('logoImgProfile').src = LOGO_WORDMARK_SRC;
 applyThemeLogos(); renderThemeControls();
 document.getElementById('aiFabIcon').innerHTML = alexAvatar(56);
 document.getElementById('noteFabIcon').innerHTML = iconNote;
+document.getElementById('vcFabIcon').innerHTML = iconMic;
 updateNoteBadge();
 if(navigator.onLine===false) renderOfflineBanner(false);
 initLoginIcon();
