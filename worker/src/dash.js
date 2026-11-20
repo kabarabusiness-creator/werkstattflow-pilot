@@ -583,7 +583,7 @@ export async function handleFunction(name, body, c) {
           rec = await db.create('TireArticle', Object.fromEntries(Object.entries({ workshop_code: code, kind: 'reifen', ...t, stock_quantity: it.quantity, min_stock: 0, dots: [{ dot: '', qty: it.quantity }], purchase_price: it.unit_price ?? undefined, supplier_key: supplierKey, supplier_name: supplierName, active: true }).filter(([, v]) => v !== undefined && v !== '')));
           arts.push(rec); created++;
         }
-        await db.create('TireStockMove', { workshop_code: code, article_id: rec.id, article_label: `${t.brand} ${t.profile} ${t.width}/${t.ratio} R${t.rim}`.replace(/\s+/g, ' ').trim(), type: 'wareneingang', qty: it.quantity, by: actor, note: `Browser-Erweiterung (${supplierName})`, stock_after: after }).catch(() => {});
+        await db.create('TireStockMove', { workshop_code: code, article_id: rec.id, article_label: `${t.brand} ${t.profile} ${t.size}`.replace(/\s+/g, ' ').trim(), type: 'wareneingang', qty: it.quantity, by: actor, note: `Browser-Erweiterung (${supplierName})`, stock_after: after }).catch(() => {});
       }
       if (!created && !updated) throw new HttpError(400, 'params', { message: 'In den Positionen wurde keine Reifengröße erkannt. Für Teile bitte „Lager“ oder einen Auftrag wählen.' });
       return { ok: true, target: 'reifen', created, updated, skipped };

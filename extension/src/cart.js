@@ -78,6 +78,12 @@ export function supplierFromHost(host) {
   if (/coparts|pv-?automotive|pv-?online/.test(h)) return 'coparts';
   if (/autodoc/.test(h)) return 'autodoc';
   if (/kfzteile24/.test(h)) return 'kfzteile24';
+  // Reifen-Großhändler
+  if (/tyre24|alzura/.test(h)) return 'tyre24';
+  if (/interpneu/.test(h)) return 'interpneu';
+  if (/goeggel|göggel|xn--ggel/.test(h)) return 'goeggel';
+  if (/gundlach/.test(h)) return 'gundlach';
   return 'sonstige';
 }
-export const SUPPLIER_NAMES = { stakis: 'Stahlgruber STAkis', wm: 'WM SE / Trost', coparts: 'PV Automotive / Coparts', autodoc: 'Autodoc', kfzteile24: 'kfzteile24', sonstige: 'Sonstiger Lieferant' };
+export const SUPPLIER_NAMES = { stakis: 'Stahlgruber STAkis', wm: 'WM SE / Trost', coparts: 'PV Automotive / Coparts', autodoc: 'Autodoc', kfzteile24: 'kfzteile24', tyre24: 'Tyre24 / Alzura', interpneu: 'Interpneu', goeggel: 'Reifen Göggel', gundlach: 'Reifen Gundlach', sonstige: 'Sonstiger Lieferant' };
+export const TIRE_SUPPLIERS = ['tyre24', 'interpneu', 'goeggel', 'gundlach'];

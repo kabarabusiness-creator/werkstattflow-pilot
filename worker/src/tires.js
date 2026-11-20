@@ -15,7 +15,7 @@ export const TIRE_SUPPLIERS = {
 // Reifengröße lesen. Liefert null, wenn keine Größe erkennbar ist.
 export function parseDim(input) {
   const s = String(input || '').toUpperCase().replace(/,/g, '.');
-  let m = s.match(/(\d{3})\s*\/\s*(\d{2}(?:\.\d)?)\s*(Z?R|-|\s)\s*F?\s*(\d{2}(?:\.5)?)\s*(C)?\b/);
+  let m = s.match(/(\d{3})\s*\/\s*(\d{2}(?:\.\d)?)\s*\/?\s*(Z?R|-|\s)\s*F?\s*(\d{2}(?:\.5)?)\s*(C)?\b/);
   let width, ratio, rim, cFlag = false, rest = '';
   if (m) { width = +m[1]; ratio = +m[2]; rim = +m[4]; cFlag = !!m[5]; rest = s.slice(m.index + m[0].length); }
   else {
@@ -155,7 +155,7 @@ export function tireFromText(text, partNumber) {
   const digits = String(partNumber || '').replace(/\D/g, '');
   const ean = digits.length === 13 || digits.length === 12 ? digits : ((t.match(/\b\d{13}\b/) || [''])[0]);
   return {
-    width: d.width, ratio: d.ratio, rim: d.rim, li: d.li, si: d.si, xl: d.xl, rf: d.rf,
+    width: d.width, ratio: d.ratio, rim: d.rim, li: d.li, si: d.si, xl: d.xl, rf: d.rf, size: dimLabel({ ...d, xl: false, rf: false }),
     vehicle_type: d.c ? 'transporter' : 'pkw', season: guessSeason(t) || undefined,
     brand: words[0] || '', profile: words.slice(1).join(' '), ean: ean || undefined,
     art_no: digits.length && !ean ? String(partNumber).trim().slice(0, 40) : undefined,

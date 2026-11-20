@@ -45,14 +45,16 @@
     <section class="card" id="targetCard">
       <div class="seg" role="tablist">
         <button class="on" data-target="auftrag" role="tab">In den Auftrag</button>
-        <button data-target="lager" role="tab">Ins Lager (Wareneingang)</button>
+        <button data-target="lager" role="tab">Teile-Lager</button>
+        <button data-target="reifen" role="tab">Neureifen-Lager</button>
       </div>
       <div id="orderPick">
         <input id="orderSearch" type="search" placeholder="Auftrag suchen: Kennzeichen, Nummer, Kunde, Fahrzeug" autocomplete="off">
         <div id="orderList" class="olist"></div>
         <label class="chk"><input type="checkbox" id="toInvoice" checked> Mit Verkaufspreis direkt auf die Rechnung</label>
       </div>
-      <p id="lagerInfo" class="hint" hidden>Bestand wird bei gleicher Teilenummer erhöht, sonst als neuer Artikel angelegt.</p>
+      <p id="lagerInfo" class="hint" hidden>Wareneingang: Bestand wird bei gleicher Teilenummer erhöht, sonst als neuer Artikel angelegt.</p>
+      <p id="reifenInfo" class="hint" hidden>Wareneingang Neureifen: Größe, Marke und Profil werden aus der Bezeichnung gelesen. Gleiche EAN bzw. gleicher Reifen → Bestand erhöhen, sonst neuer Artikel im Reifenhandel. Die DOT tragen Sie im Dashboard nach.</p>
       <div class="row-between sup"><span class="label">Lieferant</span><select id="supplier"></select></div>
     </section>
 

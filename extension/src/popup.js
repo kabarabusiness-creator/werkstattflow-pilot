@@ -1,5 +1,5 @@
 import { alReadPage, alFillVehicle } from './page.js';
-import { parseCart, parseMoney, round2, supplierFromHost, SUPPLIER_NAMES } from './cart.js';
+import { parseCart, parseMoney, round2, supplierFromHost, SUPPLIER_NAMES, TIRE_SUPPLIERS } from './cart.js';
 
 const API = 'https://werkstattflow-pilot.werkstattflow.workers.dev/fn/';
 const DASHBOARD = 'https://login.autoleitwerk.de';
@@ -77,6 +77,8 @@ async function readPage() {
     const sup = supplierFromHost(out.host);
     $('supplier').value = sup;
     if (sup === 'sonstige') $('supplier').dataset.host = out.host || '';
+    // Beim Reifen-Großhändler gleich das Neureifen-Lager vorschlagen
+    if (TIRE_SUPPLIERS.includes(sup)) setTarget('reifen');
     $('srcTxt').textContent = out.mode === 'auswahl' ? `Markierter Text · ${st.rows.length} Zeile${st.rows.length === 1 ? '' : 'n'}` : st.rows.length ? `Erkannt auf ${out.host}` : 'Kein Warenkorb erkannt';
   } catch (e) {
     st.source = { mode: 'nichts', lines: [] }; st.rows = [];
@@ -94,12 +96,13 @@ $('btnPaste').addEventListener('click', () => {
 });
 
 /* ---------- Ziel: Auftrag oder Lager ---------- */
-document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
-  st.target = b.dataset.target;
-  document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
-  $('orderPick').hidden = st.target !== 'auftrag'; $('lagerInfo').hidden = st.target !== 'lager';
+function setTarget(t) {
+  st.target = t;
+  document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x.dataset.target === t));
+  $('orderPick').hidden = t !== 'auftrag'; $('lagerInfo').hidden = t !== 'lager'; $('reifenInfo').hidden = t !== 'reifen';
   renderRows();
-}));
+}
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setTarget(b.dataset.target)));
 function renderOrders() {
   const q = $('orderSearch').value.trim().toLowerCase().replace(/[\s-]/g, '');
   let list = st.orders;
@@ -119,10 +122,10 @@ $('orderList').addEventListener('click', (e) => { const b = e.target.closest('[d
 
 function updateButton() {
   const n = st.rows.filter(r => String(r.part_name || r.part_number || '').trim()).length;
-  const ok = n > 0 && !st.busy && (st.target === 'lager' || st.orderId);
+  const ok = n > 0 && !st.busy && (st.target === 'lager' || st.target === 'reifen' || st.orderId);
   $('btnImport').disabled = !ok;
   const o = st.orders.find(x => x.id === st.orderId);
-  $('btnImport').textContent = st.busy ? 'Wird übernommen …' : !n ? 'Keine Positionen' : st.target === 'lager' ? `${n} Position${n === 1 ? '' : 'en'} ins Lager buchen` : o ? `${n} Position${n === 1 ? '' : 'en'} in ${o.plate || 'Auftrag'} übernehmen` : 'Bitte Auftrag wählen';
+  $('btnImport').textContent = st.busy ? 'Wird übernommen …' : !n ? 'Keine Positionen' : st.target === 'lager' ? `${n} Position${n === 1 ? '' : 'en'} ins Lager buchen` : st.target === 'reifen' ? `${n} Position${n === 1 ? '' : 'en'} ins Neureifen-Lager buchen` : o ? `${n} Position${n === 1 ? '' : 'en'} in ${o.plate || 'Auftrag'} übernehmen` : 'Bitte Auftrag wählen';
 }
 
 $('btnImport').addEventListener('click', async () => {
@@ -135,6 +138,7 @@ $('btnImport').addEventListener('click', async () => {
   try {
     const d = await api('extImport', { target: st.target, order_id: st.orderId, items, supplier_key: sup, supplier_name: sup === 'sonstige' ? ($('supplier').dataset.host || '') : '', to_invoice: $('toInvoice').checked });
     if (d.target === 'lager') say(`Lager: ${d.updated} Artikel aufgestockt, ${d.created} neu angelegt.`);
+    else if (d.target === 'reifen') say(`Neureifen: ${d.updated} Artikel aufgestockt, ${d.created} neu angelegt${d.skipped ? ` · ${d.skipped} Zeile${d.skipped === 1 ? '' : 'n'} ohne erkennbare Reifengröße übersprungen` : ''}.`);
     else say(`${d.parts} Teil${d.parts === 1 ? '' : 'e'} im Auftrag ${d.order_number ? '#' + d.order_number : ''}${d.invoiced ? `, ${d.invoiced} auf der Rechnung` : ''}${d.invoice_locked ? ' – Rechnung ist festgeschrieben, darum nicht auf die Rechnung' : ''}.`);
     st.rows = []; renderRows();
   } catch (e) { say(e.message, 'err'); if (e.auth) setTimeout(init, 1500); }
