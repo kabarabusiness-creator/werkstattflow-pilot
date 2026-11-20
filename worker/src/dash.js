@@ -16,6 +16,7 @@ import { handleInvoice, INVOICE_FUNCTIONS } from './invoices.js';
 import { tireScanImages, registrationScan, registrationScore, receiptScan, capacityDays, alexDashboard } from './ai.js';
 import { handleMail, MAIL_FUNCTIONS } from './mail.js';
 import { handleInvite, INVITE_FUNCTIONS } from './invites.js';
+import { TIRE_SUPPLIERS, PL_PREFIX, priceListPut, priceListMetas, priceSearch, tireFromText } from './tires.js';
 
 const TOKEN_TTL_MIN = 30;
 const SLOT_LABELS = { 1: 'Reifenflanke', 2: 'Lauffläche', 3: 'Felge' };
@@ -556,10 +557,37 @@ export async function handleFunction(name, body, c) {
       unit_price: money(it.unit_price), sale_price: money(it.sale_price),
     })).filter(it => it.part_name || it.part_number);
     if (!items.length) throw new HttpError(400, 'params', { message: 'Keine Positionen zum Übernehmen.' });
-    const SUP = { stakis: 'Stahlgruber STAkis', wm: 'WM SE / Trost', coparts: 'PV Automotive / Coparts', autodoc: 'Autodoc', kfzteile24: 'kfzteile24' };
+    const SUP = { stakis: 'Stahlgruber STAkis', wm: 'WM SE / Trost', coparts: 'PV Automotive / Coparts', autodoc: 'Autodoc', kfzteile24: 'kfzteile24', tyre24: 'Tyre24 / Alzura', interpneu: 'Interpneu', goeggel: 'Reifen Göggel', gundlach: 'Reifen Gundlach' };
     const supplierKey = SUP[body.supplier_key] ? body.supplier_key : 'sonstige';
     const supplierName = SUP[supplierKey] || str(body.supplier_name, 120) || 'Sonstiger Lieferant';
     const actor = `${ext.user_name || 'Browser-Erweiterung'} (Erweiterung)`;
+    if (body.target === 'reifen') {
+      // Neureifen-Wareneingang: gleiche EAN bzw. Größe + Profil → Bestand erhöhen, sonst Reifen-Artikel anlegen
+      const arts = await db.list('TireArticle', { workshop_code: code }, { limit: 3000 });
+      const low = v => String(v || '').toLowerCase();
+      let created = 0, updated = 0, skipped = 0;
+      for (const it of items) {
+        const t = tireFromText(it.part_name, it.part_number);
+        if (!t) { skipped++; continue; }
+        const hit = (t.ean && arts.find(a => a.ean && a.ean === t.ean))
+          || arts.find(a => a.kind !== 'felge' && +a.width === t.width && +a.ratio === t.ratio && +a.rim === t.rim && low(a.brand) === low(t.brand) && a.profile && low(a.profile) === low(t.profile));
+        const dots = n => [...(Array.isArray(n) ? n : [])];
+        let rec, after;
+        if (hit) {
+          after = (Number(hit.stock_quantity) || 0) + it.quantity;
+          const ds = dots(hit.dots); const blank = ds.find(x => !x.dot); if (blank) blank.qty = (Number(blank.qty) || 0) + it.quantity; else ds.push({ dot: '', qty: it.quantity });
+          await db.update('TireArticle', hit.id, { stock_quantity: after, dots: ds, ...(it.unit_price != null ? { purchase_price: it.unit_price } : {}), ...(hit.supplier_name ? {} : { supplier_name: supplierName, supplier_key: supplierKey }) });
+          Object.assign(hit, { stock_quantity: after, dots: ds }); rec = hit; updated++;
+        } else {
+          after = it.quantity;
+          rec = await db.create('TireArticle', Object.fromEntries(Object.entries({ workshop_code: code, kind: 'reifen', ...t, stock_quantity: it.quantity, min_stock: 0, dots: [{ dot: '', qty: it.quantity }], purchase_price: it.unit_price ?? undefined, supplier_key: supplierKey, supplier_name: supplierName, active: true }).filter(([, v]) => v !== undefined && v !== '')));
+          arts.push(rec); created++;
+        }
+        await db.create('TireStockMove', { workshop_code: code, article_id: rec.id, article_label: `${t.brand} ${t.profile} ${t.width}/${t.ratio} R${t.rim}`.replace(/\s+/g, ' ').trim(), type: 'wareneingang', qty: it.quantity, by: actor, note: `Browser-Erweiterung (${supplierName})`, stock_after: after }).catch(() => {});
+      }
+      if (!created && !updated) throw new HttpError(400, 'params', { message: 'In den Positionen wurde keine Reifengröße erkannt. Für Teile bitte „Lager“ oder einen Auftrag wählen.' });
+      return { ok: true, target: 'reifen', created, updated, skipped };
+    }
     if (body.target === 'lager') {
       // Wareneingang: Bestand erhöhen (gleiche Teilenummer), sonst neuen Artikel anlegen
       const inv = await db.list('InventoryItem', { workshop_code: code }, { limit: 2000 });
@@ -596,6 +624,62 @@ export async function handleFunction(name, body, c) {
       }
     }
     return { ok: true, target: 'auftrag', order_id: order.id, order_number: order.order_number || '', parts, invoiced, invoice_locked: !!order.invoice_locked && !!body.to_invoice };
+  }
+
+  /* ---- Reifen-Warenwirtschaft: Preislisten der Großhändler (KV), Suche nach Größe, Angebot per Mail ---- */
+  if (name === 'tirePriceListUpload' || name === 'tirePriceLists' || name === 'tirePriceListDelete' || name === 'tirePriceSearch' || name === 'tireOfferSend') {
+    const user = await authUser();
+    const code = await workshopOf(user);
+    if (!code) throw new HttpError(403, 'no_workshop');
+    await h.gate(code);
+    needKv();
+    const prof = (await db.list('WorkshopProfile', { workshop_code: code }, { limit: 1 }).catch(() => []))[0] || null;
+    const markup = Number(prof && prof.tire_markup_percent != null && prof.tire_markup_percent !== '' ? prof.tire_markup_percent : prof && prof.parts_markup_percent) || 0;
+    if (name === 'tirePriceLists') return { ok: true, lists: await priceListMetas(env, code), markup_percent: markup };
+    if (name === 'tirePriceSearch') {
+      rateLimit('tps:' + user.id, 120, 60_000);
+      const season = ['sommer', 'winter', 'ganzjahr'].includes(body.season) ? body.season : '';
+      return { ok: true, markup_percent: markup, ...(await priceSearch(env, code, { dim: String(body.dim || '').slice(0, 80), season, markup })) };
+    }
+    if (name === 'tireOfferSend') {
+      rateLimit('tos:' + user.id, 40, 3600_000);
+      const offer = await getRec('TireOffer', String(body.offer_id || ''));
+      if (!offer) throw new HttpError(404, 'not_found', { message: 'Angebot nicht gefunden.' });
+      sameWorkshop(offer, code);
+      const to = String(body.email || offer.email || '').trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new HttpError(400, 'params', { message: 'Bitte eine gültige E-Mail-Adresse des Kunden eintragen.' });
+      if (!Array.isArray(offer.options) || !offer.options.length) throw new HttpError(400, 'params', { message: 'Das Angebot hat noch keine Variante.' });
+      if (offer.status === 'angenommen' || offer.status === 'abgelehnt') throw new HttpError(409, 'answered', { message: 'Der Kunde hat bereits geantwortet.' });
+      const token = randomHex(24);
+      const validUntil = offer.valid_until && String(offer.valid_until).slice(0, 10) >= new Date().toISOString().slice(0, 10) ? String(offer.valid_until).slice(0, 10) : new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
+      await db.update('TireOffer', offer.id, { token_hash: await sha256Hex(token), status: 'gesendet', sent_at: new Date().toISOString(), valid_until: validUntil, email: to });
+      const ws = await h.workshopInfo(code);
+      const link = `${origin}/angebot?t=${token}`;
+      const escH = v => String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+      const [y, m, d] = validUntil.split('-');
+      const res = await h.sendMail({
+        to, replyTo: ws.email, orderId: offer.order_id || null, code, statusText: 'Reifenangebot',
+        subject: `Ihr Reifenangebot – ${ws.name}`,
+        html: h.mailHtml({ title: `Hallo ${offer.customer_name || ''},`,
+          intro: `${offer.reason ? escH(offer.reason) + '<br><br>' : ''}wir haben Ihnen ein Angebot für neue Reifen zusammengestellt${offer.options.length > 1 ? ` – mit ${offer.options.length} Varianten zur Auswahl` : ''}. Wählen Sie online Ihre Variante und einen Wunschtermin für den Wechsel.`,
+          rows: [['Kennzeichen', offer.license_plate || '–'], ['Reifengröße', offer.dimension || '–'], ['Gültig bis', `${d}.${m}.${y}`]],
+          button: { label: 'Angebot ansehen', href: link }, footer: h.contactFooter(ws) }),
+      });
+      if (!res.sent) {
+        await db.update('TireOffer', offer.id, { status: offer.status || 'entwurf', token_hash: '' }).catch(() => {});
+        throw new HttpError(502, 'mail_failed', { message: res.reason === 'not_configured' ? 'Der E-Mail-Versand ist noch nicht eingerichtet.' : 'Die E-Mail konnte nicht gesendet werden.' });
+      }
+      return { ok: true, sent: true, valid_until: validUntil };
+    }
+    const sk = String(body.supplier_key || '');
+    if (!/^[a-z0-9-]{2,30}$/.test(sk)) throw new HttpError(400, 'params', { message: 'Bitte einen Lieferanten wählen.' });
+    if (name === 'tirePriceListDelete') { await env.PHOTOS.delete(`${PL_PREFIX}${code}/${sk}`); return { ok: true }; }
+    rateLimit('tpu:' + user.id, 30, 3600_000);
+    const rows = Array.isArray(body.rows) ? body.rows.slice(0, 40000) : [];
+    if (!rows.length) throw new HttpError(400, 'params', { message: 'Die Preisliste enthält keine Zeilen.' });
+    const r = await priceListPut(env, code, sk, String(body.supplier_name || TIRE_SUPPLIERS[sk] || sk).slice(0, 80), rows);
+    if (!r.count) { await env.PHOTOS.delete(`${PL_PREFIX}${code}/${sk}`); throw new HttpError(400, 'params', { message: 'In der Datei wurden keine Reifen mit Größe und Einkaufspreis erkannt.' }); }
+    return { ok: true, ...r };
   }
 
   if (name === 'alexRecommendations') {

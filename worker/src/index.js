@@ -17,6 +17,7 @@
  */
 
 import { alexAsk, tireScan, berichtsheftDraft } from './ai.js';
+import { offerPageHtml, offerExpired } from './tires.js';
 import { handleFunction } from './dash.js';
 import { syncInvoiceMirror } from './invoices.js';
 import { handleCeo, readSettings, parseModules, logError, storeTicket } from './ceo.js';
@@ -1325,6 +1326,42 @@ async function mailTireReminder(env, db, ws, x, origin) {
       footer: `${booking ? '' : 'Für einen Termin antworten Sie einfach auf diese Mail oder rufen Sie uns an.<br>'}${contactFooter(ws)}<br><br>Sie erhalten diese Nachricht, weil Ihre Reifen bei uns eingelagert sind. Keine Saison-Erinnerungen mehr? <a href="${esc(optUrl)}" style="color:#6b6b88">Hier abmelden</a>.` }),
   });
 }
+// Reifenangebot: Kunde öffnet den Link aus der Mail, wählt eine Variante und einen Wunschtermin (ohne Anmeldung)
+async function tireOfferPage(db, env, request, url) {
+  rateLimit('angebot:' + (request.headers.get('CF-Connecting-IP') || 'x'), 60, 15 * 60_000);
+  const page = (body, status = 200) => new Response(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' } });
+  let token = url.searchParams.get('t') || ''; let form = null;
+  if (request.method === 'POST') { form = await request.formData(); token = String(form.get('t') || ''); }
+  const blank = { name: 'AutoLeitwerk' };
+  if (!/^[a-f0-9]{48}$/.test(token)) return page(offerPageHtml({ ws: blank, error: 'Der Link ist ungültig oder unvollständig.' }), 404);
+  const offer = (await db.list('TireOffer', { token_hash: await sha256Hex(token) }, { limit: 2 }))[0];
+  if (!offer) return page(offerPageHtml({ ws: blank, error: 'Dieses Angebot gibt es nicht mehr – vielleicht wurde Ihnen inzwischen ein neueres geschickt.' }), 404);
+  const ws = await workshopInfo(db, offer.workshop_code);
+  const prof = (await db.list('WorkshopProfile', { workshop_code: offer.workshop_code }, { limit: 1 }).catch(() => []))[0];
+  const vat = prof && prof.kleinunternehmer ? 1 : 1.19;
+  if (form && offer.status === 'gesendet' && !offerExpired(offer)) {
+    const yes = form.get('answer') === 'yes';
+    const n = (offer.options || []).length;
+    const choice = Math.max(0, Math.min(n - 1, parseInt(String(form.get('choice') || '0'), 10) || 0));
+    const wish = /^\d{4}-\d{2}-\d{2}$/.test(String(form.get('wish') || '')) ? String(form.get('wish')) : '';
+    const msg = String(form.get('msg') || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 500);
+    const upd = Object.fromEntries(Object.entries({ status: yes ? 'angenommen' : 'abgelehnt', answered_at: new Date().toISOString(), chosen_option: yes ? choice : undefined, appointment_wish: wish || undefined, customer_note: msg || undefined }).filter(([, v]) => v !== undefined));
+    await db.update('TireOffer', offer.id, upd);
+    Object.assign(offer, upd);
+    if (ws.email) {
+      const opt = yes ? offer.options[choice] : null;
+      await sendMail(env, db, { to: ws.email, code: offer.workshop_code, statusText: 'Reifenangebot',
+        subject: `Reifenangebot ${yes ? 'angenommen' : 'abgelehnt'}: ${offer.license_plate || offer.customer_name || ''}`,
+        html: mailHtml({ title: yes ? 'Reifenangebot angenommen ✅' : 'Reifenangebot abgelehnt', intro: `<b>${esc(offer.customer_name || 'Der Kunde')}</b> hat das Reifenangebot ${yes ? 'angenommen' : 'abgelehnt'}.`,
+          rows: [['Kennzeichen', offer.license_plate || '–'], ...(opt ? [['Gewählt', opt.label || ''], ['Wunschtermin', wish ? fmtDate(wish) : '–']] : []), ...(msg ? [['Nachricht', msg]] : [])],
+          button: { label: 'Im Dashboard öffnen', href: `${DASHBOARD_URL}/reifen-warenwirtschaft?tab=angebote` }, footer: 'Diese Nachricht kommt automatisch aus AutoLeitwerk.' }) }).catch(() => {});
+    }
+    return page(offerPageHtml({ offer, ws, token, vatFactor: vat, done: true }));
+  }
+  if (!['gesendet', 'angenommen', 'abgelehnt', 'abgelaufen'].includes(offer.status)) return page(offerPageHtml({ ws, error: 'Dieses Angebot ist nicht mehr aktiv. Bitte sprechen Sie uns an.' }), 410);
+  return page(offerPageHtml({ offer, ws, token, vatFactor: vat }));
+}
+
 async function tireReminder(db, env, code, body, origin) {
   const season = body.season === 'sommer' ? 'sommer' : body.season === 'winter' ? 'winter' : null;
   if (!season) throw new HttpError(400, 'params');
@@ -1825,6 +1862,7 @@ async function handleFetch(request, env, ctx) {
         if (r instanceof Response) { const hd = new Headers(r.headers); for (const [k, v] of Object.entries(cors)) hd.set(k, v); hd.set('Access-Control-Expose-Headers', 'Content-Disposition'); return new Response(r.body, { status: r.status, headers: hd }); }
         return json(r, 200, cors);
       }
+      if (path === '/angebot' && (request.method === 'GET' || request.method === 'POST')) return await tireOfferPage(db, env, request, url);
       if (path === '/reifen-abmelden' && request.method === 'GET') return await tireOptout(db, env, url);
       if (path === '/erinnerung-abmelden' && request.method === 'GET') return await vehicleOptout(db, env, url);
       if (path === '/admin' && request.method === 'GET') {

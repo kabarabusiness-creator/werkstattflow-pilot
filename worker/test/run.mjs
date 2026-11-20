@@ -1500,5 +1500,73 @@ await t('Browser-Erweiterung: verbinden, Aufträge, Teile an Auftrag und ins Lag
   await fn('extRevoke', { id: dev.data.devices[0].id }, U);
   assert.equal((await fn('extOrders', {}, T)).status, 401, 'nach dem Trennen gesperrt');
 });
+await t('Reifen-Warenwirtschaft: Preisliste, Suche nach Größe, Angebot per Mail, Kunde nimmt an, Erweiterung bucht Neureifen ein', async () => {
+  const U = 'USER-AL-T1-xxxxxxxxxxxxxxxx';
+  const fn = (name, body, tok) => worker.fetch(new Request('https://api.test/fn/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }), env, ctx).then(async r => { await Promise.all(pending.splice(0)); return { status: r.status, data: await r.json() }; });
+  db.WorkshopProfile[0].tire_markup_percent = 25;
+  assert.equal((await fn('tirePriceLists', {}, 'x')).status, 401);
+  const up = await fn('tirePriceListUpload', { supplier_key: 'tyre24', rows: [
+    { name: 'Continental PremiumContact 6 205/55 R16 91V', ek: '71,40', stock: 40, ean: '4019238791234', fuel: 'C', wet: 'A', noise: 71 },
+    { brand: 'Hankook', profile: 'Kinergy Eco 2', dim: '205/55R16 91H', ek: 52.1, stock: 0, season: 'S' },
+    { name: 'Michelin Alpin 6 205/55 R16 91H', ek: 88, stock: 8 },
+    { name: 'Bremsbelag vorne', ek: 30 }, { name: '225/45 R17 94Y XL Goodyear Eagle F1', ek: '' } ] }, U);
+  assert.equal(up.status, 200, JSON.stringify(up.data)); assert.equal(up.data.count, 3); assert.equal(up.data.skipped, 2);
+  await fn('tirePriceListUpload', { supplier_key: 'interpneu', rows: [{ name: 'Bridgestone Turanza 6 205/55 R16 91V', ek: 66 }, { name: 'Falken 195/65 R15 91H', ek: 40 }] }, U);
+  assert.equal((await fn('tirePriceListUpload', { supplier_key: 'goeggel', rows: [{ name: 'Ölfilter', ek: 3 }] }, U)).status, 400, 'ohne Reifen nichts speichern');
+  const lists = await fn('tirePriceLists', {}, U);
+  assert.deepEqual(lists.data.lists.map(l => l.supplier_key).sort(), ['interpneu', 'tyre24']); assert.equal(lists.data.markup_percent, 25);
+  const sr = await fn('tirePriceSearch', { dim: '205/55 R16 91V' }, U);
+  assert.equal(sr.status, 200); assert.deepEqual(sr.data.results.map(r => r.brand || r.name.split(' ')[0]), ['Bridgestone', 'Continental'], 'nur passende Tragfähigkeit/Geschwindigkeit (V), günstigster zuerst');
+  assert.equal(sr.data.results[1].vk, 89.25, 'VK = EK + 25 %'); assert.equal(sr.data.results[1].supplier_name, 'Tyre24 / Alzura');
+  const win = await fn('tirePriceSearch', { dim: '2055516', season: 'winter' }, U);
+  assert.deepEqual(win.data.results.map(r => r.ek), [88]);
+  // fremde Werkstatt sieht nichts
+  db.Workshop.push({ id: 'w9', code: 'AL-T9', name: 'Andere', subscription_status: 'active' });
+  // Angebot senden
+  db.TireOffer = [{ id: 'to1', workshop_code: 'AL-T1', status: 'entwurf', customer_name: 'Kunde A', email: 'kunde@example.com', license_plate: 'AB-C-1', dimension: '205/55 R16', reason: 'Ihre Winterreifen haben nur noch 3 mm Profil.', options: [
+    { label: 'Michelin Alpin 6', detail: '205/55 R16 91H', qty: 4, season: 'winter', fuel: 'C', wet: 'B', noise: 70, total: 500 },
+    { label: 'Hankook Winter i*cept RS3', detail: '205/55 R16 91H', qty: 4, total: 400 } ] },
+    { id: 'to2', workshop_code: 'AL-T2', status: 'entwurf', customer_name: 'Fremd', email: 'f@x.de', options: [{ label: 'X', total: 1 }] }];
+  assert.equal((await fn('tireOfferSend', { offer_id: 'to2' }, U)).status, 403, 'fremdes Angebot');
+  const before = mails.length;
+  const snd = await fn('tireOfferSend', { offer_id: 'to1' }, U);
+  assert.equal(snd.status, 200, JSON.stringify(snd.data)); assert.equal(mails.length, before + 1);
+  const link = mails.at(-1).html.match(/https:\/\/api\.test\/angebot\?t=([a-f0-9]{48})/);
+  assert.ok(link, 'Link in der Mail'); assert.match(mails.at(-1).html, /nur noch 3 mm Profil/);
+  const off = db.TireOffer[0]; assert.equal(off.status, 'gesendet'); assert.ok(off.token_hash && off.token_hash !== link[1], 'nur Prüfwert gespeichert');
+  const page = await worker.fetch(new Request('https://api.test/angebot?t=' + link[1]), env, ctx);
+  const html = await page.text();
+  assert.equal(page.status, 200); assert.match(html, /Michelin Alpin 6/); assert.match(html, /595,00/, 'Bruttopreis 500 € + 19 %'); assert.match(html, /inkl\. 19 % MwSt/);
+  assert.equal((await worker.fetch(new Request('https://api.test/angebot?t=' + 'a'.repeat(48)), env, ctx)).status, 404);
+  const xss = db.TireOffer[0].options[1].label; db.TireOffer[0].options[1].label = '<script>alert(1)</script>';
+  assert.ok(!(await (await worker.fetch(new Request('https://api.test/angebot?t=' + link[1]), env, ctx)).text()).includes('<script>alert'), 'Text wird maskiert');
+  db.TireOffer[0].options[1].label = xss;
+  const form = new URLSearchParams({ t: link[1], choice: '1', wish: '2026-12-03', msg: 'Gern vormittags', answer: 'yes' });
+  const mb = mails.length;
+  const ans = await worker.fetch(new Request('https://api.test/angebot', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form }), env, ctx);
+  await Promise.all(pending.splice(0));
+  const ah = await ans.text();
+  assert.equal(ans.status, 200); assert.match(ah, /Hankook Winter i\*cept RS3/); assert.match(ah, /03\.12\.2026/);
+  assert.equal(off.status, 'angenommen'); assert.equal(off.chosen_option, 1); assert.equal(off.appointment_wish, '2026-12-03'); assert.equal(off.customer_note, 'Gern vormittags');
+  assert.equal(mails.length, mb + 1); assert.equal(mails.at(-1).to[0], 'a@b.de', 'Werkstatt wird informiert');
+  // zweites Absenden ändert nichts mehr
+  await worker.fetch(new Request('https://api.test/angebot', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ t: link[1], answer: 'no' }) }), env, ctx);
+  assert.equal(off.status, 'angenommen');
+  assert.equal((await fn('tireOfferSend', { offer_id: 'to1' }, U)).status, 409, 'beantwortet → nicht erneut senden');
+  // Erweiterung: Neureifen einbuchen
+  const c = await fn('extConnect', { device: 'Reifen' }, U); const T = c.data.token;
+  db.TireArticle = [{ id: 'ta1', workshop_code: 'AL-T1', kind: 'reifen', ean: '4019238791234', brand: 'Continental', profile: 'PremiumContact 6', width: 205, ratio: 55, rim: 16, stock_quantity: 2, dots: [{ dot: '1224', qty: 2 }] }];
+  db.TireStockMove = [];
+  const im = await fn('extImport', { target: 'reifen', supplier_key: 'tyre24', items: [
+    { part_name: 'Continental PremiumContact 6 205/55 R16 91V', part_number: '4019238791234', quantity: 4, unit_price: '71,40' },
+    { part_name: 'Michelin Alpin 6 205/55 R16 91H XL', part_number: '', quantity: 2, unit_price: 88 },
+    { part_name: 'Ventil', part_number: 'V1', quantity: 4 } ] }, T);
+  assert.equal(im.status, 200, JSON.stringify(im.data)); assert.equal(im.data.updated, 1); assert.equal(im.data.created, 1); assert.equal(im.data.skipped, 1);
+  assert.equal(db.TireArticle[0].stock_quantity, 6); assert.equal(db.TireArticle[0].purchase_price, 71.4);
+  const neu = db.TireArticle[1]; assert.equal(neu.brand, 'Michelin'); assert.equal(neu.profile, 'Alpin 6'); assert.equal(neu.season, 'winter'); assert.equal(neu.xl, true); assert.equal(neu.supplier_name, 'Tyre24 / Alzura');
+  assert.equal(db.TireStockMove.length, 2); assert.equal(db.TireStockMove[0].stock_after, 6);
+  await fn('tirePriceListDelete', { supplier_key: 'interpneu' }, U);
+  assert.deepEqual((await fn('tirePriceLists', {}, U)).data.lists.map(l => l.supplier_key), ['tyre24']);
+});
 console.log(results.join('\n'));
 if (results.some(r => r.startsWith('✗'))) process.exit(1);
