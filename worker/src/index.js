@@ -27,6 +27,9 @@ const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
 const CACHE_MS = 30_000;
 const WORKTIME_CAP_MIN = 720;
+const ATTEND_MAX_MIN = 16 * 60;
+// Vorschlag Pause nach Arbeitszeitgesetz (mehr als 6 h → 30 Min., mehr als 9 h → 45 Min.), wenn nichts angegeben ist
+const statutoryBreak = (min) => (min > 9 * 60 ? 45 : min > 6 * 60 ? 30 : 0);
 const TIME_SLOTS = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00','15:30'];
 const TABLET_ENTITIES = ['Order', 'OrderTask', 'Employee', 'WorkTime', 'Lift', 'Appointment', 'TireSet', 'Workshop', 'Service'];
 
@@ -848,6 +851,35 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     await db.update('WorkTime', wt.id, { end_timestamp: end.toISOString(), duration_minutes: minutes });
     invalidate('WorkTime');
     return { ok: true, duration_minutes: minutes };
+  }
+  // Stempeluhr: Kommen/Gehen je Mitarbeiter (Grundlage für den Arbeitszeiten-Export ans Lohnbüro)
+  if (action === 'attendance_status' || action === 'attendance_in' || action === 'attendance_out') {
+    const mine = (await db.list('Attendance', { employee_id: sess.employee_id }, { limit: 60, sort: '-clock_in' }))
+      .filter(a => a.workshop_code === code);
+    let open = mine.find(a => !a.clock_out) || null;
+    // vergessen auszustempeln: nach 16 h automatisch schließen und zur Prüfung markieren
+    if (open && Date.now() - Date.parse(open.clock_in) > ATTEND_MAX_MIN * 60000) {
+      const end = new Date(Date.parse(open.clock_in) + ATTEND_MAX_MIN * 60000);
+      const brk = statutoryBreak(ATTEND_MAX_MIN);
+      await db.update('Attendance', open.id, { clock_out: end.toISOString(), break_minutes: brk, duration_minutes: ATTEND_MAX_MIN - brk, needs_review: true, note: 'Nicht ausgestempelt – bitte prüfen' });
+      open = null;
+    }
+    const today = berlinDate();
+    const todayMin = mine.filter(a => a.work_date === today && a.clock_out).reduce((s, a) => s + (Number(a.duration_minutes) || 0), 0);
+    if (action === 'attendance_status') return { ok: true, open, today_minutes: todayMin };
+    if (action === 'attendance_in') {
+      if (open) return { ok: true, open, already: true, today_minutes: todayMin };
+      const rec = await db.create('Attendance', { employee_id: sess.employee_id, employee_name: emp.name, work_date: today, clock_in: clientTime(body), source: 'tablet', break_minutes: 0, workshop_code: code });
+      return { ok: true, open: rec, today_minutes: todayMin };
+    }
+    if (!open) return { ok: true, open: null, already: true, today_minutes: todayMin };
+    const end = new Date(Math.max(Date.parse(clientTime(body)), Date.parse(open.clock_in)));
+    const gross = Math.max(0, Math.round((end - new Date(open.clock_in)) / 60000));
+    let brk = Number(body.break_minutes);
+    brk = Number.isFinite(brk) && brk >= 0 ? Math.min(Math.round(brk), 240, gross) : statutoryBreak(gross);
+    const net = Math.max(0, gross - brk);
+    await db.update('Attendance', open.id, { clock_out: end.toISOString(), break_minutes: brk, duration_minutes: net });
+    return { ok: true, open: null, closed: { id: open.id, gross, break_minutes: brk, duration_minutes: net }, today_minutes: todayMin + net };
   }
   if (action === 'note_add') {
     const content = String(body.content || '').trim().slice(0, 5000);

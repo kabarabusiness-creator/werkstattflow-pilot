@@ -1005,6 +1005,7 @@ function renderChrome(){
         <div class="user-id-shift" id="shiftTimerText">${iconClock} Im Dienst seit ${formatClock(state.shiftStart)} · 0:00</div>
       </div>
     `;
+    renderStampButton();
   }
 
   const bnItems = [
@@ -2107,6 +2108,7 @@ const faqData = [
   {q:'Wie starte ich die Zeiterfassung für eine Aufgabe?', a:'Öffne die Aufgabe in "Meine Aufträge" → Tab "Aufgaben" und tippe auf "Start" im Zeiterfassungs-Feld. Die Uhr läuft, bis du auf "Fertig" oder "Pause" tippst.'},
   {q:'Wie füge ich ein Foto zu einer Aufgabe hinzu?', a:'In der Aufgabendetail-Ansicht auf "Hinzufügen" bei "Bilder & Notizen" tippen. Das Foto wird dem Auftrag zugeordnet.'},
   {q:'Warum kann ich einen Auftrag nicht abschließen?', a:'Vor dem Abschluss muss die digitale Qualitätskontrolle (Tab "Checkliste") vollständig abgehakt sein. Der Abschließen-Button zeigt dir, wie viele Punkte noch offen sind.'},
+  {q:'Wie stemple ich Kommen und Gehen?', a:'Links unter deinem Namen: „Kommen stempeln“ morgens antippen, abends „Gehen“. Beim Gehen wählst du deine Pause – vorgeschlagen wird die gesetzliche Mindestpause. Anmelden am Tablet zählt nicht als Kommen, weil sich mehrere ein Tablet teilen. Vergessen? Das Büro kann die Zeit unter „Arbeitszeiten“ korrigieren; nach 16 Stunden wird automatisch ausgestempelt und zur Prüfung markiert.'},
   {q:'Was passiert, wenn ich offline bin?', a:'Einfach weiterarbeiten. Aufgaben starten und abschließen, Zeiten, Notizen, Fotos und die Checkliste werden auf dem Tablet gespeichert und automatisch nachgetragen, sobald das WLAN wieder da ist – mit der richtigen Uhrzeit. Oben rechts siehst du, wie viele Änderungen noch offen sind. Ohne Netz gehen nicht: ALEX-KI, Reifenscan, Chat und neue Daten aus dem Büro.'},
   {q:'Wie ändere ich meine Rolle oder die eines Kollegen?', a:'Nur Admins können das unter "Benutzerverwaltung" in der Sidebar Rollen für Teammitglieder ändern.'},
 ];
@@ -6367,6 +6369,7 @@ async function selectProfile(member){
   loadQuickNotesFor(state.workshopToken, member.name);
   state.selectedRole = member.role;
   state.shiftStart = Date.now();
+  state.attendance = null; attendanceRefresh();
   document.getElementById('profileScreen').style.display = 'none';
   document.getElementById('pinScreen').style.display = 'none';
   state.mainView = 'auftraege';
@@ -6392,6 +6395,7 @@ function showLoginScreen(){
   if(state.workshopToken) alStore.remove(snapKey(state.workshopToken));
   state.currentUser = null;
   state.shiftStart = null;
+  state.attendance = null;
   state.token = null;
   state.backendAvailable = false;
   state.workshopToken = null;
@@ -7016,6 +7020,81 @@ document.addEventListener('click', e=>{
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) vcStopRec(); else if(vc.hands) setTimeout(vcStartHands, 500); });
 setInterval(()=>{ vcRenderFab(); if(vc.hands && !vc.rec && state.currentUser && !vc.suspended && !vc.speaking && !document.hidden && vc.fails.length <= 6) vcStartHands(); if(!state.currentUser && vc.rec) vcStopRec(); }, 3000);
 
+
+/* ---------- Stempeluhr: Kommen / Gehen ----------
+   Eigener Knopf unter dem Namen. Anmelden am Tablet ist NICHT Kommen – mehrere Mitarbeiter teilen sich ein Tablet.
+   Gehen fragt die Pause ab (Vorschlag nach Arbeitszeitgesetz). Daraus entsteht im Dashboard der Export fürs Lohnbüro. */
+function stampLabel(){
+  const a = state.attendance;
+  if(!a || a.loading) return { text:'Stempeluhr …', cls:'', disabled:true };
+  if(a.error) return { text:'Stempeln nicht möglich', cls:'', disabled:false };
+  if(a.open) return { text:`Gehen (seit ${formatClock(Date.parse(a.open.clock_in))})`, cls:'out', disabled:false };
+  return { text:'Kommen stempeln', cls:'in', disabled:false };
+}
+function renderStampButton(){
+  const row = document.getElementById('userIdRow'); if(!row || !state.currentUser) return;
+  let el = document.getElementById('stampBtn');
+  if(!el){ el = document.createElement('button'); el.id='stampBtn'; el.type='button'; el.className='stamp-btn'; el.onclick = onStampClick; row.after(el); }
+  const l = stampLabel();
+  el.className = 'stamp-btn ' + l.cls; el.disabled = !!l.disabled; el.textContent = l.text;
+}
+async function attendanceRefresh(){
+  if(!state.currentUser || !state.sessionToken) return;
+  state.attendance = { loading:true }; renderStampButton();
+  const r = await tabletRequest('attendance_status', {}, 15000);
+  state.attendance = r.ok ? { open:r.data.open || null, today:r.data.today_minutes || 0 } : { error:true, reason:r.reason, missing:r.missing };
+  renderStampButton();
+}
+function suggestBreak(min){ return min > 540 ? 45 : min > 360 ? 30 : 0; }
+async function onStampClick(){
+  const a = state.attendance || {};
+  if(a.error && a.missing){ showUpdateToast('Die Stempeluhr ist auf dem Server noch nicht freigeschaltet.'); return; }
+  if(a.error){ attendanceRefresh(); return; }
+  if(!a.open){
+    state.attendance = { loading:true }; renderStampButton();
+    const r = await tabletRequest('attendance_in', { client_at:new Date().toISOString() }, 15000);
+    if(!r.ok){ showUpdateToast('Kommen konnte nicht gestempelt werden – ' + (r.reason||'bitte erneut versuchen') + '.'); attendanceRefresh(); return; }
+    state.attendance = { open:r.data.open, today:r.data.today_minutes||0 }; renderStampButton();
+    showUpdateToast(`Kommen gestempelt um ${formatClock(Date.parse(r.data.open.clock_in))}.`);
+    return;
+  }
+  const gross = Math.max(0, Math.round((Date.now() - Date.parse(a.open.clock_in))/60000));
+  openStampSheet(gross, suggestBreak(gross));
+}
+function openStampSheet(gross, brk){
+  let ov = document.getElementById('stampSheet'); if(ov) ov.remove();
+  ov = document.createElement('div'); ov.id='stampSheet'; ov.className='stamp-sheet';
+  const hm = m => `${Math.floor(m/60)}:${String(m%60).padStart(2,'0')}`;
+  const opts = [0,15,30,45,60];
+  if(!opts.includes(brk)) opts.push(brk);
+  ov.innerHTML = `<div class="stamp-card" role="dialog" aria-modal="true" aria-label="Gehen stempeln">
+    <h3>Gehen stempeln</h3>
+    <p>${escHtml(state.currentUser ? state.currentUser.name : '')} · seit ${formatClock(Date.parse(state.attendance.open.clock_in))} · <b>${hm(gross)} Std.</b> anwesend</p>
+    <div class="stamp-lbl">Pause heute</div>
+    <div class="stamp-opts">${opts.sort((x,y)=>x-y).map(m=>`<button type="button" data-m="${m}" class="${m===brk?'on':''}">${m} Min.</button>`).join('')}</div>
+    <p class="stamp-hint" id="stampNet">Arbeitszeit: ${hm(Math.max(0,gross-brk))} Std.${gross>360 && brk<30 ? ' · Hinweis: Bei mehr als 6 Std. sind 30 Min. Pause vorgeschrieben.' : ''}</p>
+    <div class="stamp-act"><button type="button" class="ghost" id="stampCancel">Abbrechen</button><button type="button" class="go" id="stampGo">Gehen</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  let cur = brk;
+  ov.querySelectorAll('.stamp-opts button').forEach(b=>b.onclick=()=>{
+    cur = Number(b.dataset.m);
+    ov.querySelectorAll('.stamp-opts button').forEach(x=>x.classList.toggle('on', x===b));
+    const warn = gross>540 && cur<45 ? ' · Hinweis: Bei mehr als 9 Std. sind 45 Min. Pause vorgeschrieben.' : gross>360 && cur<30 ? ' · Hinweis: Bei mehr als 6 Std. sind 30 Min. Pause vorgeschrieben.' : '';
+    document.getElementById('stampNet').textContent = `Arbeitszeit: ${hm(Math.max(0,gross-cur))} Std.${warn}`;
+  });
+  ov.onclick = e => { if(e.target===ov) ov.remove(); };
+  document.getElementById('stampCancel').onclick = () => ov.remove();
+  document.getElementById('stampGo').onclick = async () => {
+    const btn = document.getElementById('stampGo'); btn.disabled = true; btn.textContent = '…';
+    const r = await tabletRequest('attendance_out', { client_at:new Date().toISOString(), break_minutes:cur }, 15000);
+    if(!r.ok){ btn.disabled=false; btn.textContent='Gehen'; showUpdateToast('Gehen konnte nicht gestempelt werden – ' + (r.reason||'bitte erneut versuchen') + '.'); return; }
+    ov.remove();
+    state.attendance = { open:null, today:r.data.today_minutes||0 }; renderStampButton();
+    const c = r.data.closed;
+    showUpdateToast(c ? `Gehen gestempelt – heute ${hm(c.duration_minutes)} Std. (Pause ${c.break_minutes} Min.).` : 'Gehen gestempelt.');
+  };
+}
 
 /* ---------- init ---------- */
 document.getElementById('logoImgSidebar').src = LOGO_ICON_SRC;

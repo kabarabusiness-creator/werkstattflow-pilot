@@ -240,6 +240,22 @@
   .user-id-role{font-size:10.5px;color:var(--accent-2);margin-top:1px;}
   .user-id-shift{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-faint);margin-top:3px;white-space:nowrap;font-variant-numeric:tabular-nums;}
   .user-id-shift svg{width:10px;height:10px;flex-shrink:0;}
+  .stamp-btn{display:block;width:calc(100% - 12px);margin:0 6px 8px;padding:8px 10px;border-radius:10px;border:1px solid var(--border,rgba(255,255,255,.12));background:transparent;color:var(--text-dim);font-size:12px;font-weight:700;cursor:pointer;text-align:center;}
+  .stamp-btn.in{background:#16a34a;border-color:#16a34a;color:#fff;}
+  .stamp-btn.out{background:transparent;border-color:#f59e0b;color:#f59e0b;}
+  .stamp-btn:disabled{opacity:.6;cursor:default;}
+  .stamp-sheet{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;}
+  .stamp-card{width:100%;max-width:420px;background:var(--panel,#1b1d24);color:var(--text,#fff);border-radius:16px;padding:20px;box-shadow:0 20px 50px rgba(0,0,0,.4);}
+  .stamp-card h3{margin:0 0 6px;font-size:18px;}
+  .stamp-card p{margin:0 0 12px;font-size:13px;color:var(--text-dim,#bbb);}
+  .stamp-lbl{font-size:12px;font-weight:700;margin-bottom:6px;}
+  .stamp-opts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+  .stamp-opts button{flex:1 0 64px;padding:12px 8px;border-radius:10px;border:1px solid var(--border,rgba(255,255,255,.15));background:transparent;color:inherit;font-size:14px;font-weight:700;cursor:pointer;}
+  .stamp-opts button.on{background:var(--accent-2,#7c3aed);border-color:transparent;color:#fff;}
+  .stamp-hint{font-size:12px !important;}
+  .stamp-act{display:flex;gap:10px;justify-content:flex-end;margin-top:6px;}
+  .stamp-act button{padding:12px 18px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;border:1px solid var(--border,rgba(255,255,255,.15));background:transparent;color:inherit;}
+  .stamp-act .go{background:#f59e0b;border-color:#f59e0b;color:#111;}
   .logout{
     display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;
     color:var(--text-dim);font-size:13.5px;font-weight:500;cursor:pointer;

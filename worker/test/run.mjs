@@ -188,6 +188,29 @@ await t('Zeiterfassung Start/Stop', async () => {
   const e = await call('/tabletAction', { action: 'worktime_stop', worktime_id: s.data.worktime_id }, token);
   assert.equal(e.data.duration_minutes, 25);
 });
+await t('Stempeluhr: Kommen, Gehen mit Pause, vergessenes Ausstempeln', async () => {
+  const st0 = await call('/tabletAction', { action: 'attendance_status' }, token);
+  assert.equal(st0.data.open, null);
+  const i1 = await call('/tabletAction', { action: 'attendance_in' }, token);
+  assert.ok(i1.data.open && i1.data.open.id); assert.equal(i1.data.open.workshop_code, 'AL-T1');
+  const again = await call('/tabletAction', { action: 'attendance_in' }, token);
+  assert.equal(again.data.already, true); assert.equal(again.data.open.id, i1.data.open.id, 'kein zweiter offener Eintrag');
+  const rec = db.Attendance.find(a => a.id === i1.data.open.id);
+  rec.clock_in = new Date(Date.now() - (7 * 60 + 10) * 60000).toISOString();
+  const o1 = await call('/tabletAction', { action: 'attendance_out' }, token);
+  assert.equal(o1.data.closed.break_minutes, 30, 'über 6 h → 30 Min. Pause vorgeschlagen');
+  assert.equal(o1.data.closed.duration_minutes, 7 * 60 + 10 - 30);
+  const i2 = await call('/tabletAction', { action: 'attendance_in' }, token);
+  db.Attendance.find(a => a.id === i2.data.open.id).clock_in = new Date(Date.now() - 125 * 60000).toISOString();
+  const o2 = await call('/tabletAction', { action: 'attendance_out', break_minutes: 15 }, token);
+  assert.equal(o2.data.closed.break_minutes, 15); assert.equal(o2.data.closed.duration_minutes, 110);
+  const i3 = await call('/tabletAction', { action: 'attendance_in' }, token);
+  db.Attendance.find(a => a.id === i3.data.open.id).clock_in = new Date(Date.now() - 20 * 3600000).toISOString();
+  const st = await call('/tabletAction', { action: 'attendance_status' }, token);
+  assert.equal(st.data.open, null, 'nach 16 h automatisch geschlossen');
+  const r3 = db.Attendance.find(a => a.id === i3.data.open.id);
+  assert.equal(r3.needs_review, true); assert.equal(r3.duration_minutes, 16 * 60 - 45);
+});
 await t('Notiz + Auftrag abschließen', async () => {
   assert.equal((await call('/tabletAction', { action: 'note_add', order_id: 'o1', content: 'Hallo' }, token)).data.ok, true);
   const r = await call('/tabletAction', { action: 'order_complete', order_id: 'o1', qc: [{ label: 'Probefahrt', checked: true }] }, token);
