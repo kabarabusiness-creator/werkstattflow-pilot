@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import worker from '../src/index.js';
 import { finCheckDigit, normalizeRegistration, parseRegistrationLines } from '../src/ai.js';
+import { planTasks } from '../src/tasks.js';
 
 const sha = s => createHash('sha256').update(s).digest('hex');
 const APP = 'app1';
@@ -176,6 +177,37 @@ await t('Aufgabe starten/erledigen → Hebebühne zeigt Fortschritt + aktuelle A
   await call('/tabletAction', { action: 'task_update', task_id: 't4b', status: 'erledigt' }, token);
   assert.equal(l.progress, 100); assert.equal(l.current_task, 'Alle Aufgaben erledigt');
   assert.equal(db.Lift.find(x => x.id === 'l2').progress, 0, 'fremde Werkstatt unberührt');
+});
+await t('Doppelte Aufgaben (Bremse vorne + hinten) am Tablet zusammengeführt, Status für alle Datensätze', async () => {
+  db.Order.push({ id: 'o5', workshop_code: 'AL-T1', status: 'fahrzeug_angenommen', customer_name: 'E' });
+  db.Service.push({ id: 'sbv', name: 'Bremsen vorne', category: 'bremse', is_active: false, workshop_code: 'AL-T1' }, { id: 'sbh', name: 'Bremsen hinten', category: 'bremse', is_active: false, workshop_code: 'AL-T1' });
+  const mk = (id, sv, title, oi, min) => ({ id, order_id: 'o5', workshop_code: 'AL-T1', service_id: sv, title, status: 'offen', order_index: oi, estimated_minutes: min });
+  db.OrderTask.push(
+    mk('bv1', 'sbv', 'Fahrzeug aufbocken', 1, 5), mk('bv2', 'sbv', 'Vorderräder demontieren', 2, 10), mk('bv3', 'sbv', 'Bremsbeläge vorne wechseln', 3, 30), mk('bv4', 'sbv', 'Räder montieren, Probefahrt', 5, 15),
+    mk('bh1', 'sbh', 'Fahrzeug aufbocken', 1, 5), mk('bh2', 'sbh', 'Hinterräder demontieren', 2, 10), mk('bh3', 'sbh', 'Bremsbeläge hinten wechseln', 3, 25), mk('bh4', 'sbh', 'Räder montieren, Probefahrt', 5, 15));
+  db.Lift.push({ id: 'l5', workshop_code: 'AL-T1', assigned_order_id: 'o5', status: 'in_arbeit', progress: 0 });
+  const realNow = Date.now; Date.now = () => realNow() + 60_000; // Server-Cache überspringen
+  const d = (await call('/getTabletData', null, token, 'GET')).data;
+  Date.now = realNow;
+  const list = d.tasks.filter(x => x.order_id === 'o5').sort((a, b) => a.order_index - b.order_index);
+  assert.deepEqual(list.map(x => x.title), ['Fahrzeug aufbocken', 'Räder demontieren (vorne + hinten)', 'Bremsbeläge vorne wechseln', 'Bremsbeläge hinten wechseln', 'Räder montieren, Probefahrt']);
+  assert.deepEqual(list[0].merged_ids, ['bv1', 'bh1']); assert.match(list[0].description, /Bremsen vorne \+ Bremsen hinten/);
+  assert.equal(list[2].category, 'bremse');
+  await call('/tabletAction', { action: 'task_update', task_id: 'bv1', status: 'erledigt' }, token);
+  assert.equal(db.OrderTask.find(x => x.id === 'bh1').status, 'erledigt', 'zweites „aufbocken“ mit erledigt');
+  assert.equal(db.OrderTask.find(x => x.id === 'bh2').status, 'offen', 'andere Aufgaben unberührt');
+  assert.equal(db.Lift.find(x => x.id === 'l5').progress, 20, '1 von 5 statt 2 von 8');
+});
+await t('Neuer Auftrag mit mehreren Leistungen: Rüstarbeiten nur einmal, sinnvolle Reihenfolge', async () => {
+  const tp = (sid, ...ts) => ({ service_id: sid, templates: ts.map((title, i) => ({ title, order_index: i + 1, estimated_minutes: 10 })) });
+  let p = planTasks([tp('rw', 'Fahrzeug aufbocken', 'Reifen wechseln', 'Wuchten', 'Reifendruck prüfen'),
+    tp('bv', 'Fahrzeug aufbocken', 'Vorderräder demontieren', 'Bremsbeläge vorne wechseln', 'Räder montieren, Probefahrt'),
+    tp('ig', 'Öl und alle Filter wechseln', 'Fahrwerk/Bremsen Probefahrt', 'Abschlusskontrolle')]);
+  assert.deepEqual(p.map(x => x.title), ['Fahrzeug aufbocken', 'Vorderräder demontieren', 'Reifen wechseln', 'Wuchten', 'Bremsbeläge vorne wechseln', 'Öl und alle Filter wechseln', 'Reifendruck prüfen', 'Räder montieren, Probefahrt', 'Abschlusskontrolle']);
+  assert.equal(p[0].service_id, null); assert.equal(p[2].service_id, 'rw');
+  p = planTasks([tp('ik', 'Öl und Filter wechseln', 'Bremsen prüfen', 'Abschlusskontrolle'), tp('oel', 'Fahrzeug vorbereiten', 'Öl ablassen', 'Ölfilter wechseln', 'Abschlusskontrolle durchführen')]);
+  assert.equal(p.filter(x => /^Öl und Filter/.test(x.title)).length, 0, 'grober Ölwechsel entfällt neben den Einzelschritten');
+  assert.equal(p.filter(x => x.title === 'Abschlusskontrolle').length, 1); assert.equal(p.at(-1).title, 'Abschlusskontrolle');
 });
 await t('Fremde Aufgabe nicht änderbar', async () => {
   const r = await call('/tabletAction', { action: 'task_update', task_id: 't2', status: 'erledigt' }, token);

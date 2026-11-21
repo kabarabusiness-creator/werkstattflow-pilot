@@ -19,6 +19,7 @@
 import { alexAsk, tireScan, berichtsheftDraft } from './ai.js';
 import { offerPageHtml, offerExpired } from './tires.js';
 import { handleFunction } from './dash.js';
+import { groupTasks, siblingIds } from './tasks.js';
 import { syncInvoiceMirror } from './invoices.js';
 import { handleCeo, readSettings, parseModules, logError, storeTicket } from './ceo.js';
 import { count as countUsage, maybeFlush } from './usage.js';
@@ -148,8 +149,8 @@ async function syncLiftProgress(db, orderId, code) {
   if (!orderId) return null;
   const lifts = (await db.list('Lift', { assigned_order_id: orderId }, { limit: 5 })).filter(l => l.workshop_code === code);
   if (!lifts.length) return null;
-  const tasks = (await db.list('OrderTask', { order_id: orderId }, { limit: 500 }))
-    .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+  // zusammengeführt wie am Tablet – doppelt angelegtes „Fahrzeug aufbocken“ zählt nur einmal
+  const tasks = groupTasks(await db.list('OrderTask', { order_id: orderId }, { limit: 500 }));
   const total = tasks.length;
   const done = tasks.filter(t => t.status === 'erledigt').length;
   const progress = total ? Math.round(done / total * 100) : 0;
@@ -310,6 +311,14 @@ function stripTireSet(t) {
   if (!Array.isArray(t.protocols)) return t;
   return { ...t, protocols: t.protocols.map(({ signature, ...p }) => ({ ...p, signed: !!signature })) };
 }
+function tabletTasks(tasks, services) {
+  const svcById = new Map(services.map(s => [s.id, s]));
+  const withCat = tasks.map(t => { const svc = t.service_id && svcById.get(t.service_id); return svc && svc.category ? { ...t, category: svc.category } : t; });
+  const byOrder = new Map();
+  for (const t of withCat) { const k = t.order_id || ''; if (!byOrder.has(k)) byOrder.set(k, []); byOrder.get(k).push(t); }
+  const name = id => (svcById.get(id) || {}).name;
+  return [...byOrder.values()].flatMap(list => groupTasks(list, name));
+}
 async function getTabletData(db, sess) {
   const code = sess.workshop_code;
   const lists = await Promise.all(TABLET_ENTITIES.map(e => cachedList(db, e)));
@@ -319,19 +328,21 @@ async function getTabletData(db, sess) {
   const orderIds = new Set(orders.map(o => o.id));
   const ws = by.Workshop.find(w => w.code === code) || {};
   const [media, notes] = await Promise.all([cachedList(db, 'MediaItem').catch(() => []), cachedList(db, 'InternalNote').catch(() => [])]);
+  const tasks = tabletTasks(by.OrderTask.filter(t => t.workshop_code === code || orderIds.has(t.order_id)), by.Service);
+  // Fotos/Notizen/Timer an einer zusammengeführten (ausgeblendeten) Aufgabe → an der sichtbaren Aufgabe zeigen
+  const primary = new Map(); tasks.forEach(t => (t.merged_ids || []).forEach(id => primary.set(id, t.id)));
+  const remap = id => (id && primary.get(id)) || id || null;
   return {
     generated_at: nowIso(),
     workshop_code: code,
     workshop: { name: ws.name || '', trial_ends_at: ws.trial_ends_at || null, subscription_status: ws.subscription_status || null },
     orders: orders.map(stripOrder),
     // Kategorie der verknüpften Dienstleistung mitgeben (Tablet zeigt sonst „Allgemein“)
-    tasks: by.OrderTask.filter(t => t.workshop_code === code || orderIds.has(t.order_id)).map(t => {
-      const svc = t.service_id ? by.Service.find(x => x.id === t.service_id) : null;
-      return svc && svc.category ? { ...t, category: svc.category } : t;
-    }),
+    // Zusammengehörige Aufgaben je Auftrag zusammenführen (z. B. „Fahrzeug aufbocken“ bei Bremse vorne + hinten nur einmal)
+    tasks,
     employees: (await trustedEmployees(db, mine(by.Employee).filter(e => e.is_active !== false))).map(stripEmployee),
     // auch Timer ohne Werkstatt-Code (z. B. im Dashboard gestartet), sofern sie zu einem eigenen Auftrag gehören
-    worktimes: by.WorkTime.filter(w => w.workshop_code === code || (!w.workshop_code && orderIds.has(w.order_id))).slice(0, 300),
+    worktimes: by.WorkTime.filter(w => w.workshop_code === code || (!w.workshop_code && orderIds.has(w.order_id))).slice(0, 300).map(w => w.task_id && primary.has(w.task_id) ? { ...w, task_id: remap(w.task_id) } : w),
     parts: [],
     lifts: mine(by.Lift),
     appointments: mine(by.Appointment),
@@ -339,9 +350,9 @@ async function getTabletData(db, sess) {
     tire_sets: mine(by.TireSet).map(stripTireSet),
     // Fotos und Sprachberichte zu Aufgaben – damit sie nach Neuladen am Tablet wieder da sind
     task_media: media.filter(m => m.workshop_code === code && orderIds.has(m.order_id) && (m.media_type === 'foto' || !m.media_type))
-      .slice(0, 2000).map(m => ({ id: m.id, order_id: m.order_id, task_id: m.task_id || null, caption: m.caption || '', file_url: m.file_url, created_date: m.created_date })),
+      .slice(0, 2000).map(m => ({ id: m.id, order_id: m.order_id, task_id: remap(m.task_id), caption: m.caption || '', file_url: m.file_url, created_date: m.created_date })),
     task_notes: notes.filter(n => n.task_id && n.workshop_code === code && orderIds.has(n.order_id))
-      .slice(0, 2000).map(n => ({ id: n.id, order_id: n.order_id, task_id: n.task_id, content: n.content || '', created_date: n.created_date })),
+      .slice(0, 2000).map(n => ({ id: n.id, order_id: n.order_id, task_id: remap(n.task_id), content: n.content || '', created_date: n.created_date })),
     backend: 'worker',
   };
 }
@@ -796,7 +807,13 @@ async function tabletAction(db, sess, body, env, origin, ctx) {
     if (!status) throw new HttpError(400, 'params');
     const upd = { status };
     if (status === 'erledigt') { upd.completed_by = emp.name; upd.completed_date = clientTime(body); }
-    await db.update('OrderTask', task.id, upd);
+    // Tablet zeigt zusammengeführte Aufgaben → alle dazugehörigen Datensätze mitziehen
+    const siblings = task.order_id ? await db.list('OrderTask', { order_id: task.order_id }, { limit: 500 }).catch(() => [task]) : [task];
+    const ids = siblingIds(siblings.some(t => t.id === task.id) ? siblings : [...siblings, task], task.id);
+    for (const id of ids) {
+      const cur = id === task.id ? task : siblings.find(t => t.id === id);
+      if (cur && (id === task.id || cur.status !== status)) await db.update('OrderTask', id, upd);
+    }
     invalidate('OrderTask');
     // Erste Aufgabe begonnen/erledigt → Auftrag von „Fahrzeug angenommen“ auf „Reparatur läuft“ (sichtbar in Base44 + Kundenportal)
     let orderStatus = null;

@@ -17,6 +17,7 @@ import { tireScanImages, registrationScan, registrationScore, receiptScan, capac
 import { handleMail, MAIL_FUNCTIONS } from './mail.js';
 import { handleInvite, INVITE_FUNCTIONS } from './invites.js';
 import { TIRE_SUPPLIERS, PL_PREFIX, priceListPut, priceListMetas, priceSearch, tireFromText } from './tires.js';
+import { planTasks } from './tasks.js';
 
 const TOKEN_TTL_MIN = 30;
 const SLOT_LABELS = { 1: 'Reifenflanke', 2: 'Lauffläche', 3: 'Felge' };
@@ -452,12 +453,15 @@ export async function handleFunction(name, body, c) {
       const svcIds = (Array.isArray(d.service_ids) ? d.service_ids : []).slice(0, 10);
       if (svcIds.length) {
         const all = await db.list('Service', null, { limit: 500 });
+        const chosen = [];
         for (const id of svcIds) {
           const sv = all.find(x => x.id === id && (!x.workshop_code || x.workshop_code === code)); if (!sv) continue;
           const tpl = (await db.list('ServiceTaskTemplate', { service_id: id }, { limit: 200 })).sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-          for (const t of tpl) { await db.create('OrderTask', { order_id: order.id, service_id: id, title: t.title, description: t.description || '', estimated_minutes: t.estimated_minutes || 0, order_index: t.order_index || 0, status: 'offen', assigned_employee: order.assigned_mechanic || '', workshop_code: code }); tasks++; }
+          chosen.push({ service_id: id, templates: tpl });
           if (sv.base_price != null && sv.base_price >= 0) await db.create('InvoiceItem', { order_id: order.id, service_id: id, description: sv.name, item_type: 'leistung', quantity: 1, unit_price: sv.base_price, total: sv.base_price, workshop_code: code });
         }
+        // Vorlagen aller Leistungen zusammenführen: gemeinsame Rüstarbeiten (aufbocken, Räder ab/an, Probefahrt …) nur einmal
+        for (const t of planTasks(chosen)) { await db.create('OrderTask', { order_id: order.id, ...(t.service_id ? { service_id: t.service_id } : {}), title: t.title, description: t.description || '', estimated_minutes: t.estimated_minutes || 0, order_index: t.order_index, status: 'offen', assigned_employee: order.assigned_mechanic || '', workshop_code: code }); tasks++; }
       }
       if (order.email) bg(h.mailPortalLink(order));
       return { ok: true, kind: 'auftrag', order_id: order.id, order_number: order.order_number, tasks_created: tasks };
